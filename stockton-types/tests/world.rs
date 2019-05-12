@@ -16,26 +16,13 @@
 extern crate stockton_types;
 extern crate stockton_bsp;
 
-use stockton_bsp::BSPFile;
-use stockton_bsp::lumps::*;
+#[macro_use]
+mod helpers;
+use crate::helpers::*;
+
 use stockton_bsp::lumps::entities::Entity as BSPEntity;
-use stockton_bsp::directory::{DirEntry, Header};
 
 use stockton_types::{World, Entity, Vector3};
-
-
-macro_rules! map(
-    { $($key:expr => $value:expr),+ } => {
-        {
-            let mut m = ::std::collections::HashMap::new();
-            $(
-                m.insert($key, $value);
-            )+
-            m
-        }
-    };
-);
-
 
 #[derive(Debug, PartialEq)]
 struct DummyEntity;
@@ -50,58 +37,23 @@ impl Entity for DummyEntity {
 #[test]
 fn world_creation() {
 
-	let file = Box::pin(BSPFile {
-        directory: Header {
-        	version: 1,
-        	dir_entries: [DirEntry { offset: 0, length: 0 }; 17]
-        },
-        entities: EntitiesLump {
-        	string: "dummy",
-        	entities: vec![
-        		BSPEntity {
-        			attributes: map!(
-        				"name" => "1"
-        			)
-        		},
-        		BSPEntity {
-					attributes: map!(
-        				"name" => "2"
-        			)
-        		},
-        		BSPEntity {
-        			attributes: map!(
-        				"name" => "3"
-        			)
-        		}
-        	]
-        },
-        textures: TexturesLump {
-        	textures: vec![].into_boxed_slice()
-        },
-        planes: PlanesLump {
-        	planes: vec![].into_boxed_slice()
-        },
-        lightvols: LightVolsLump {
-        	vols: vec![].into_boxed_slice()
-        },
-        lightmaps: LightmapsLump {
-        	maps: vec![].into_boxed_slice()
-        },
-        meshverts: MeshVertsLump {
-        	meshverts: vec![].into_boxed_slice()
-        },
-        vertices: VerticesLump {
-        	vertices: vec![].into_boxed_slice()
-        },
-        effects: EffectsLump::empty(),
-        brushes: BrushesLump::empty(),
-        faces: FaceLump::empty(),
-        tree: BSPTree::empty(),
-        visdata: VisDataLump {
-        	vecs: vec![].into_boxed_slice()
-        },
-        models: ModelsLump::empty()
-	});
+	let file = dummy_bspfile(vec![
+		BSPEntity {
+			attributes: map!(
+				"name" => "1"
+			)
+		},
+		BSPEntity {
+			attributes: map!(
+				"name" => "2"
+			)
+		},
+		BSPEntity {
+			attributes: map!(
+				"name" => "3"
+			)
+		}
+	]);
 
 	let mut called_times = 0;
 

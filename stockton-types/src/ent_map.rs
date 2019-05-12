@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -12,28 +12,24 @@
 
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
-//! Common types for all stockton crates.
 
-extern crate stockton_bsp;
-extern crate nalgebra as na;
-#[macro_use]
-extern crate downcast_rs;
-
-pub mod entity_store;
-pub use entity_store::{EntityStore, Entity};
-
-pub mod world;
-pub use world::World;
-
-pub mod ent_map;
-
-/// Alias for convenience
-pub type Vector2 = na::base::Vector2<f32>;
-/// Alias for convenience
-pub type Vector3 = na::base::Vector3<f32>;
-
-/// Alias for convenience
-pub type Vector2i = na::base::Vector2<i32>;
-
-/// Alias for convenience
-pub type Vector3i = na::base::Vector3<i32>;
+/// Convenience function for creating mappers for `World::new()`.
+#[macro_export]
+macro_rules! ent_map {
+	( $ ( $name:expr => $type:ident [ $( $key:expr => $target:ident ),* ] ),* ) => {
+		{
+			use stockton_bsp::lumps::entities::Entity as BSPEntity;	
+			use stockton_types::Entity;	
+			|ent: &BSPEntity| -> Box<dyn Entity> {
+				$(
+					if ent.attributes["classname"] == $name {
+						return Box::new($type {
+							$( $target : ent.attributes[$key].into() ),*
+						});
+					}
+				);*
+				panic!("Unrecognised Entity type: {:?}", ent);
+			}
+		}
+	}
+}
