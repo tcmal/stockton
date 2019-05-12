@@ -1,12 +1,29 @@
+// Copyright (C) Oscar Shrimpton 2019  
+
+// This program is free software: you can redistribute it and/or modify it
+// under the terms of the GNU General Public License as published by the Free
+// Software Foundation, either version 3 of the License, or (at your option)
+// any later version.
+
+// This program is distributed in the hope that it will be useful, but WITHOUT
+// ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+// FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+// more details.
+
+// You should have received a copy of the GNU General Public License along
+// with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Stores entities in a world.
 
 use std::collections::HashMap;
 use std::boxed::Box;
 use std::ops::Index;
+
+use downcast_rs::Downcast;
+
 use crate::Vector3;
 
 /// An entity, capable of recieving events.
-pub trait Entity {
+pub trait Entity: Downcast {
 
 	/// Should return the position of this entity in 3d space.
 	///
@@ -14,6 +31,8 @@ pub trait Entity {
 	fn get_position(&self) -> Vector3;
 
 }
+
+impl_downcast!(Entity);
 
 /// Stores all the entities in a live world. The BSPFile only specifies the starting entities,
 /// whereas this is mutable and thus is used to represent the current state of the world's entities.
