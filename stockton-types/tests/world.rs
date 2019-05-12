@@ -59,7 +59,7 @@ fn world_creation() {
 
 	let world = World::new(file, |ent: &BSPEntity| {
 		called_times += 1;
-		(Box::new(DummyEntity), ent.attributes.get("name").unwrap().clone().into())
+		Some((Box::new(DummyEntity), ent.attributes.get("name").unwrap().clone().into()))
 	}).unwrap();
 
 

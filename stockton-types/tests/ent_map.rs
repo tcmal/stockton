@@ -83,14 +83,14 @@ fn ent_map_macro() {
 		attributes: map![
 			"classname" => "A"
 		]
-	}).downcast_ref::<A>().unwrap(), &A);
+	}).unwrap().downcast_ref::<A>().unwrap(), &A);
 
 	assert_eq!(map_func(&BSPEntity {
 		attributes: map![
 			"classname" => "B",
 			"data" => "foobar"
 		]
-	}).downcast_ref::<B>().unwrap(), &B { data: "foobar".to_string() });
+	}).unwrap().downcast_ref::<B>().unwrap(), &B { data: "foobar".to_string() });
 
 	assert_eq!(map_func(&BSPEntity {
 		attributes: map![
@@ -98,5 +98,18 @@ fn ent_map_macro() {
 			"data" => "foobar",
 			"into" => "a b c"
 		]
-	}).downcast_ref::<C>().unwrap(), &C { data2: "foobar".to_string(), into: CustomStruct { one: 1, two: 2, three: 3 } });
+	}).unwrap().downcast_ref::<C>().unwrap(), &C { data2: "foobar".to_string(), into: CustomStruct { one: 1, two: 2, three: 3 } });
+
+	assert!(map_func(&BSPEntity {
+		attributes: map![
+			"classname" => "D"
+		]
+	}).is_none());
+
+	assert!(map_func(&BSPEntity {
+		attributes: map![
+			"classname" => "B",
+			"ebeb" => "foobar"
+		]
+	}).is_none());
 }

@@ -20,15 +20,30 @@ macro_rules! ent_map {
 		{
 			use stockton_bsp::lumps::entities::Entity as BSPEntity;	
 			use stockton_types::Entity;	
-			|ent: &BSPEntity| -> Box<dyn Entity> {
+			|ent: &BSPEntity| -> Option<Box<dyn Entity>> {
 				$(
 					if ent.attributes["classname"] == $name {
-						return Box::new($type {
-							$( $target : ent.attributes[$key].into() ),*
-						});
+						let mut valid = true;
+						{
+							$(let mut $target = false;);*
+							for key in ent.attributes.keys() {
+								$(if key == &$key {
+									$target = true;
+									continue;
+								});*
+							}
+							$(if !$target {
+								valid = false;
+							});*
+						}
+						if valid {
+							return Some(Box::new($type {
+								$( $target : ent.attributes[$key].into() ),*
+							}));
+						}
 					}
 				);*
-				panic!("Unrecognised Entity type: {:?}", ent);
+				None
 			}
 		}
 	}
