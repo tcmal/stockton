@@ -76,6 +76,24 @@ impl EntityStore {
 
 		Some(self.entities.remove(index))
 	}
+
+	/// Make a new EntityStore from a list of entities & names.
+	///
+	/// Returns None in case of name conflicts in list.
+	pub fn from_entities(entities: Vec<(Box<Entity>, String)>) -> Option<EntityStore> {
+		let mut store = EntityStore {
+			entities: Vec::with_capacity(entities.len()),
+			name_to_index: HashMap::with_capacity(entities.len())
+		};
+
+		for (entity, name) in entities {
+			if store.add(entity, name).is_err() {
+				return None;
+			}
+		}
+
+		Some(store)
+	}
 }
 
 /// Indexes the EntityStore for a specific index.
