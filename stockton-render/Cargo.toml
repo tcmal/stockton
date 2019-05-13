@@ -10,18 +10,13 @@ winit = "0.19.1"
 gfx-hal = "0.2.0"
 
 [features]
-default = ["empty"]
-empty = ["gfx-backend-empty"]
+default = ["vulkan"]
 metal = ["gfx-backend-metal"]
 gl = ["gfx-backend-gl"]
 dx11 = ["gfx-backend-dx11"]
 dx12 = ["gfx-backend-dx12"]
 vulkan = ["gfx-backend-vulkan"]
 unstable = []
-
-[dependencies.gfx-backend-empty]
-version = "0.2"
-optional = true
 
 [dependencies.gfx-backend-gl]
 version = "0.2"
