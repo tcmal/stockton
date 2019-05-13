@@ -1,4 +1,6 @@
 [workspace]
 members = [
-    "stockton-types"
+    "stockton-types",
+    "stockton-render",
+    "examples/render"
 ]

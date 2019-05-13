@@ -6,5 +6,5 @@ edition = "2018"
 
 [dependencies]
 nalgebra = "0.18.0"
-stockton-bsp = "1.0.0"
+stockton-bsp = "2.0.0"
 downcast-rs = "1.0.4"
