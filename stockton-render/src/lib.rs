@@ -35,9 +35,6 @@ extern crate gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 
-#[cfg(feature = "empty")]
-extern crate gfx_backend_empty as back;
-
 extern crate gfx_hal as hal;
 extern crate stockton_types;
 extern crate winit;
@@ -46,7 +43,8 @@ use stockton_types::World;
 
 use winit::Window;
 
-use back::Instance;
+use back::{Instance};
+use back::{Backend};
 
 use std::sync::{Arc, RwLock};
 
@@ -54,13 +52,17 @@ pub struct Renderer<'a> {
 	world: Arc<RwLock<World<'a>>>,
 	instance: Instance,
 	window: &'a Window,
+	surface: <Backend as hal::Backend>::Surface
 }
 
 impl<'a> Renderer<'a> {
 	pub fn new(world: Arc<RwLock<World<'a>>>, window: &'a Window) -> Renderer<'a> {
 		let instance = Instance::create("stockton", 1);
+
+		let surface = instance.create_surface(&window);
+
 		Renderer {
-			world, window, instance
+			world, window, instance, surface
 		}
 	}
 }
