@@ -1,5 +1,7 @@
 # stockton
 
+[![Build Status](https://travis-ci.org/tcmal/stockton.svg?branch=master)](https://travis-ci.org/tcmal/stockton)
+
 A 3D engine inspired by quake.
 
 Most of what is described below isn't fully done, or even started.
