@@ -8,6 +8,7 @@ edition = "2018"
 stockton-types = { path = "../stockton-types" }
 winit = "0.19.1"
 gfx-hal = "0.2.0"
+arrayvec = "0.4.10"
 
 [features]
 default = ["vulkan"]

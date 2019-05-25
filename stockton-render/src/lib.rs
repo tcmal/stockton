@@ -13,7 +13,7 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Renders a world to a window.
+//! Renders a world to a window. 
 //!
 //! You'll need to pick a backend using features. You should only pick one.
 //! On Linux & Windows, you should use vulkan.
@@ -39,30 +39,39 @@ extern crate gfx_hal as hal;
 extern crate stockton_types;
 extern crate winit;
 
+extern crate arrayvec;
+
+mod error;
+mod draw;
+
+use error::{CreationError, FrameError};
+use draw::RenderingContext;
+
 use stockton_types::World;
 
 use winit::Window;
-
-use back::{Instance};
-use back::{Backend};
 
 use std::sync::{Arc, RwLock};
 
 pub struct Renderer<'a> {
 	world: Arc<RwLock<World<'a>>>,
-	instance: Instance,
-	window: &'a Window,
-	surface: <Backend as hal::Backend>::Surface
+	context: RenderingContext<'a>
 }
 
+
 impl<'a> Renderer<'a> {
-	pub fn new(world: Arc<RwLock<World<'a>>>, window: &'a Window) -> Renderer<'a> {
-		let instance = Instance::create("stockton", 1);
+	/// Create a new Renderer.
+	/// This initialises all the vulkan context, etc needed.
+	pub fn new(world: Arc<RwLock<World<'a>>>, window: &'a Window) -> Result<Self, CreationError> {
+		let context = RenderingContext::new(window)?;
 
-		let surface = instance.create_surface(&window);
+		Ok(Renderer {
+			world, context
+		})
+	}
 
-		Renderer {
-			world, window, instance, surface
-		}
+	/// Draw a frame of solid `color` (RGBA)
+	pub fn draw_clear(&mut self, color: [f32; 4]) -> Result<(), FrameError> {
+		self.context.draw_clear(color)
 	}
 }
