@@ -15,7 +15,7 @@
 //! Common types for all stockton crates.
 
 extern crate stockton_bsp;
-extern crate nalgebra as na;
+extern crate nalgebra_glm as na;
 #[macro_use]
 extern crate downcast_rs;
 
@@ -28,12 +28,12 @@ pub use world::World;
 pub mod ent_map;
 
 /// Alias for convenience
-pub type Vector2 = na::base::Vector2<f32>;
+pub type Vector2 = na::Vec2;
 /// Alias for convenience
-pub type Vector3 = na::base::Vector3<f32>;
+pub type Vector3 = na::Vec3;
 
 /// Alias for convenience
-pub type Vector2i = na::base::Vector2<i32>;
+pub type Vector2i = na::IVec2;
 
 /// Alias for convenience
-pub type Vector3i = na::base::Vector3<i32>;
+pub type Vector3i = na::IVec3;
