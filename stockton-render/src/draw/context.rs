@@ -31,7 +31,7 @@ use hal::pass::{SubpassDesc, AttachmentOps, Attachment, AttachmentStoreOp, Attac
 use hal::image::{Usage, Layout, SubresourceRange, ViewKind, Extent};
 use hal::format::{ChannelType, Format, Swizzle, Aspects};
 use hal::pool::{CommandPoolCreateFlags, CommandPool};
-use hal::command::{ClearValue, ClearColor};
+use hal::command::{ClearValue, ClearColor, CommandBuffer};
 use hal::pso::{Rect, PipelineStage};
 use hal::queue::family::QueueGroup;
 use hal::window::{PresentMode, Extent2D};
@@ -329,16 +329,11 @@ impl<'a> RenderingContext<'a> {
 		})
 	}
 
-	/// Draw a frame of color 
-	pub fn draw_clear(&mut self, color: [f32; 4]) -> Result<(), FrameError> {
-		// Advance the frame before early outs to prevent fuckery.
-		self.current_frame = (self.current_frame + 1) % self.frames_in_flight;
-
-		let cell = &mut self.cells[self.current_frame];
-
+	/// Internal function. Gets the index of the next image from the swapchain to use & resets the frame_presented fence.
+	fn get_image(swapchain: &mut <Backend as hal::Backend>::Swapchain, device: &mut <Backend as hal::Backend>::Device, cell: &FrameCell) -> Result<usize, FrameError> {
 		// Get the image of the swapchain to present to.
 		let (i, _) = unsafe {
-			self.swapchain
+			swapchain
 				.acquire_image(core::u64::MAX, Some(&cell.image_available), None)
 				.map_err(|e| FrameError::AcquisitionError { 0: e })?
 		};
@@ -346,18 +341,48 @@ impl<'a> RenderingContext<'a> {
 
 		// Make sure frame has been presented since whenever it was last drawn.
 		unsafe {
-			self.device
+			device
 				.wait_for_fence(&cell.frame_presented, core::u64::MAX)
 				.map_err(|e| FrameError::FenceWaitError { 0: e })?;
-			self.device
+			device
 				.reset_fence(&cell.frame_presented)
 				.map_err(|e| FrameError::FenceResetError { 0: e })?;
 		}
 
+		Ok(i)
+	}
+
+	/// Internal function. Prepares a submission for a frame.
+	fn prep_submission(cell: &FrameCell) 
+	  -> Submission<ArrayVec<[&CommandBuffer<Backend, Graphics>; 1]>, 
+	                ArrayVec<[(&<Backend as hal::Backend>::Semaphore, hal::pso::PipelineStage); 1]>, 
+	                ArrayVec<[&<Backend as hal::Backend>::Semaphore; 1]>> {
+		let command_buffers: ArrayVec<[_; 1]> = [&cell.command_buffer].into();
+
+		let wait_semaphores: ArrayVec<[_; 1]> = [(&cell.image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)].into();
+		let signal_semaphores: ArrayVec<[_; 1]> = [&cell.render_finished].into();
+
+		Submission {
+			command_buffers,
+			wait_semaphores,
+			signal_semaphores,
+		}
+	}
+
+	/// Draw a frame of color 
+	pub fn draw_clear(&mut self, color: [f32; 4]) -> Result<(), FrameError> {
+		// Advance the frame before early outs to prevent fuckery.
+		self.current_frame = (self.current_frame + 1) % self.frames_in_flight;
+
+		let i = RenderingContext::get_image(&mut self.swapchain, &mut self.device, &self.cells[self.current_frame])?;
+
+		let cell = &mut self.cells[self.current_frame];
+
 		// Record commands.
 		unsafe {
-			let clear_values = [ClearValue::Color(ClearColor::Float(color))];
 			cell.command_buffer.begin();
+
+			let clear_values = [ClearValue::Color(ClearColor::Float(color))];
 			cell.command_buffer.begin_render_pass_inline(
 				&self.render_pass,
 				&self.framebuffers[i],
@@ -365,23 +390,16 @@ impl<'a> RenderingContext<'a> {
 				clear_values.iter(),
 			);
 			cell.command_buffer.finish();
-		}
+		};
 
 
 		// Prepare submission
-		let command_buffers: ArrayVec<[_; 1]> = [&cell.command_buffer].into();
-
-		let wait_semaphores: ArrayVec<[_; 1]> = [(&cell.image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)].into();
-		let signal_semaphores: ArrayVec<[_; 1]> = [&cell.render_finished].into();
-		let present_wait_semaphores: ArrayVec<[_; 1]> = [&cell.render_finished].into();
-		let submission = Submission {
-			command_buffers,
-			wait_semaphores,
-			signal_semaphores,
-		};
+		let submission = RenderingContext::prep_submission(&cell);
 		
 		// Submit it for rendering and presentation.
 		let command_queue = &mut self.queue_group.queues[0];
+
+		let present_wait_semaphores: ArrayVec<[_; 1]> = [&cell.render_finished].into();
 
 		unsafe {
 			command_queue.submit(submission, Some(&cell.frame_presented));
