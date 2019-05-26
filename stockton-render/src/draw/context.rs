@@ -34,7 +34,7 @@ use hal::pool::{CommandPoolCreateFlags, CommandPool};
 use hal::command::{ClearValue, ClearColor};
 use hal::pso::{Rect, PipelineStage};
 use hal::queue::family::QueueGroup;
-use hal::window::{PresentMode};
+use hal::window::{PresentMode, Extent2D};
 use hal::adapter::Adapter;
 
 use back::{Instance};
@@ -174,7 +174,16 @@ impl<'a> RenderingContext<'a> {
 				},
 			};
 
-			let extent = caps.extents.end;
+			let extent = {
+				let window_client_area = window
+					.get_inner_size()
+					.ok_or(CreationError::NoWindow)?
+					.to_physical(window.get_hidpi_factor());
+				Extent2D {
+					width: caps.extents.end.width.min(window_client_area.width as u32),
+					height: caps.extents.end.height.min(window_client_area.height as u32)
+				}
+			};
 			let image_count = if present_mode == PresentMode::Mailbox {
 				(caps.image_count.end - 1).min(3)
 			} else {

@@ -37,6 +37,7 @@ pub enum CreationError {
 	NoCompositeAlphas,
 	NoImageFormats,
 	NoColor,
+	NoWindow,
 
 	/// # Runtime
 	SwapchainFailed (hal::window::CreationError),
