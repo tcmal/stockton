@@ -19,3 +19,4 @@ mod context;
 mod frame;
 
 pub use context::RenderingContext;
+pub use context::Tri2;

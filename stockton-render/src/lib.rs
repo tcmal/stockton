@@ -37,6 +37,7 @@ extern crate gfx_backend_vulkan as back;
 
 extern crate gfx_hal as hal;
 extern crate stockton_types;
+extern crate shaderc;
 extern crate winit;
 
 extern crate arrayvec;
@@ -45,9 +46,9 @@ mod error;
 mod draw;
 
 use error::{CreationError, FrameError};
-use draw::RenderingContext;
+use draw::{RenderingContext, Tri2};
 
-use stockton_types::World;
+use stockton_types::{World, Vector2};
 
 use winit::Window;
 
@@ -70,8 +71,13 @@ impl<'a> Renderer<'a> {
 		})
 	}
 
-	/// Draw a frame of solid `color` (RGBA)
-	pub fn draw_clear(&mut self, color: [f32; 4]) -> Result<(), FrameError> {
-		self.context.draw_clear(color)
+	/// Render a single frame of the world
+	pub fn render_frame(&mut self) -> Result<(), FrameError>{
+		// self.context.draw_clear([0.0, 0.5, 0.5, 1.0])
+		self.context.draw_triangle(Tri2 ([
+			Vector2::new(-0.5, -0.5),
+			Vector2::new(0.5, -0.5),
+			Vector2::new(0.0, 0.5)
+		]))
 	}
 }

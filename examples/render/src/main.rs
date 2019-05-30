@@ -45,5 +45,13 @@ fn main() {
 	let window = Window::new(&events).unwrap();
 
 	// Create the renderer.
-	let renderer = Renderer::new(world, &window);
+	let mut renderer = Renderer::new(world, &window).unwrap();
+
+    loop {
+    	// TODO: Poll Window events
+    	// TODO: Handle resize
+    	// TODO: Simulate world
+
+    	renderer.render_frame().unwrap();
+	}
 }

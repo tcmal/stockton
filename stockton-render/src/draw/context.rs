@@ -14,7 +14,8 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Deals with all the Vulkan/HAL details.
-use core::mem::ManuallyDrop;
+use core::mem::{ManuallyDrop, size_of};
+use std::borrow::Cow;
 
 use crate::error::{CreationError, FrameError};
 use super::frame::FrameCell;
@@ -27,18 +28,51 @@ use winit::Window;
 use hal::{Surface as SurfaceTrait, Instance as InstanceTrait, QueueFamily as QFTrait, PhysicalDevice as PDTrait, Device as DeviceTrait, Swapchain as SwapchainTrait};
 
 use hal::{Graphics, Gpu, Features, SwapchainConfig, Submission};
-use hal::pass::{SubpassDesc, AttachmentOps, Attachment, AttachmentStoreOp, AttachmentLoadOp};
+use hal::pso::*;
+use hal::pass::{Subpass, SubpassDesc, AttachmentOps, Attachment, AttachmentStoreOp, AttachmentLoadOp};
 use hal::image::{Usage, Layout, SubresourceRange, ViewKind, Extent};
+use hal::command::{ClearValue, ClearColor, CommandBuffer};
 use hal::format::{ChannelType, Format, Swizzle, Aspects};
 use hal::pool::{CommandPoolCreateFlags, CommandPool};
-use hal::command::{ClearValue, ClearColor, CommandBuffer};
-use hal::pso::{Rect, PipelineStage};
-use hal::queue::family::QueueGroup;
 use hal::window::{PresentMode, Extent2D};
-use hal::adapter::Adapter;
+use hal::queue::family::QueueGroup;
+use hal::adapter::{Adapter, MemoryTypeId};
 
 use back::{Instance};
 use back::{Backend};
+
+use stockton_types::Vector2;
+
+const VERTEX_SOURCE: &str = "#version 450
+layout (location = 0) in vec2 position;
+out gl_PerVertex {
+	vec4 gl_Position;
+};
+void main()
+{
+  gl_Position = vec4(position, 0.0, 1.0);
+}";
+const FRAGMENT_SOURCE: &str = "#version 450
+layout(location = 0) out vec4 color;
+void main()
+{
+  color = vec4(1.0);
+}";
+
+/// Represents a triangle in 2D (screen) space.
+pub struct Tri2 (pub [Vector2; 3]);
+
+/// Easy conversion to proper format.
+impl From<Tri2> for [f32; 6] {
+	fn from(tri: Tri2) -> [f32; 6] {
+	    [tri.0[0].x, tri.0[0].y,
+	     tri.0[1].x, tri.0[1].y,
+	     tri.0[2].x, tri.0[2].y]
+	}
+}
+
+/// Size of Tri2
+const F32_XY_TRIANGLE: u64 = (size_of::<f32>() * 2 * 3) as u64;
 
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
@@ -94,7 +128,17 @@ pub struct RenderingContext<'a> {
 	frames_in_flight: usize,
 
 	/// Track which framecell is up next.
-	current_frame: usize
+	current_frame: usize,
+
+	descriptor_set_layouts: Vec<<Backend as hal::Backend>::DescriptorSetLayout>,
+
+	pipeline_layout: ManuallyDrop<<Backend as hal::Backend>::PipelineLayout>,
+
+	pipeline: ManuallyDrop<<Backend as hal::Backend>::GraphicsPipeline>,
+
+	buffer: ManuallyDrop<<Backend as hal::Backend>::Buffer>,
+	memory: ManuallyDrop<<Backend as hal::Backend>::Memory>,
+	requirements: hal::memory::Requirements
 }
 
 impl<'a> RenderingContext<'a> {
@@ -116,7 +160,7 @@ impl<'a> RenderingContext<'a> {
 		  .ok_or(CreationError::NoAdapter)?;
 
 		// from that adapter, get the device & queue group
-		let (device, queue_group) = {
+		let (mut device, queue_group) = {
 			let queue_family = adapter
 				.queue_families
 				.iter()
@@ -248,6 +292,33 @@ impl<'a> RenderingContext<'a> {
 			}
 		};
 
+		// Graphics pipeline
+		let (descriptor_set_layouts, pipeline_layout, pipeline) = RenderingContext::create_pipeline(&mut device, extent, &render_pass)?;
+
+		// Vertex Buffer
+		let (mut buffer, memory, requirements) = unsafe {
+			let buffer = device
+				.create_buffer(F32_XY_TRIANGLE, hal::buffer::Usage::VERTEX)
+				.map_err(|e| CreationError::BufferFailed (e))?;
+
+			let requirements = device.get_buffer_requirements(&buffer);
+			let memory_type_id = adapter.physical_device
+				.memory_properties().memory_types
+				.iter().enumerate()
+				.find(|&(id, memory_type)| {
+					requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(hal::memory::Properties::CPU_VISIBLE)
+				})
+				.map(|(id, _)| MemoryTypeId(id))
+				.ok_or(CreationError::NoMemory)?;
+
+			let memory = device
+				.allocate_memory(memory_type_id, requirements.size)
+				.map_err(|e| CreationError::AllocationFailed (e))?;
+
+			(buffer, memory, requirements)
+		};
+
+
 		// Make the command pool
 		let mut command_pool = unsafe {
 			device
@@ -325,9 +396,194 @@ impl<'a> RenderingContext<'a> {
 		
 			command_pool: ManuallyDrop::new(command_pool), 
 	
-			current_frame: 0
+			current_frame: 0,
+
+			descriptor_set_layouts,
+			pipeline_layout: ManuallyDrop::new(pipeline_layout),
+			pipeline: ManuallyDrop::new(pipeline),
+
+			buffer: ManuallyDrop::new(buffer),
+			memory: ManuallyDrop::new(memory),
+			requirements
 		})
 	}
+
+	#[allow(clippy::type_complexity)]
+	fn create_pipeline(device: &mut back::Device, extent: Extent2D, render_pass: &<Backend as hal::Backend>::RenderPass)
+		-> Result<(
+	    	Vec<<Backend as hal::Backend>::DescriptorSetLayout>,
+	    	<Backend as hal::Backend>::PipelineLayout,
+	    	<Backend as hal::Backend>::GraphicsPipeline,
+	    ), CreationError> {
+
+		// Compile shaders
+		let mut compiler = shaderc::Compiler::new().ok_or(CreationError::NoShaderC)?;
+
+		let vertex_compile_artifact = compiler
+			.compile_into_spirv(VERTEX_SOURCE, shaderc::ShaderKind::Vertex, "vertex.vert", "main", None)
+			.map_err(|e| CreationError::ShaderCError (e))?;
+		
+		let fragment_compile_artifact = compiler
+			.compile_into_spirv(FRAGMENT_SOURCE, shaderc::ShaderKind::Fragment, "fragment.frag", "main", None)
+			.map_err(|e| CreationError::ShaderCError (e))?;
+		
+		// Make into shader module
+		let vertex_shader_module = unsafe {
+			device
+				.create_shader_module(vertex_compile_artifact.as_binary_u8())
+				.map_err(|e| CreationError::ShaderModuleFailed (e))?
+		};
+		let fragment_shader_module = unsafe {
+			device
+				.create_shader_module(fragment_compile_artifact.as_binary_u8())
+				.map_err(|e| CreationError::ShaderModuleFailed (e))?
+		};
+
+		// Specify entrypoints for each shader.
+		let vs_entry: EntryPoint<Backend> = EntryPoint {
+			entry: "main",
+			module: &vertex_shader_module,
+			specialization: Specialization {
+				constants: Cow::Borrowed (&[]),
+				data: Cow::Borrowed (&[]),
+			}
+		};
+
+		let fs_entry: EntryPoint<Backend> = EntryPoint {
+			entry: "main",
+			module: &fragment_shader_module,
+			specialization: Specialization {
+				constants: Cow::Borrowed (&[]),
+				data: Cow::Borrowed (&[]),
+			}
+		};
+
+		// Specify input format
+		let input_assembler = InputAssemblerDesc::new(hal::Primitive::TriangleList);
+
+		// Vertex Shader I/O
+		let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
+			binding: 0,
+			stride: (size_of::<f32>() * 2) as u32,
+			rate: VertexInputRate::Vertex,
+		}];
+
+		let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
+			location: 0,
+			binding: 0,
+			element: Element {
+				format: Format::Rgb32Sfloat,
+				offset: 0,
+			},
+		}];
+
+		// Make shader set
+		let shaders = GraphicsShaderSet {
+			vertex: vs_entry,
+			hull: None,
+			domain: None,
+			geometry: None,
+			fragment: Some(fs_entry),
+		};
+
+
+		// Rasterisation options
+		let rasterizer = Rasterizer {
+			depth_clamping: false,
+			polygon_mode: PolygonMode::Fill,
+			cull_face: Face::NONE,
+			front_face: FrontFace::Clockwise,
+			depth_bias: None,
+			conservative: false,
+		};
+
+		// Depth testing options
+		let depth_stencil = DepthStencilDesc {
+			depth: DepthTest::Off,
+			depth_bounds: false,
+			stencil: StencilTest::Off,
+		};
+
+		// Colour blending options
+		// Only takes the source value
+		let blender = {
+			let blend_state = BlendState::On {
+				color: BlendOp::Add {
+					src: Factor::One,
+					dst: Factor::Zero,
+				},
+				alpha: BlendOp::Add {
+					src: Factor::One,
+					dst: Factor::Zero,
+				},
+			};
+			BlendDesc {
+				logic_op: Some(LogicOp::Copy),
+				targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
+			}
+		};
+
+		// Viewport, scissor, options
+		let baked_states = BakedStates {
+			viewport: Some(Viewport {
+				rect: extent.to_extent().rect(),
+				depth: (0.0..1.0),
+			}),
+			scissor: Some(extent.to_extent().rect()),
+			blend_color: None,
+			depth_bounds: None,
+		};
+
+		// Non-Buffer data sources (none right now)
+		let bindings = Vec::<DescriptorSetLayoutBinding>::new();
+		let immutable_samplers = Vec::<<Backend as hal::Backend>::Sampler>::new();
+		let descriptor_set_layouts: Vec<<Backend as hal::Backend>::DescriptorSetLayout> = vec![unsafe {
+			device
+				.create_descriptor_set_layout(bindings, immutable_samplers)
+				.map_err(|e| CreationError::DescriptorSetLayoutFailed (e))?
+		}];
+		let push_constants = Vec::<(ShaderStageFlags, core::ops::Range<u32>)>::new();
+		let layout = unsafe {
+			device
+				.create_pipeline_layout(&descriptor_set_layouts, push_constants)
+				.map_err(|e| CreationError::PipelineLayoutFailed (e))?
+		};
+
+		// Create the actual pipeline
+		let gfx_pipeline = {
+			let desc = GraphicsPipelineDesc {
+				shaders,
+				rasterizer,
+				vertex_buffers,
+				attributes,
+				input_assembler,
+				blender,
+				depth_stencil,
+				multisampling: None,
+				baked_states,
+				layout: &layout,
+				subpass: Subpass {
+					index: 0,
+					main_pass: render_pass,
+				},
+				flags: PipelineCreationFlags::empty(),
+				parent: BasePipeline::None,
+			};
+
+			unsafe {
+				device.create_graphics_pipeline(&desc, None)
+					.map_err(|e| CreationError::PipelineFailed (e))?
+			}
+		};
+
+		// TODO: Destroy shader modules
+		unsafe {
+			device.destroy_shader_module(vertex_shader_module);
+			device.destroy_shader_module(fragment_shader_module);
+		}
+
+		Ok((descriptor_set_layouts, layout, gfx_pipeline))
+    }
 
 	/// Internal function. Gets the index of the next image from the swapchain to use & resets the frame_presented fence.
 	fn get_image(swapchain: &mut <Backend as hal::Backend>::Swapchain, device: &mut <Backend as hal::Backend>::Device, cell: &FrameCell) -> Result<usize, FrameError> {
@@ -355,8 +611,8 @@ impl<'a> RenderingContext<'a> {
 	/// Internal function. Prepares a submission for a frame.
 	fn prep_submission(cell: &FrameCell) 
 	  -> Submission<ArrayVec<[&CommandBuffer<Backend, Graphics>; 1]>, 
-	                ArrayVec<[(&<Backend as hal::Backend>::Semaphore, hal::pso::PipelineStage); 1]>, 
-	                ArrayVec<[&<Backend as hal::Backend>::Semaphore; 1]>> {
+					ArrayVec<[(&<Backend as hal::Backend>::Semaphore, hal::pso::PipelineStage); 1]>, 
+					ArrayVec<[&<Backend as hal::Backend>::Semaphore; 1]>> {
 		let command_buffers: ArrayVec<[_; 1]> = [&cell.command_buffer].into();
 
 		let wait_semaphores: ArrayVec<[_; 1]> = [(&cell.image_available, PipelineStage::COLOR_ATTACHMENT_OUTPUT)].into();
@@ -410,6 +666,75 @@ impl<'a> RenderingContext<'a> {
 
 		Ok(())
 	}
+
+	/// Draw a single triangle as a frame.
+	pub fn draw_triangle(&mut self, triangle: Tri2) -> Result<(), FrameError> {
+		// Advance the frame before early outs to prevent fuckery.
+		self.current_frame = (self.current_frame + 1) % self.frames_in_flight;
+
+		// Get the image
+		let i = RenderingContext::get_image(&mut self.swapchain, &mut self.device, &self.cells[self.current_frame])?;
+
+		let cell = &mut self.cells[self.current_frame];
+
+		// Write the vertex data to the buffer.
+		unsafe {
+			let mut data_target = self.device
+				.acquire_mapping_writer(&self.memory, 0..self.requirements.size)
+				.map_err(|e| FrameError::BufferError (e))?;
+			
+			let points: [f32; 6] = triangle.into();
+			data_target[..6].copy_from_slice(&points);
+			
+			self
+				.device
+				.release_mapping_writer(data_target)
+				.map_err(|e| FrameError::BufferError (hal::mapping::Error::OutOfMemory(e)))?;
+		}
+
+		// Record commands.
+		unsafe {
+			
+			const TRIANGLE_CLEAR: [ClearValue; 1] = [ClearValue::Color(ClearColor::Float([0.1, 0.2, 0.3, 1.0]))];
+			
+			cell.command_buffer.begin();
+
+			{
+				let mut encoder = cell.command_buffer.begin_render_pass_inline(
+					&self.render_pass,
+					&self.framebuffers[i],
+					self.render_area,
+					TRIANGLE_CLEAR.iter(),
+				);
+				encoder.bind_graphics_pipeline(&self.pipeline);
+				
+				let buffer_ref: &<Backend as hal::Backend>::Buffer = &self.buffer;
+				let buffers: ArrayVec<[_; 1]> = [(buffer_ref, 0)].into();
+				
+				encoder.bind_vertex_buffers(0, buffers);
+				encoder.draw(0..3, 0..1);
+			}
+			cell.command_buffer.finish();
+		}
+
+
+		// Prepare submission
+		let submission = RenderingContext::prep_submission(&cell);
+		
+		// Submit it for rendering and presentation.
+		let command_queue = &mut self.queue_group.queues[0];
+
+		let present_wait_semaphores: ArrayVec<[_; 1]> = [&cell.render_finished].into();
+
+		unsafe {
+			command_queue.submit(submission, Some(&cell.frame_presented));
+			self.swapchain
+				.present(command_queue, i as u32, present_wait_semaphores)
+				.map_err(|e| FrameError::PresentError { 0: e })?;
+			println!("presented");
+		};
+		Ok(())
+	}
 }
 
 /// Properly destroys all the vulkan objects we have.
@@ -438,6 +763,22 @@ impl<'a> std::ops::Drop for RenderingContext<'a> {
 			for framebuffer in self.framebuffers.drain(..) {
 				self.device.destroy_framebuffer(framebuffer);
 			}
+
+			for descriptor_set in self.descriptor_set_layouts.drain(..) {
+				self.device.destroy_descriptor_set_layout(descriptor_set);
+			}
+
+			// buffer
+			self.device.destroy_buffer(ManuallyDrop::into_inner(read(&self.buffer)));
+			self.device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
+
+			// graphics pipeline
+			self.device
+			  .destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
+
+			self.device
+			  .destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
+
 
 			// command pool
 			self.device

@@ -22,13 +22,14 @@
 ///				These aren't guaranteed sanity issues, but they are weird issues.
 /// 	- Runtime - Things caused by runtime conditions, usually resource constraints.
 /// You can use the associated methods to get the group of one, which may be helpful for error reporting, etc.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum CreationError {
 	
 	/// # Hardware
 	NoAdapter,
 	NoQueueFamily,
 	NoPhysicalDevice,
+	NoMemory,
 
 	/// # Sanity
 	NoQueueGroup,
@@ -38,6 +39,8 @@ pub enum CreationError {
 	NoImageFormats,
 	NoColor,
 	NoWindow,
+	NoShaderC,
+	ShaderCError (shaderc::Error),
 
 	/// # Runtime
 	SwapchainFailed (hal::window::CreationError),
@@ -46,7 +49,13 @@ pub enum CreationError {
 	SemaphoreFailed (hal::device::OutOfMemory),
 	FenceFailed (hal::device::OutOfMemory),
 	ImageViewFailed (hal::image::ViewError),
-	FramebufferFailed (hal::device::OutOfMemory)
+	FramebufferFailed (hal::device::OutOfMemory),
+	ShaderModuleFailed (hal::device::ShaderError),
+	DescriptorSetLayoutFailed (hal::device::OutOfMemory),
+	PipelineLayoutFailed (hal::device::OutOfMemory),
+	PipelineFailed (hal::pso::CreationError),
+	BufferFailed (hal::buffer::CreationError),
+	AllocationFailed (hal::device::AllocationError)
 }
 
 impl CreationError {
@@ -54,7 +63,8 @@ impl CreationError {
 	pub fn is_hardware(&self) -> bool {
 		use self::CreationError::*;
 		match &self {
-			NoAdapter | NoQueueFamily | NoPhysicalDevice => true,
+			NoAdapter | NoQueueFamily | NoPhysicalDevice |
+			NoMemory => true,
 			_ => false
 		}
 	}
@@ -63,7 +73,8 @@ impl CreationError {
 		use self::CreationError::*;
 		match &self {
 			NoQueueGroup | NoCommandQueues | NoPresentModes |
-			NoCompositeAlphas | NoImageFormats | NoColor
+			NoCompositeAlphas | NoImageFormats | NoColor | NoWindow | 
+			ShaderCError(_) | NoShaderC
 				=> true,
 			_ => false
 		}
@@ -75,7 +86,9 @@ impl CreationError {
 			SwapchainFailed(_) | RenderPassFailed(_) |
 			CommandPoolFailed(_) | SemaphoreFailed(_) |
 			FenceFailed(_) | ImageViewFailed(_) |
-			FramebufferFailed(_) => true,
+			FramebufferFailed(_) | ShaderModuleFailed(_) |
+			DescriptorSetLayoutFailed(_) | PipelineLayoutFailed(_) |
+			PipelineFailed(_) | BufferFailed(_) | AllocationFailed(_) => true,
 			_ => false
 		}
 	}
@@ -96,5 +109,8 @@ pub enum FrameError {
 	FenceResetError (hal::device::OutOfMemory),
 
 	/// Error presenting the rendered frame.
-	PresentError (hal::window::PresentError)
+	PresentError (hal::window::PresentError),
+
+	/// Error writing to buffer
+	BufferError (hal::mapping::Error),
 }
