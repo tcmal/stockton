@@ -15,71 +15,64 @@
 
 //! Renders ./example.bsp
 
-extern crate stockton_types;
-extern crate stockton_bsp;
-extern crate stockton_render;
-extern crate winit;
-extern crate simple_logger;
-extern crate rand;
+// extern crate stockton_types;
+// extern crate stockton_bsp;
+// extern crate stockton_render;
+// extern crate winit;
+// extern crate simple_logger;
+// extern crate rand;
 
-use stockton_render::draw::{RenderingContext, Tri2};
-use stockton_types::Vector2;
+// use stockton_render::draw::{RenderingContext, Tri2};
+// use stockton_types::Vector2;
 
-use winit::{Event, WindowEvent, VirtualKeyCode, ElementState};
-use rand::prelude::*;
+// use winit::{Event, WindowEvent, VirtualKeyCode, ElementState};
+// use rand::prelude::*;
 
 fn main() {
 
-	simple_logger::init().unwrap();
+	// simple_logger::init().unwrap();
 
-	// Create the renderer.
-	let mut ctx = RenderingContext::new().unwrap();
-	let mut rng = thread_rng();
-	let mut vertices: Vec<Tri2> = Vec::new();
-	let mut running = true;
-	let mut vertices_dirty = false;
+	// // Create the renderer.
+	// let mut ctx = RenderingContext::new().unwrap();
+	// let mut rng = thread_rng();
+	// let mut vertices: VertexLump<Tri2> = VertexLump::new(&mut ctx);
+	// let mut running = true;
+	// let mut vertices_dirty = false;
 
-    while running {
-    	ctx.events_loop.poll_events(|event| {
-    		match event {
-		    	// TODO: Handle resize
-		    	Event::WindowEvent {
-		    		event: WindowEvent::KeyboardInput { input,  .. },
-		    		..
-		    	} => match input.state {
-		    		ElementState::Released => match input.virtual_keycode {
-			    		Some(VirtualKeyCode::Escape) => running = false,
-			    		Some(VirtualKeyCode::Space) => {
-			    			vertices.push(Tri2 ([
-			    				Vector2::new(
-			    					rng.gen_range(-1.0, 1.0),
-			    					rng.gen_range(-1.0, 1.0),
-			    					),
-			    				Vector2::new(
-			    					rng.gen_range(-1.0, 1.0),
-			    					rng.gen_range(-1.0, 1.0),
-			    					),
-			    				Vector2::new(
-			    					rng.gen_range(-1.0, 1.0),
-			    					rng.gen_range(-1.0, 1.0),
-			    					)
-		    				]));
+ //    while running {
+ //    	ctx.events_loop.poll_events(|event| {
+ //    		match event {
+	// 	    	// TODO: Handle resize
+	// 	    	Event::WindowEvent {
+	// 	    		event: WindowEvent::KeyboardInput { input,  .. },
+	// 	    		..
+	// 	    	} => match input.state {
+	// 	    		ElementState::Released => match input.virtual_keycode {
+	// 		    		Some(VirtualKeyCode::Escape) => running = false,
+	// 		    		Some(VirtualKeyCode::Space) => {
+	// 		    			vertices.add(Tri2 ([
+	// 		    				Vector2::new(
+	// 		    					rng.gen_range(-1.0, 1.0),
+	// 		    					rng.gen_range(-1.0, 1.0),
+	// 		    					),
+	// 		    				Vector2::new(
+	// 		    					rng.gen_range(-1.0, 1.0),
+	// 		    					rng.gen_range(-1.0, 1.0),
+	// 		    					),
+	// 		    				Vector2::new(
+	// 		    					rng.gen_range(-1.0, 1.0),
+	// 		    					rng.gen_range(-1.0, 1.0),
+	// 		    					)
+	// 	    				]));
+	// 		    		},
+	// 		    		_ => ()
+	// 		    	},
+	// 		    	_ => ()
+	// 		    }
+ //    			_ => ()
+ //    		}
+ //    	});
 
-			    			vertices_dirty = true;
-			    		},
-			    		_ => ()
-			    	},
-			    	_ => ()
-			    }
-    			_ => ()
-    		}
-    	});
-
-    	if vertices_dirty {
-			ctx.populate_vertices(vertices.as_slice()).unwrap();
-			vertices_dirty = false;    		
-    	}
-
-    	ctx.draw_vertices().unwrap();
-	}
+ //    	vertices.draw(&mut ctx).unwrap();
+	// }
 }

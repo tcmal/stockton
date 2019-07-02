@@ -16,6 +16,8 @@
 //! Given 3D points and some camera information, renders to the screen.
 
 mod context;
+mod vertexlump;
 
 pub use context::RenderingContext;
 pub use context::Tri2;
+pub use vertexlump::VertexLump;

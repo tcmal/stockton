@@ -70,7 +70,7 @@ pub struct RenderingContext {
 	pub events_loop: winit::EventsLoop,
 	surface: <Backend as hal::Backend>::Surface,
 
-	device: ManuallyDrop<<Backend as hal::Backend>::Device>,
+	pub (crate) device: ManuallyDrop<<Backend as hal::Backend>::Device>,
 
 	swapchain: ManuallyDrop<<Backend as hal::Backend>::Swapchain>,
 	
@@ -99,7 +99,7 @@ pub struct RenderingContext {
 	descriptor_set_layouts: <Backend as hal::Backend>::DescriptorSetLayout,
 	pipeline_layout: ManuallyDrop<<Backend as hal::Backend>::PipelineLayout>,
 	pipeline: ManuallyDrop<<Backend as hal::Backend>::GraphicsPipeline>,
-	adapter: adapter::Adapter<Backend>
+	pub (crate) adapter: adapter::Adapter<Backend>
 
 }
 
