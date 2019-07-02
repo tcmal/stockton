@@ -16,7 +16,6 @@
 //! Given 3D points and some camera information, renders to the screen.
 
 mod context;
-mod frame;
 
 pub use context::RenderingContext;
 pub use context::Tri2;

@@ -24,74 +24,25 @@
 /// You can use the associated methods to get the group of one, which may be helpful for error reporting, etc.
 #[derive(Debug)]
 pub enum CreationError {
+	WindowError,
+	BadSurface,
 	
-	/// # Hardware
-	NoAdapter,
-	NoQueueFamily,
-	NoPhysicalDevice,
-	NoMemory,
+	DeviceError (hal::error::DeviceCreationError),
 
-	/// # Sanity
-	NoQueueGroup,
-	NoCommandQueues,
-	NoPresentModes,
-	NoCompositeAlphas,
-	NoImageFormats,
-	NoColor,
-	NoWindow,
+	OutOfMemoryError,
+
+	SyncObjectError,
+	
 	NoShaderC,
 	ShaderCError (shaderc::Error),
-
-	/// # Runtime
-	SwapchainFailed (hal::window::CreationError),
-	RenderPassFailed (hal::device::OutOfMemory),
-	CommandPoolFailed (hal::device::OutOfMemory),
-	SemaphoreFailed (hal::device::OutOfMemory),
-	FenceFailed (hal::device::OutOfMemory),
-	ImageViewFailed (hal::image::ViewError),
-	FramebufferFailed (hal::device::OutOfMemory),
 	ShaderModuleFailed (hal::device::ShaderError),
-	DescriptorSetLayoutFailed (hal::device::OutOfMemory),
-	PipelineLayoutFailed (hal::device::OutOfMemory),
-	PipelineFailed (hal::pso::CreationError),
-	BufferFailed (hal::buffer::CreationError),
-	AllocationFailed (hal::device::AllocationError)
-}
-
-impl CreationError {
-	/// Check if the error is (likely) a hardware error
-	pub fn is_hardware(&self) -> bool {
-		use self::CreationError::*;
-		match &self {
-			NoAdapter | NoQueueFamily | NoPhysicalDevice |
-			NoMemory => true,
-			_ => false
-		}
-	}
-	/// Check if the error is (possibly) a sanity error.
-	pub fn is_sanity(&self) -> bool {
-		use self::CreationError::*;
-		match &self {
-			NoQueueGroup | NoCommandQueues | NoPresentModes |
-			NoCompositeAlphas | NoImageFormats | NoColor | NoWindow | 
-			ShaderCError(_) | NoShaderC
-				=> true,
-			_ => false
-		}
-	}
-	/// Check if the error is (likely) a runtime error.
-	pub fn is_runtime(&self) -> bool {
-		use self::CreationError::*;
-		match &self {
-			SwapchainFailed(_) | RenderPassFailed(_) |
-			CommandPoolFailed(_) | SemaphoreFailed(_) |
-			FenceFailed(_) | ImageViewFailed(_) |
-			FramebufferFailed(_) | ShaderModuleFailed(_) |
-			DescriptorSetLayoutFailed(_) | PipelineLayoutFailed(_) |
-			PipelineFailed(_) | BufferFailed(_) | AllocationFailed(_) => true,
-			_ => false
-		}
-	}
+	RenderPassError,
+	PipelineError (hal::pso::CreationError),
+	BufferError (hal::buffer::CreationError),
+	BufferNoMemory,
+	
+	SwapchainError (hal::window::CreationError),
+	ImageViewError (hal::image::ViewError)
 }
 
 /// An error encountered when rendering.
@@ -99,18 +50,7 @@ impl CreationError {
 /// You'll likely need to exit or create a new context.
 #[derive(Debug, Clone)]
 pub enum FrameError {
-	/// Error getting the image from the swapchain
-	AcquisitionError (hal::window::AcquireError),
-	
-	/// Error waiting on the frame_presented fence.
-	FenceWaitError (hal::device::OomOrDeviceLost),
-	
-	/// Error resetting the frame_presented fence.
-	FenceResetError (hal::device::OutOfMemory),
-
-	/// Error presenting the rendered frame.
-	PresentError (hal::window::PresentError),
-
-	/// Error writing to buffer
-	BufferError (hal::mapping::Error),
+	AcquireError (hal::window::AcquireError),
+	SyncObjectError,
+	PresentError
 }

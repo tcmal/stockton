@@ -20,6 +20,7 @@
 //! On Mac, you should use `metal`.
 //! If your targetting machines without Vulkan, OpenGL or dx11/dx12 is preferred.
 //! `empty` is used for testing
+
 #[cfg(feature = "dx11")]
 extern crate gfx_backend_dx11 as back;
 
@@ -50,21 +51,19 @@ use draw::{RenderingContext, Tri2};
 
 use stockton_types::{World, Vector2};
 
-use winit::Window;
-
 use std::sync::{Arc, RwLock};
 
 pub struct Renderer<'a> {
 	world: Arc<RwLock<World<'a>>>,
-	context: RenderingContext<'a>
+	pub context: RenderingContext
 }
 
 
 impl<'a> Renderer<'a> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
-	pub fn new(world: Arc<RwLock<World<'a>>>, window: &'a Window) -> Result<Self, CreationError> {
-		let context = RenderingContext::new(window)?;
+	pub fn new(world: Arc<RwLock<World<'a>>>) -> Result<Self, CreationError> {
+		let context = RenderingContext::new()?;
 
 		Ok(Renderer {
 			world, context
@@ -73,11 +72,21 @@ impl<'a> Renderer<'a> {
 
 	/// Render a single frame of the world
 	pub fn render_frame(&mut self) -> Result<(), FrameError>{
-		// self.context.draw_clear([0.0, 0.5, 0.5, 1.0])
-		self.context.draw_triangle(Tri2 ([
+		// self.context.draw_clear([0.0, 0.5, 0.5, 1.0]).unwrap();
+		// Ok(())
+		self.context.draw_triangle([Tri2 ([
+			Vector2::new(-1.0, -1.0),
+			Vector2::new(-0.5, 0.0),
+			Vector2::new(0.0, -1.0)
+		]), Tri2 ([
 			Vector2::new(-0.5, -0.5),
 			Vector2::new(0.5, -0.5),
 			Vector2::new(0.0, 0.5)
-		]))
+		]), Tri2 ([
+			Vector2::new(0.5, 0.5),
+			Vector2::new(1.0, 0.0),
+			Vector2::new(0.0, 0.0)
+		]), ]).unwrap();
+		Ok(())
 	}
 }

@@ -19,17 +19,18 @@ extern crate stockton_types;
 extern crate stockton_bsp;
 extern crate stockton_render;
 extern crate winit;
+extern crate simple_logger;
 
 use stockton_bsp::BSPFile;
 use stockton_render::Renderer;
 use stockton_types::World;
 
-use winit::{EventsLoop, Window};
-
 use std::sync::{Arc,RwLock};
 
-
 fn main() {
+
+	simple_logger::init().unwrap();
+  
 	// Parse the BSP file.
 	let data = include_bytes!("../13power.bsp");
 	let bsp = BSPFile::from_buffer(data).unwrap();
@@ -40,12 +41,8 @@ fn main() {
 		None
 	}).unwrap()));
 
-	// Create the window.
-	let events = EventsLoop::new();
-	let window = Window::new(&events).unwrap();
-
 	// Create the renderer.
-	let mut renderer = Renderer::new(world, &window).unwrap();
+	let mut renderer = Renderer::new(world).unwrap();
 
     loop {
     	// TODO: Poll Window events

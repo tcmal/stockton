@@ -4,3 +4,8 @@ members = [
     "stockton-render",
     "examples/render"
 ]
+
+
+[patch.crates-io]
+gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx" }
+gfx-hal = { git = "https://github.com/gfx-rs/gfx" }
