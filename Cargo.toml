@@ -2,7 +2,7 @@
 members = [
     "stockton-types",
     "stockton-render",
-    "examples/render"
+    "examples/render-triangles"
 ]
 
 

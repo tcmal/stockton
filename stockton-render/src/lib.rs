@@ -20,6 +20,7 @@
 //! On Mac, you should use `metal`.
 //! If your targetting machines without Vulkan, OpenGL or dx11/dx12 is preferred.
 //! `empty` is used for testing
+#![feature(manually_drop_take)]
 
 #[cfg(feature = "dx11")]
 extern crate gfx_backend_dx11 as back;
@@ -44,7 +45,7 @@ extern crate winit;
 extern crate arrayvec;
 
 mod error;
-mod draw;
+pub mod draw;
 
 use error::{CreationError, FrameError};
 use draw::{RenderingContext, Tri2};
@@ -72,21 +73,7 @@ impl<'a> Renderer<'a> {
 
 	/// Render a single frame of the world
 	pub fn render_frame(&mut self) -> Result<(), FrameError>{
-		// self.context.draw_clear([0.0, 0.5, 0.5, 1.0]).unwrap();
-		// Ok(())
-		self.context.draw_triangle([Tri2 ([
-			Vector2::new(-1.0, -1.0),
-			Vector2::new(-0.5, 0.0),
-			Vector2::new(0.0, -1.0)
-		]), Tri2 ([
-			Vector2::new(-0.5, -0.5),
-			Vector2::new(0.5, -0.5),
-			Vector2::new(0.0, 0.5)
-		]), Tri2 ([
-			Vector2::new(0.5, 0.5),
-			Vector2::new(1.0, 0.0),
-			Vector2::new(0.0, 0.0)
-		]), ]).unwrap();
+		self.context.draw_vertices().unwrap();
 		Ok(())
 	}
 }

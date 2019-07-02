@@ -1,0 +1,30 @@
+[package]
+name = "render-triangles"
+version = "0.1.0"
+authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+stockton-render = { path = "../../stockton-render" }
+stockton-types = { path = "../../stockton-types" }
+stockton-bsp = "2.0.0"
+winit = "0.19.1"
+log = "0.4.0"
+simple_logger = "1.0"
+rand = "0.7"
+
+[target.'cfg(feature = "gl")'.dependencies.stockton-render]
+path = "../../stockton-render"
+features = ["gl"]
+
+# [target.'cfg(feature = "dx11")'.dependencies.stockton-render]
+# path = "../../stockton-render"
+# features = ["dx11"]
+
+# [target.'cfg(feature = "dx12")'.dependencies.stockton-render]
+# path = "../../stockton-render"
+# features = ["dx12"]
+
+# [target.'cfg(feature = "vulkan")'.dependencies.stockton-render]
+# path = "../../stockton-render"
+# features = ["vulkan"]

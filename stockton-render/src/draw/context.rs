@@ -44,18 +44,24 @@ const COLOR_RANGE: image::SubresourceRange = image::SubresourceRange {
 const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
 const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
+const VERTEX_BUFFER_BATCH_SIZE: u64 = 10;
+const VERTEX_BUFFER_INITIAL_BATCHES: u64 = 1;
+
 /// Represents a triangle in 2D (screen) space.
 #[derive(Debug, Clone, Copy)]
 pub struct Tri2 (pub [Vector2; 3]);
 
 /// Easy conversion to proper format.
-impl From<Tri2> for [f32; 6] {
-	fn from(tri: Tri2) -> [f32; 6] {
-	    [tri.0[0].x, tri.0[0].y,
-	     tri.0[1].x, tri.0[1].y,
-	     tri.0[2].x, tri.0[2].y]
+impl From<Tri2> for [f32; 15] {
+	fn from(tri: Tri2) -> [f32; 15] {
+	    [tri.0[0].x, tri.0[0].y, 1.0, 0.0, 0.0,
+	     tri.0[1].x, tri.0[1].y, 0.0, 1.0, 0.0,
+	     tri.0[2].x, tri.0[2].y, 0.0, 0.0, 1.0]
 	}
 }
+
+const TRI2_SIZE_F32: usize = 15;
+const TRI2_SIZE_BYTES: usize = size_of::<f32>() * TRI2_SIZE_F32;
 
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
@@ -93,6 +99,7 @@ pub struct RenderingContext {
 	descriptor_set_layouts: <Backend as hal::Backend>::DescriptorSetLayout,
 	pipeline_layout: ManuallyDrop<<Backend as hal::Backend>::PipelineLayout>,
 	pipeline: ManuallyDrop<<Backend as hal::Backend>::GraphicsPipeline>,
+	adapter: adapter::Adapter<Backend>
 
 }
 
@@ -237,27 +244,7 @@ impl RenderingContext {
 
 	    // Vertex buffer
 	    // TODO: Proper sizing / resizing
-		let mut buffer = unsafe { device
-		        .create_buffer((size_of::<Tri2>() * 3).try_into().unwrap(), buffer::Usage::VERTEX) }
-	        .map_err(|e| CreationError::BufferError (e))?;
-
-		let requirements = unsafe { device.get_buffer_requirements(&buffer) };
-		let memory_type_id = adapter.physical_device
-	        .memory_properties().memory_types
-	        .iter().enumerate()
-	        .find(|&(id, memory_type)| {
-	        	requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(memory::Properties::CPU_VISIBLE)
-	        })
-	        .map(|(id, _)| MemoryTypeId(id))
-	        .ok_or(CreationError::BufferNoMemory)?;
-
-		let memory = unsafe {device
-			.allocate_memory(memory_type_id, requirements.size) }
-			.map_err(|_| CreationError::OutOfMemoryError)?;
-
-		unsafe { device
-			.bind_buffer_memory(&memory, 0, &mut buffer) }
-			.map_err(|_| CreationError::BufferNoMemory)?;
+	    let (buffer, requirements, memory) = Self::allocate_vertex_buffer(VERTEX_BUFFER_INITIAL_BATCHES, &mut device, &adapter)?;
 
 	    // Command Pools, Buffers, imageviews, framebuffers & Sync objects
     	let frames_in_flight = backbuffer.len();
@@ -330,7 +317,9 @@ impl RenderingContext {
 
     		buffer: ManuallyDrop::new(buffer),
     		memory: ManuallyDrop::new(memory),
-    		requirements
+    		requirements,
+
+    		adapter
     	})
 	}
 
@@ -392,7 +381,7 @@ impl RenderingContext {
     	// Vertex buffers
 		let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
 			binding: 0,
-			stride: (size_of::<f32>() * 2) as u32,
+			stride: (size_of::<f32>() * 5) as u32,
 			rate: VertexInputRate::Vertex,
 		}];
 
@@ -403,6 +392,13 @@ impl RenderingContext {
 				format: Format::Rg32Sfloat,
 				offset: 0,
 			},
+		}, AttributeDesc {
+			location: 1,
+			binding: 0,
+			element: Element {
+				format: Format::Rgb32Sfloat,
+				offset: (size_of::<f32>() * 2) as ElemOffset,
+			}
 		}];
 
     	// Rasterizer
@@ -493,6 +489,35 @@ impl RenderingContext {
     	Ok((set_layout, layout, pipeline))
 	}
 
+	pub fn allocate_vertex_buffer(batches: u64, device: &mut <Backend as hal::Backend>::Device, adapter: &adapter::Adapter<Backend>) 
+		-> Result<(<Backend as hal::Backend>::Buffer, 
+			memory::Requirements,
+			<Backend as hal::Backend>::Memory), CreationError> {
+		let mut buffer = unsafe { device
+		        .create_buffer(batches *  VERTEX_BUFFER_BATCH_SIZE * TRI2_SIZE_BYTES as u64, buffer::Usage::VERTEX) }
+	        .map_err(|e| CreationError::BufferError (e))?;
+
+		let requirements = unsafe { device.get_buffer_requirements(&buffer) };
+		let memory_type_id = adapter.physical_device
+	        .memory_properties().memory_types
+	        .iter().enumerate()
+	        .find(|&(id, memory_type)| {
+	        	requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(memory::Properties::CPU_VISIBLE)
+	        })
+	        .map(|(id, _)| MemoryTypeId(id))
+	        .ok_or(CreationError::BufferNoMemory)?;
+
+		let memory = unsafe {device
+			.allocate_memory(memory_type_id, requirements.size) }
+			.map_err(|_| CreationError::OutOfMemoryError)?;
+
+		unsafe { device
+			.bind_buffer_memory(&memory, 0, &mut buffer) }
+			.map_err(|_| CreationError::BufferNoMemory)?;
+
+		Ok((buffer, requirements, memory))
+	}
+
     /// Draw a frame that's just cleared to the color specified.
     pub fn draw_clear(&mut self, color: [f32; 4]) -> Result<(), FrameError> {
         let get_image = &self.get_image[self.current_frame];
@@ -561,7 +586,45 @@ impl RenderingContext {
         Ok(())
 	}
 
-	pub fn draw_triangle(&mut self, tris: [Tri2; 3]) -> Result<(), &'static str> {
+	pub fn populate_vertices(&mut self, tris: &[Tri2]) -> Result<(), &'static str> {
+		// Ensure buffer is big enough
+		if tris.len() > (self.requirements.size as usize / TRI2_SIZE_BYTES) {
+			// Reallocate buffer
+			// Destroy old one
+			unsafe { self.device.free_memory(ManuallyDrop::take(&mut self.memory)) };
+			unsafe { self.device.destroy_buffer(ManuallyDrop::take(&mut self.buffer)) };
+
+			// Make new one
+			let batches = (tris.len() as u64 / VERTEX_BUFFER_BATCH_SIZE) + 1;
+
+			let (buffer, requirements, memory) = Self::allocate_vertex_buffer(batches, &mut self.device, &self.adapter)
+				.map_err(|_| "Couldn't re-allocate vertex buffer")?;
+			self.buffer = ManuallyDrop::new(buffer);
+			self.requirements = requirements;
+			self.memory = ManuallyDrop::new(memory);
+		}
+
+	    // Write triangles to the vertex buffer
+	    unsafe {
+			let mut data_target: mapping::Writer<_, f32> = self.device
+				.acquire_mapping_writer(&self.memory, 0..self.requirements.size)
+				.map_err(|_| "Failed to acquire a memory writer!")?;
+
+			for (i,tri) in tris.into_iter().enumerate() {
+				let points: [f32; 15] = (*tri).into();
+				data_target[i * TRI2_SIZE_F32..(i * TRI2_SIZE_F32) + TRI2_SIZE_F32].copy_from_slice(&points);
+			}
+
+			self
+				.device
+				.release_mapping_writer(data_target)
+				.map_err(|_| "Couldn't release the mapping writer!")?;
+	    };
+
+	    Ok(())
+	}
+
+	pub fn draw_vertices(&mut self) -> Result<(), &'static str> {
         let get_image = &self.get_image[self.current_frame];
         let render_complete = &self.render_complete[self.current_frame];
         
@@ -588,23 +651,6 @@ impl RenderingContext {
                 .map_err(|_| "FrameError::SyncObjectError")?;
         };
 
-	    // Write triangle to the vertex buffer
-	    unsafe {
-			let mut data_target = self.device
-				.acquire_mapping_writer(&self.memory, 0..self.requirements.size)
-				.map_err(|_| "Failed to acquire a memory writer!")?;
-	      
-			for (i,tri) in tris.into_iter().enumerate() {
-				let points: [f32; 6] = (*tri).into();
-				data_target[i * 6..(i * 6) + 6].copy_from_slice(&points);
-			}
-
-			self
-				.device
-				.release_mapping_writer(data_target)
-				.map_err(|_| "Couldn't release the mapping writer!")?;
-	    }
-
         // Record commands
         unsafe {
             let buffer = &mut self.cmd_buffers[image_index];
@@ -625,7 +671,7 @@ impl RenderingContext {
 				let buffers: ArrayVec<[_; 1]> = [(buffer_ref, 0)].into();
 
 				encoder.bind_vertex_buffers(0, buffers);
-				encoder.draw(0..18, 0..3);
+				encoder.draw(0..self.requirements.size as u32, 0..(self.requirements.size / TRI2_SIZE_BYTES as u64) as u32);
 			}
             buffer.finish();
         };
