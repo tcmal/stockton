@@ -63,6 +63,15 @@ impl From<Tri2> for [f32; 15] {
 const TRI2_SIZE_F32: usize = 15;
 const TRI2_SIZE_BYTES: usize = size_of::<f32>() * TRI2_SIZE_F32;
 
+#[cfg(not(feature = "gl"))]
+type Instance = back::Instance;
+
+#[cfg(feature = "gl")]
+type Instance = ();
+
+#[cfg(not(feature = "gl"))]
+type WindowType = winit::Window;
+
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
 // TODO: Settings for clear colour, buffer sizes, etc
@@ -70,6 +79,8 @@ pub struct RenderingContext {
 	pub events_loop: winit::EventsLoop,
 	surface: <Backend as hal::Backend>::Surface,
 
+	window: WindowType,
+	pub (crate) instance: ManuallyDrop<Instance>,
 	pub (crate) device: ManuallyDrop<<Backend as hal::Backend>::Device>,
 
 	swapchain: ManuallyDrop<<Backend as hal::Backend>::Swapchain>,
@@ -110,9 +121,19 @@ impl RenderingContext {
 	    let wb = WindowBuilder::new();
 
 	    // Create surface
-	    // TODO: Vulkan version
+	    #[cfg(not(feature = "gl"))]
+	    let (window, instance, mut surface, mut adapters) = {
+	    	use hal::Instance;
+	    	let window = wb.build(&events_loop).map_err(|_| CreationError::WindowError)?;
+	        let instance = back::Instance::create("stockton", 1);
+	        let surface = instance.create_surface(&window);
+	        let adapters = instance.enumerate_adapters();
+
+	        (window, instance, surface, adapters)
+	    };
+
 	    #[cfg(feature = "gl")]
-	    let (mut surface, mut adapters) = {
+	    let (window, instance, mut surface, mut adapters) = {
 	    	let window = unsafe {
 	    		let builder = back::config_context(glutin::ContextBuilder::new(), ColorFormat::SELF, None);
 
@@ -124,7 +145,7 @@ impl RenderingContext {
 	    	let surface = back::Surface::from_window(window);
 	    	let adapters = surface.enumerate_adapters();
 
-	    	(surface, adapters)
+	    	((), (), surface, adapters)
 	    };
 
 	    // TODO: Properly figure out which adapter to use
@@ -277,7 +298,7 @@ impl RenderingContext {
 		            ).map_err(|e| CreationError::ImageViewError (e))?);
 		            framebuffers.push(device.create_framebuffer(
 		            	&renderpass,
-		            	Some(imageviews[i]),
+		            	Some(&imageviews[i]),
 		            	extent
 		            ).map_err(|_| CreationError::OutOfMemoryError)?);
 		    	}
@@ -290,6 +311,8 @@ impl RenderingContext {
 	    let (descriptor_set_layouts, pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass)?;
 
     	Ok(RenderingContext {
+    		window,
+    		instance: ManuallyDrop::new(instance),
     		events_loop,
     		surface,
 
