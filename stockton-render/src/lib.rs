@@ -37,6 +37,8 @@ extern crate gfx_backend_metal as back;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 
+#[macro_use]
+extern crate log;
 extern crate gfx_hal as hal;
 extern crate stockton_types;
 extern crate shaderc;

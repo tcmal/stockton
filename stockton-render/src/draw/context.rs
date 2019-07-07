@@ -16,6 +16,7 @@
 //! Deals with all the Vulkan/HAL details.
 use crate::error as error;
 use crate::error::{CreationError, FrameError};
+use super::VertexLump;
 
 use core::mem::{ManuallyDrop, size_of};
 use std::convert::TryInto;
@@ -103,9 +104,7 @@ pub struct RenderingContext {
 	cmd_buffers: Vec<command::CommandBuffer<Backend, Graphics, command::MultiShot>>,
 	queue_group: QueueGroup<Backend, Graphics>,
 
-	buffer: ManuallyDrop<<Backend as hal::Backend>::Buffer>,
-	memory: ManuallyDrop<<Backend as hal::Backend>::Memory>,
-	requirements: memory::Requirements,
+	map_verts: VertexLump<Tri2, [f32; 15]>,
 
 	descriptor_set_layouts: <Backend as hal::Backend>::DescriptorSetLayout,
 	pipeline_layout: ManuallyDrop<<Backend as hal::Backend>::PipelineLayout>,
@@ -264,8 +263,7 @@ impl RenderingContext {
 		};
 
 	    // Vertex buffer
-	    // TODO: Proper sizing / resizing
-	    let (buffer, requirements, memory) = Self::allocate_vertex_buffer(VERTEX_BUFFER_INITIAL_BATCHES, &mut device, &adapter)?;
+	    let map_verts = VertexLump::new(&mut device, &adapter)?;
 
 	    // Command Pools, Buffers, imageviews, framebuffers & Sync objects
     	let frames_in_flight = backbuffer.len();
@@ -338,9 +336,7 @@ impl RenderingContext {
     		pipeline_layout: ManuallyDrop::new(pipeline_layout),
     		pipeline: ManuallyDrop::new(pipeline),
 
-    		buffer: ManuallyDrop::new(buffer),
-    		memory: ManuallyDrop::new(memory),
-    		requirements,
+    		map_verts,
 
     		adapter
     	})
@@ -512,35 +508,6 @@ impl RenderingContext {
     	Ok((set_layout, layout, pipeline))
 	}
 
-	pub fn allocate_vertex_buffer(batches: u64, device: &mut <Backend as hal::Backend>::Device, adapter: &adapter::Adapter<Backend>) 
-		-> Result<(<Backend as hal::Backend>::Buffer, 
-			memory::Requirements,
-			<Backend as hal::Backend>::Memory), CreationError> {
-		let mut buffer = unsafe { device
-		        .create_buffer(batches *  VERTEX_BUFFER_BATCH_SIZE * TRI2_SIZE_BYTES as u64, buffer::Usage::VERTEX) }
-	        .map_err(|e| CreationError::BufferError (e))?;
-
-		let requirements = unsafe { device.get_buffer_requirements(&buffer) };
-		let memory_type_id = adapter.physical_device
-	        .memory_properties().memory_types
-	        .iter().enumerate()
-	        .find(|&(id, memory_type)| {
-	        	requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(memory::Properties::CPU_VISIBLE)
-	        })
-	        .map(|(id, _)| MemoryTypeId(id))
-	        .ok_or(CreationError::BufferNoMemory)?;
-
-		let memory = unsafe {device
-			.allocate_memory(memory_type_id, requirements.size) }
-			.map_err(|_| CreationError::OutOfMemoryError)?;
-
-		unsafe { device
-			.bind_buffer_memory(&memory, 0, &mut buffer) }
-			.map_err(|_| CreationError::BufferNoMemory)?;
-
-		Ok((buffer, requirements, memory))
-	}
-
     /// Draw a frame that's just cleared to the color specified.
     pub fn draw_clear(&mut self, color: [f32; 4]) -> Result<(), FrameError> {
         let get_image = &self.get_image[self.current_frame];
@@ -609,44 +576,6 @@ impl RenderingContext {
         Ok(())
 	}
 
-	pub fn populate_vertices(&mut self, tris: &[Tri2]) -> Result<(), &'static str> {
-		// Ensure buffer is big enough
-		if tris.len() > (self.requirements.size as usize / TRI2_SIZE_BYTES) {
-			// Reallocate buffer
-			// Destroy old one
-			unsafe { self.device.free_memory(ManuallyDrop::take(&mut self.memory)) };
-			unsafe { self.device.destroy_buffer(ManuallyDrop::take(&mut self.buffer)) };
-
-			// Make new one
-			let batches = (tris.len() as u64 / VERTEX_BUFFER_BATCH_SIZE) + 1;
-
-			let (buffer, requirements, memory) = Self::allocate_vertex_buffer(batches, &mut self.device, &self.adapter)
-				.map_err(|_| "Couldn't re-allocate vertex buffer")?;
-			self.buffer = ManuallyDrop::new(buffer);
-			self.requirements = requirements;
-			self.memory = ManuallyDrop::new(memory);
-		}
-
-	    // Write triangles to the vertex buffer
-	    unsafe {
-			let mut data_target: mapping::Writer<_, f32> = self.device
-				.acquire_mapping_writer(&self.memory, 0..self.requirements.size)
-				.map_err(|_| "Failed to acquire a memory writer!")?;
-
-			for (i,tri) in tris.into_iter().enumerate() {
-				let points: [f32; 15] = (*tri).into();
-				data_target[i * TRI2_SIZE_F32..(i * TRI2_SIZE_F32) + TRI2_SIZE_F32].copy_from_slice(&points);
-			}
-
-			self
-				.device
-				.release_mapping_writer(data_target)
-				.map_err(|_| "Couldn't release the mapping writer!")?;
-	    };
-
-	    Ok(())
-	}
-
 	pub fn draw_vertices(&mut self) -> Result<(), &'static str> {
         let get_image = &self.get_image[self.current_frame];
         let render_complete = &self.render_complete[self.current_frame];
@@ -690,11 +619,13 @@ impl RenderingContext {
 				encoder.bind_graphics_pipeline(&self.pipeline);
 				
 				// Here we must force the Deref impl of ManuallyDrop to play nice.
-				let buffer_ref: &<Backend as hal::Backend>::Buffer = &self.buffer;
+				let buffer_ref: &<Backend as hal::Backend>::Buffer = &self.map_verts.buffer;
 				let buffers: ArrayVec<[_; 1]> = [(buffer_ref, 0)].into();
 
 				encoder.bind_vertex_buffers(0, buffers);
-				encoder.draw(0..self.requirements.size as u32, 0..(self.requirements.size / TRI2_SIZE_BYTES as u64) as u32);
+
+				trace!("Requesting draw of {:?} instances ({:?} verts)", self.map_verts.active_instances, self.map_verts.active_verts);
+				encoder.draw(self.map_verts.active_verts.clone(), self.map_verts.active_instances.clone());
 			}
             buffer.finish();
         };
@@ -723,6 +654,14 @@ impl RenderingContext {
 
         Ok(())
 	}
+
+	pub fn add_map_vert(&mut self, tri: Tri2) -> Result<(), ()> {
+		// get around the borrow checker
+		unsafe {
+			let ctx: *mut Self = &mut *self;
+			self.map_verts.add(tri, ctx.as_mut().unwrap())
+		}
+	}
 }
 
 #[cfg(feature = "gl")]
@@ -749,6 +688,8 @@ impl core::ops::Drop for RenderingContext {
             for image_view in self.imageviews.drain(..) {
                 self.device.destroy_image_view(image_view);
             }
+
+            // self.map_verts.deactivate(self);
 
             use core::ptr::read;
             for cmd_pool in self.cmd_pools.drain(..) {

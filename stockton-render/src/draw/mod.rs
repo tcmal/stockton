@@ -20,4 +20,4 @@ mod vertexlump;
 
 pub use context::RenderingContext;
 pub use context::Tri2;
-pub use vertexlump::VertexLump;
+pub(crate) use vertexlump::VertexLump;
