@@ -18,9 +18,11 @@
 //! You'll need to pick a backend using features. You should only pick one.
 //! On Linux & Windows, you should use vulkan.
 //! On Mac, you should use `metal`.
-//! If your targetting machines without Vulkan, OpenGL or dx11/dx12 is preferred.
+//! If you're targetting machines without Vulkan, OpenGL or dx11/dx12 is preferred.
 //! `empty` is used for testing
 #![feature(manually_drop_take)]
+
+extern crate core;
 
 #[cfg(feature = "dx11")]
 extern crate gfx_backend_dx11 as back;

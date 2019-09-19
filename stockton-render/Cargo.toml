@@ -2,19 +2,18 @@
 name = "stockton-render"
 version = "0.1.0"
 authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
-edition = "2018"
 
 [dependencies]
 stockton-types = { path = "../stockton-types" }
 winit = "0.19.1"
-gfx-hal = "0.2.1"
+gfx-hal = "^0.3"
 arrayvec = "0.4.10"
 nalgebra-glm = "0.4.0"
-shaderc = "0.5.0"
+shaderc = "0.6.1"
 log = "0.4.0"
 
 [features]
-default = ["vulkan"]
+default = ["gl"]
 metal = ["gfx-backend-metal"]
 gl = ["gfx-backend-gl"]
 dx11 = ["gfx-backend-dx11"]
@@ -22,22 +21,23 @@ dx12 = ["gfx-backend-dx12"]
 vulkan = ["gfx-backend-vulkan"]
 
 [dependencies.gfx-backend-gl]
-version = "0.2"
+version = "0.3"
 features = ["glutin"]
 optional = true
 
 [dependencies.gfx-backend-vulkan]
-version = "0.2"
+version = "0.3"
+features = ["winit"]
 optional = true
 
 [target.'cfg(any(target_os = "macos", all(target_os = "ios", target_arch = "aarch64")))'.dependencies.gfx-backend-metal]
-version = "0.2"
+version = "0.3"
 optional = true
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx11]
-version = "0.2"
+version = "0.3"
 optional = true
 
 [target.'cfg(windows)'.dependencies.gfx-backend-dx12]
-version = "0.2"
+version = "0.3"
 optional = true

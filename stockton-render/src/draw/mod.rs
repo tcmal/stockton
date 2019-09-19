@@ -18,6 +18,6 @@
 mod context;
 mod vertexlump;
 
-pub use context::RenderingContext;
-pub use context::Tri2;
-pub(crate) use vertexlump::VertexLump;
+pub use self::context::RenderingContext;
+pub use self::context::Tri2;
+pub(crate) use self::vertexlump::VertexLump;

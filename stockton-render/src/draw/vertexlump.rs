@@ -21,13 +21,13 @@ use hal::memory::{Pod, Properties, Requirements};
 use hal::buffer::Usage;
 use hal::adapter::MemoryTypeId;
 use hal::{VertexCount, InstanceCount, Adapter, Device, PhysicalDevice, mapping};
-use back::Backend;
+use hal::Backend;
 use crate::error::CreationError;
 use super::RenderingContext;
 
 pub(crate) struct VertexLump<T: Into<X>, X: Pod> {
-	pub (crate) buffer: ManuallyDrop<<Backend as hal::Backend>::Buffer>,
-	memory: ManuallyDrop<<Backend as hal::Backend>::Memory>,
+	pub (crate) buffer: ManuallyDrop<<back::Backend as hal::Backend>::Buffer>,
+	memory: ManuallyDrop<<back::Backend as hal::Backend>::Memory>,
 	requirements: Requirements,
 
 	unit_size_bytes: u64,
@@ -50,7 +50,7 @@ pub(crate) struct VertexLump<T: Into<X>, X: Pod> {
 const BATCH_SIZE: u64 = 3;
 
 impl<T: Into<X>, X: Pod> VertexLump<T, X> {
-	pub fn new(device: &mut <Backend as hal::Backend>::Device, adapter: &Adapter<Backend>) -> Result<VertexLump<T, X>, CreationError> {
+	pub fn new(device: &mut <back::Backend as hal::Backend>::Device, adapter: &Adapter<back::Backend>) -> Result<VertexLump<T, X>, CreationError> {
 		let unit_size_bytes = size_of::<X>()  as u64;
 		let unit_size_verts = unit_size_bytes / size_of::<f32>() as u64;
 
@@ -146,7 +146,7 @@ impl<T: Into<X>, X: Pod> VertexLump<T, X> {
 
 				trace!("Copying {:?} from old buffer to new buffer", copy_range);
 
-				let reader = ctx.device.acquire_mapping_reader::<u8>(&self.memory, copy_range.clone())
+				let reader = ctx.device.acquire_mapping_reader::<u8>(&*(self.memory), copy_range.clone())
 					.map_err(|_| ())?;
 				let mut writer = ctx.device.acquire_mapping_writer::<u8>(&new_memory, copy_range.clone())
 					.map_err(|_| ())?;
@@ -186,7 +186,7 @@ impl<T: Into<X>, X: Pod> VertexLump<T, X> {
 
 	pub(crate) fn writer<'a>(&'a mut self, ctx: &'a mut RenderingContext) -> Result<VertexWriter<'a, X>, ()> {
 		let mapping_writer = unsafe { ctx.device
-			.acquire_mapping_writer(&self.memory, 0..self.requirements.size)
+			.acquire_mapping_writer(&*(self.memory), 0..self.requirements.size)
 			.map_err(|_| ())? };
 		
 		Ok(VertexWriter {
@@ -203,7 +203,7 @@ impl<T: Into<X>, X: Pod> VertexLump<T, X> {
 }
 
 pub struct VertexWriter<'a, X: Pod> {
-	mapping_writer: ManuallyDrop<mapping::Writer<'a, Backend, X>>,
+	mapping_writer: ManuallyDrop<mapping::Writer<'a, back::Backend, X>>,
 	ctx: &'a mut RenderingContext
 }
 

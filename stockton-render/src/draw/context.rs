@@ -18,7 +18,7 @@ use crate::error as error;
 use crate::error::{CreationError, FrameError};
 use super::VertexLump;
 
-use core::mem::{ManuallyDrop, size_of};
+use std::mem::{ManuallyDrop, size_of};
 use std::convert::TryInto;
 
 use winit::{EventsLoop, WindowBuilder};
@@ -26,9 +26,10 @@ use winit::{EventsLoop, WindowBuilder};
 use arrayvec::ArrayVec;
 
 use hal::*;
+use hal::device::Device;
 use hal::format::{AsFormat, Rgba8Srgb as ColorFormat, Format, ChannelType};
 
-use back::Backend;
+use hal::Instance as InstanceTrait;
 
 #[cfg(feature = "gl")]
 use back::glutin as glutin;
@@ -70,46 +71,42 @@ type Instance = back::Instance;
 #[cfg(feature = "gl")]
 type Instance = ();
 
-#[cfg(not(feature = "gl"))]
-type WindowType = winit::Window;
-
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
 // TODO: Settings for clear colour, buffer sizes, etc
 pub struct RenderingContext {
 	pub events_loop: winit::EventsLoop,
-	surface: <Backend as hal::Backend>::Surface,
+	surface: <back::Backend as hal::Backend>::Surface,
 
-	window: WindowType,
 	pub (crate) instance: ManuallyDrop<Instance>,
-	pub (crate) device: ManuallyDrop<<Backend as hal::Backend>::Device>,
+	pub (crate) device: ManuallyDrop<<back::Backend as hal::Backend>::Device>,
 
-	swapchain: ManuallyDrop<<Backend as hal::Backend>::Swapchain>,
+	swapchain: ManuallyDrop<<back::Backend as hal::Backend>::Swapchain>,
 	
 	viewport: pso::Viewport,
 
-	imageviews: Vec<<Backend as hal::Backend>::ImageView>,
-	framebuffers: Vec<<Backend as hal::Backend>::Framebuffer>,
+	imageviews: Vec<<back::Backend as hal::Backend>::ImageView>,
+	framebuffers: Vec<<back::Backend as hal::Backend>::Framebuffer>,
 
-	renderpass: ManuallyDrop<<Backend as hal::Backend>::RenderPass>,
+	renderpass: ManuallyDrop<<back::Backend as hal::Backend>::RenderPass>,
 
 	current_frame: usize,
 	// TODO: Collect these together
-	get_image: Vec<<Backend as hal::Backend>::Semaphore>,
-	render_complete: Vec<<Backend as hal::Backend>::Semaphore>,
-	present_complete: Vec<<Backend as hal::Backend>::Fence>,
+	get_image: Vec<<back::Backend as hal::Backend>::Semaphore>,
+	render_complete: Vec<<back::Backend as hal::Backend>::Semaphore>,
+	present_complete: Vec<<back::Backend as hal::Backend>::Fence>,
 
 	frames_in_flight: usize,
-	cmd_pools: Vec<ManuallyDrop<CommandPool<Backend, Graphics>>>,
-	cmd_buffers: Vec<command::CommandBuffer<Backend, Graphics, command::MultiShot>>,
-	queue_group: QueueGroup<Backend, Graphics>,
+	cmd_pools: Vec<ManuallyDrop<CommandPool<back::Backend, Graphics>>>,
+	cmd_buffers: Vec<command::CommandBuffer<back::Backend, Graphics, command::MultiShot>>,
+	queue_group: QueueGroup<back::Backend, Graphics>,
 
 	map_verts: VertexLump<Tri2, [f32; 15]>,
 
-	descriptor_set_layouts: <Backend as hal::Backend>::DescriptorSetLayout,
-	pipeline_layout: ManuallyDrop<<Backend as hal::Backend>::PipelineLayout>,
-	pipeline: ManuallyDrop<<Backend as hal::Backend>::GraphicsPipeline>,
-	pub (crate) adapter: adapter::Adapter<Backend>
+	descriptor_set_layouts: <back::Backend as hal::Backend>::DescriptorSetLayout,
+	pipeline_layout: ManuallyDrop<<back::Backend as hal::Backend>::PipelineLayout>,
+	pipeline: ManuallyDrop<<back::Backend as hal::Backend>::GraphicsPipeline>,
+	pub (crate) adapter: adapter::Adapter<back::Backend>
 
 }
 
@@ -133,15 +130,15 @@ impl RenderingContext {
 
 	    #[cfg(feature = "gl")]
 	    let (window, instance, mut surface, mut adapters) = {
-	    	let window = unsafe {
-	    		let builder = back::config_context(glutin::ContextBuilder::new(), ColorFormat::SELF, None);
+	    	use back::glutin::ContextBuilder;
 
-	    		builder.build_windowed(wb, &events_loop)
-	    			.map_err(|_| CreationError::WindowError)?
-	    			.make_current()
-	    	}.map_err(|_| CreationError::WindowError)?;
+			let glutin_window = ContextBuilder::new().with_vsync(true).build_windowed(wb, &events_loop).unwrap();
+			let (glutin_context, glutin_window) = unsafe {
+				glutin_window.make_current().map_err(|_| CreationError::WindowError)?
+					.split()
+			};
 
-	    	let surface = back::Surface::from_window(window);
+			let surface = back::Surface::from_context(glutin_context);
 	    	let adapters = surface.enumerate_adapters();
 
 	    	((), (), surface, adapters)
@@ -167,7 +164,7 @@ impl RenderingContext {
 		    });
 
             let present_mode = {
-                use window::PresentMode::*;
+                use hal::window::PresentMode::*;
                 [Mailbox, Fifo, Relaxed, Immediate]
                     .iter()
                     .cloned()
@@ -182,11 +179,11 @@ impl RenderingContext {
                     .ok_or(CreationError::BadSurface)?
             };
 
-            let extent = caps.extents.end;
+            let extent = caps.extents.end();
             let image_count = if present_mode == PresentMode::Mailbox {
-                (caps.image_count.end - 1).min(caps.image_count.start.max(3))
+                ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(3))
             } else {
-                (caps.image_count.end - 1).min(caps.image_count.start.max(2))
+                ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
             };
 
             let image_layers = 1;
@@ -201,7 +198,7 @@ impl RenderingContext {
                 present_mode,
                 composite_alpha,
                 format,
-                extent,
+                extent: *extent,
                 image_count,
                 image_layers,
                 image_usage,
@@ -225,9 +222,9 @@ impl RenderingContext {
 
 		// Renderpass
 		let renderpass = {
-			use pass::*;
-			use pso::PipelineStage;
-			use image::{Access, Layout};
+			use hal::pass::*;
+			use hal::pso::PipelineStage;
+			use hal::image::{Access, Layout};
 
 			let attachment = Attachment {
 				format: Some(format),
@@ -281,7 +278,7 @@ impl RenderingContext {
 			        device.create_command_pool_typed(&queue_group, pool::CommandPoolCreateFlags::empty())
 			    }.map_err(|_| CreationError::OutOfMemoryError)?));
 
-			    cmd_buffers.push(cmd_pools[i].acquire_command_buffer::<command::MultiShot>());
+			    cmd_buffers.push((*cmd_pools[i]).acquire_command_buffer::<command::MultiShot>());
 			    get_image.push(device.create_semaphore().map_err(|_| CreationError::SyncObjectError)?);
 			    render_complete.push(device.create_semaphore().map_err(|_| CreationError::SyncObjectError)?);
 			    present_complete.push(device.create_fence(true).map_err(|_| CreationError::SyncObjectError)?);
@@ -309,7 +306,6 @@ impl RenderingContext {
 	    let (descriptor_set_layouts, pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass)?;
 
     	Ok(RenderingContext {
-    		window,
     		instance: ManuallyDrop::new(instance),
     		events_loop,
     		surface,
@@ -343,13 +339,13 @@ impl RenderingContext {
 	}
 
 	#[allow(clippy::type_complexity)]
-	pub fn create_pipeline(device: &mut back::Device, extent: image::Extent, subpass: &pass::Subpass<Backend>) -> Result<
+	pub fn create_pipeline(device: &mut <back::Backend as hal::Backend>::Device, extent: image::Extent, subpass: &pass::Subpass<back::Backend>) -> Result<
     (
-      <Backend as hal::Backend>::DescriptorSetLayout,
-      <Backend as hal::Backend>::PipelineLayout,
-      <Backend as hal::Backend>::GraphicsPipeline,
+      <back::Backend as hal::Backend>::DescriptorSetLayout,
+      <back::Backend as hal::Backend>::PipelineLayout,
+      <back::Backend as hal::Backend>::GraphicsPipeline,
     ), error::CreationError> {
-    	use pso::*;
+    	use hal::pso::*;
 
         // Shader modules
         let (vs_module, fs_module) = {
@@ -376,12 +372,12 @@ impl RenderingContext {
 
         // Shader entry points (ShaderStage)
         let (vs_entry, fs_entry) = (
-        	EntryPoint::<Backend> {
+        	EntryPoint::<back::Backend> {
         		entry: ENTRY_NAME,
         		module: &vs_module,
         		specialization: Specialization::default()
         	},
-        	EntryPoint::<Backend> {
+        	EntryPoint::<back::Backend> {
         		entry: ENTRY_NAME,
         		module: &fs_module,
         		specialization: Specialization::default()
@@ -432,9 +428,9 @@ impl RenderingContext {
 
     	// Depth stencil
 		let depth_stencil = DepthStencilDesc {
-			depth: DepthTest::Off,
+			depth: None,
 			depth_bounds: false,
-			stencil: StencilTest::Off,
+			stencil: None,
 		};
 
 		// Descriptor set layout
@@ -452,7 +448,7 @@ impl RenderingContext {
 
     	// Colour blending
 		let blender = {
-			let blend_state = BlendState::On {
+			let blend_state = BlendState {
 				color: BlendOp::Add {
 					src: Factor::One,
 					dst: Factor::Zero,
@@ -465,7 +461,7 @@ impl RenderingContext {
 
 			BlendDesc {
 				logic_op: Some(LogicOp::Copy),
-				targets: vec![ColorBlendDesc(ColorMask::ALL, blend_state)],
+				targets: vec![ColorBlendDesc { mask: ColorMask::ALL, blend: Some(blend_state) }],
 			}
 		};
 
@@ -619,7 +615,7 @@ impl RenderingContext {
 				encoder.bind_graphics_pipeline(&self.pipeline);
 				
 				// Here we must force the Deref impl of ManuallyDrop to play nice.
-				let buffer_ref: &<Backend as hal::Backend>::Buffer = &self.map_verts.buffer;
+				let buffer_ref: &<back::Backend as hal::Backend>::Buffer = &self.map_verts.buffer;
 				let buffers: ArrayVec<[_; 1]> = [(buffer_ref, 0)].into();
 
 				encoder.bind_vertex_buffers(0, buffers);
@@ -663,9 +659,6 @@ impl RenderingContext {
 		}
 	}
 }
-
-#[cfg(feature = "gl")]
-pub struct WindowWrapper<'a> (&'a back::glutin::Window);
 
 impl core::ops::Drop for RenderingContext {
 	fn drop(&mut self) {

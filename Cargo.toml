@@ -4,9 +4,3 @@ members = [
     "stockton-render",
     "examples/render-triangles"
 ]
-
-
-[patch.crates-io]
-gfx-backend-gl = { git = "https://github.com/gfx-rs/gfx" }
-gfx-backend-vulkan = { git = "https://github.com/gfx-rs/gfx" }
-gfx-hal = { git = "https://github.com/gfx-rs/gfx" }

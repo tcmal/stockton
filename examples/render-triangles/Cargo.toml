@@ -2,12 +2,6 @@
 name = "render-triangles"
 version = "0.1.0"
 authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
-edition = "2018"
-
-[features]
-default = []
-gl = ["stockton-render/gl"]
-vulkan = ["stockton-render/vulkan"]
 
 [dependencies]
 stockton-render = { path = "../../stockton-render" }
@@ -17,3 +11,8 @@ winit = "0.19.1"
 log = "0.4.0"
 simple_logger = "1.0"
 rand = "0.7"
+
+[features]
+default = []
+gl = ["stockton-render/gl"]
+vulkan = ["stockton-render/vulkan"]
