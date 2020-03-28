@@ -35,9 +35,9 @@ impl<'a> World<'a> {
 	///
 	/// `mapper` is called for each BSPEntity to map it to a concrete rust type.
 	pub fn new<F>(bsp: Pin<Box<BSPFile<'a>>>, mut mapper: F) -> Option<World<'a>>
-		where F: FnMut(&BSPEntity) -> Option<(Box<Entity>, String)> {
+		where F: FnMut(&BSPEntity) -> Option<(Box<dyn Entity>, String)> {
 
-		let mut entities: Vec<(Box<Entity>, String)> = Vec::with_capacity(bsp.entities.entities.len());
+		let mut entities: Vec<(Box<dyn Entity>, String)> = Vec::with_capacity(bsp.entities.entities.len());
 		for bsp_ent in bsp.entities.entities.iter() {
 			if let Some(result) = mapper(&bsp_ent) {
 				entities.push(result);

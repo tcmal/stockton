@@ -13,33 +13,11 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Renders a world to a window. 
-//!
-//! You'll need to pick a backend using features. You should only pick one.
-//! On Linux & Windows, you should use vulkan.
-//! On Mac, you should use `metal`.
-//! If you're targetting machines without Vulkan, OpenGL or dx11/dx12 is preferred.
-//! `empty` is used for testing
-#![feature(manually_drop_take)]
-
 extern crate core;
-
-#[cfg(feature = "dx11")]
-extern crate gfx_backend_dx11 as back;
-
-#[cfg(feature = "dx12")]
-extern crate gfx_backend_dx12 as back;
-
-#[cfg(feature = "gl")]
-extern crate gfx_backend_gl as back;
-
-#[cfg(feature = "metal")]
-extern crate gfx_backend_metal as back;
 
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 
-#[macro_use]
 extern crate log;
 extern crate gfx_hal as hal;
 extern crate stockton_types;
@@ -48,18 +26,20 @@ extern crate winit;
 
 extern crate arrayvec;
 
-mod error;
 pub mod draw;
-
-use error::{CreationError, FrameError};
-use draw::{RenderingContext, Tri2};
-
-use stockton_types::{World, Vector2};
+mod error;
+mod types;
 
 use std::sync::{Arc, RwLock};
 
+use stockton_types::World;
+
+use error::{CreationError, FrameError};
+use draw::RenderingContext;
+
+/// Renders a world to a window when you tell it to.
 pub struct Renderer<'a> {
-	world: Arc<RwLock<World<'a>>>,
+	_world: Arc<RwLock<World<'a>>>,
 	pub context: RenderingContext<'a>
 }
 
@@ -67,11 +47,11 @@ pub struct Renderer<'a> {
 impl<'a> Renderer<'a> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
-	pub fn new(world: Arc<RwLock<World<'a>>>) -> Result<Self, CreationError> {
-		let context = RenderingContext::new()?;
+	pub fn new(world: Arc<RwLock<World<'a>>>, window: &winit::window::Window) -> Result<Self, CreationError> {
+		let context = RenderingContext::new(window)?;
 
 		Ok(Renderer {
-			world, context
+			_world: world, context
 		})
 	}
 

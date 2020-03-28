@@ -5,7 +5,7 @@ authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
 
 [dependencies]
 stockton-types = { path = "../stockton-types" }
-winit = "0.19.1"
+winit = "^0.21"
 gfx-hal = "^0.5"
 arrayvec = "0.4.10"
 nalgebra-glm = "0.4.0"
@@ -18,4 +18,5 @@ vulkan = ["gfx-backend-vulkan"]
 
 [dependencies.gfx-backend-vulkan]
 version = "^0.5"
+features = ["x11"]
 optional = true

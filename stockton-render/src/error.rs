@@ -21,7 +21,6 @@
 /// 	- Sanity - Things that probably aren't true, likely indicating a deeper issue.
 ///				These aren't guaranteed sanity issues, but they are weird issues.
 /// 	- Runtime - Things caused by runtime conditions, usually resource constraints.
-/// You can use the associated methods to get the group of one, which may be helpful for error reporting, etc.
 #[derive(Debug)]
 pub enum CreationError {
 	WindowError,

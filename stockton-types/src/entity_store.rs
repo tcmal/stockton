@@ -54,7 +54,7 @@ impl EntityStore {
 	/// # Returns
 	/// The name & index of the added entity if successful. 
 	/// If an entity already exists with the given name, NameConflict is returned.
-	pub fn add(&mut self, entity: Box<Entity>, name: String) -> Result<usize, NameConflict> {
+	pub fn add(&mut self, entity: Box<dyn Entity>, name: String) -> Result<usize, NameConflict> {
 		if self.name_to_index.contains_key(&name) {
 			return Err(NameConflict)
 		}
@@ -67,7 +67,7 @@ impl EntityStore {
 	/// Remove the entity with the given index, returning it.
 	///
 	/// Takes O(2n - i) time.
-	pub fn remove_by_index(&mut self, index: usize) -> Option<Box<Entity>> {
+	pub fn remove_by_index(&mut self, index: usize) -> Option<Box<dyn Entity>> {
 		if index >= self.entities.len() {
 			return None;
 		}
@@ -78,7 +78,7 @@ impl EntityStore {
 	/// Removes the entity with the given name, returning it.
 	///
 	/// Takes O(2n - i) time.
-	pub fn remove_by_name(&mut self, name: &str) -> Option<Box<Entity>> {
+	pub fn remove_by_name(&mut self, name: &str) -> Option<Box<dyn Entity>> {
 		let mut index: usize = self.entities.len();
 		
 		self.name_to_index.retain(|k,v| {
@@ -99,7 +99,7 @@ impl EntityStore {
 	/// Make a new EntityStore from a list of entities & names.
 	///
 	/// Returns None in case of name conflicts in list.
-	pub fn from_entities(entities: Vec<(Box<Entity>, String)>) -> Option<EntityStore> {
+	pub fn from_entities(entities: Vec<(Box<dyn Entity>, String)>) -> Option<EntityStore> {
 		let mut store = EntityStore {
 			entities: Vec::with_capacity(entities.len()),
 			name_to_index: HashMap::with_capacity(entities.len())
@@ -118,7 +118,7 @@ impl EntityStore {
 /// Indexes the EntityStore for a specific index.
 /// If you want to target an entity for longer than one tick, store its name, not an index.
 impl Index<usize> for EntityStore {
-	type Output = Entity;
+	type Output = dyn Entity;
 	fn index(&self, index: usize) -> &Self::Output {
 		self.entities[index].as_ref()
 	}
@@ -127,7 +127,7 @@ impl Index<usize> for EntityStore {
 /// Indexes the EntityStore for a specific name.
 /// This is what you should use if you plan to target an entity for more than one tick.
 impl Index<&str> for EntityStore {
-	type Output = Entity;
+	type Output = dyn Entity;
 	fn index(&self, index: &str) -> &Self::Output {
 		self.entities[self.name_to_index[index]].as_ref()
 	}

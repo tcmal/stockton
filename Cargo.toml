@@ -2,5 +2,5 @@
 members = [
     "stockton-types",
     "stockton-render",
-    "examples/render-triangles"
+    "examples/render-quad"
 ]

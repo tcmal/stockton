@@ -13,26 +13,28 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::marker::PhantomData;
-use std::ops::{Index, IndexMut, Range};
+use std::ops::{Index, IndexMut};
 use std::convert::TryInto;
 use core::mem::{ManuallyDrop, size_of};
-use hal::memory::{Properties, Requirements, Segment};
-use hal::buffer::Usage;
-use hal::adapter::{Adapter, MemoryType, PhysicalDevice};
-use hal::device::Device;
-use hal::{MemoryTypeId, VertexCount, InstanceCount};
-use hal::Backend;
+
+use hal::prelude::*;
+use hal::{
+	MemoryTypeId,
+	buffer::Usage,
+	memory::{Properties, Segment},
+	queue::Submission
+};
+
 use crate::error::CreationError;
-use super::RenderingContext;
+use crate::types::*;
 
 // TODO: Proper sizing of buffers
-const BUF_SIZE: u64 = 32;
+const BUF_SIZE: u64 = 4 * 15 * 2;
 
-fn create_buffer(device: &mut <back::Backend as hal::Backend>::Device,
-	adapter: &Adapter<back::Backend>,
+fn create_buffer(device: &mut Device,
+	adapter: &Adapter,
 	usage: Usage,
-	properties: Properties) -> Result<(<back::Backend as hal::Backend>::Buffer, <back::Backend as hal::Backend>::Memory), CreationError> {
+	properties: Properties) -> Result<(Buffer, Memory), CreationError> {
 	let mut buffer = unsafe { device
 	        .create_buffer(BUF_SIZE, usage) }
 	    .map_err(|e| CreationError::BufferError (e))?;
@@ -59,66 +61,131 @@ fn create_buffer(device: &mut <back::Backend as hal::Backend>::Device,
 ))
 }
 
-trait ModifiableBuffer: IndexMut<usize> {
-	fn commit<'a>(&'a self) -> &'a <back::Backend as hal::Backend>::Buffer;
+pub trait ModifiableBuffer: IndexMut<usize> {
+	fn commit<'a>(&'a mut self, device: &Device,
+		command_queue: &mut CommandQueue, 
+		command_pool: &mut CommandPool) -> &'a Buffer;
 }
 
-pub struct StagedBuffer<'a> {
-	stagedBuffer: ManuallyDrop<<back::Backend as hal::Backend>::Buffer>,
-	stagedMemory: ManuallyDrop<<back::Backend as hal::Backend>::Memory>,
-	buffer: ManuallyDrop<<back::Backend as hal::Backend>::Buffer>,
-	memory: ManuallyDrop<<back::Backend as hal::Backend>::Memory>,
-	mappedStaged: &'a mut [f32],
-	stagedIsDirty: bool
+pub struct StagedBuffer<'a, T: Sized> {
+	staged_buffer: ManuallyDrop<Buffer>,
+	staged_memory: ManuallyDrop<Memory>,
+	buffer: ManuallyDrop<Buffer>,
+	memory: ManuallyDrop<Memory>,
+	staged_mapped_memory: &'a mut [T],
+	staged_is_dirty: bool,
 }
 
 
-impl<'a> ModifiableBuffer for StagedBuffer<'a> {
-	fn new(device: &mut <back::Backend as hal::Backend>::Device, adapter: &Adapter<back::Backend>, usage: Usage) -> Result<Self, CreationError> {
+impl<'a, T: Sized> StagedBuffer<'a, T> {
+	pub fn new(device: &mut Device, adapter: &Adapter, usage: Usage) -> Result<Self, CreationError> {
 
-		let (stagedBuffer, stagedMemory) = create_buffer(device, adapter, Usage::TRANSFER_SRC, Properties::CPU_VISIBLE)?;
+		let (staged_buffer, staged_memory) = create_buffer(device, adapter, Usage::TRANSFER_SRC, Properties::CPU_VISIBLE)?;
 		let (buffer, memory) = create_buffer(device, adapter, Usage::TRANSFER_DST | usage, Properties::DEVICE_LOCAL)?;
 
 		// Map it somewhere and get a slice to that memory
-		let rawPtr = unsafe {
-			device.map_memory(&stagedMemory, Segment::ALL).unwrap() // TODO
+		let staged_mapped_memory = unsafe {
+			let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap();
+			
+			let slice_size: usize = (BUF_SIZE / size_of::<T>() as u64).try_into().unwrap(); // size in f32s
+
+			std::slice::from_raw_parts_mut(ptr as *mut T, slice_size)
 		};
-		let sliceSize: usize = (BUF_SIZE / 4).try_into().unwrap(); // size in f32s
-		let mappedStaged: &'a mut [f32] = std::slice::from_raw_parts_mut(rawPtr as *mut f32, sliceSize);
 
 		Ok(StagedBuffer {
-			stagedBuffer: ManuallyDrop::new(stagedBuffer),
-			stagedMemory: ManuallyDrop::new(stagedMemory),
+			staged_buffer: ManuallyDrop::new(staged_buffer),
+			staged_memory: ManuallyDrop::new(staged_memory),
 			buffer: ManuallyDrop::new(buffer),
 			memory: ManuallyDrop::new(memory),
-			mappedStaged: mappedStaged,
-			stagedIsDirty: false
+			staged_mapped_memory,
+			staged_is_dirty: false
 		})
 	}
-}
 
-impl<'a> Index<usize> for StagedBuffer<'a> {
-	type Output = f32;
+	pub(crate) fn deactivate(mut self, device: &mut Device) {
+		unsafe { 
+			device.unmap_memory(&self.staged_memory);
 
-	fn index(&self, index: usize) -> &Self::Output {
-		&self.mappedStaged[index]
+			device.free_memory(ManuallyDrop::take(&mut self.staged_memory));
+			device.destroy_buffer(ManuallyDrop::take(&mut self.staged_buffer));
+
+			device.free_memory(ManuallyDrop::take(&mut self.memory));
+			device.destroy_buffer(ManuallyDrop::take(&mut self.buffer));
+		};
 	}
 }
 
-impl<'a> IndexMut<usize> for StagedBuffer<'a> {
+impl <'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
+	fn commit<'b>(&'b mut self, device: &Device,
+		command_queue: &mut CommandQueue, 
+		command_pool: &mut CommandPool) -> &'b Buffer {
+		if self.staged_is_dirty {
+			// Copy from staged to buffer
+
+			let buf = unsafe {
+				use hal::command::{CommandBufferFlags, BufferCopy};
+				// Get a command buffer
+				let mut buf = command_pool.allocate_one(hal::command::Level::Primary);
+
+				// Put in our copy command
+				buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
+				buf.copy_buffer(&self.staged_buffer, &self.buffer, &[
+					BufferCopy {
+						src: 0,
+						dst: 0,
+						size: BUF_SIZE // TODO
+					}
+				]);
+				buf.finish();
+
+				buf
+			};
+
+			// Submit it and wait for completion
+			// TODO: We could use more semaphores or something?
+			// TODO: Better error handling
+			unsafe {
+				let copy_finished = device.create_fence(false).unwrap();
+				command_queue.submit::<_, _, Semaphore, _, _>(Submission {
+					command_buffers: &[&buf],
+					wait_semaphores: std::iter::empty::<_>(),
+					signal_semaphores: std::iter::empty::<_>()
+				}, Some(&copy_finished));
+
+				device
+			        .wait_for_fence(&copy_finished, core::u64::MAX).unwrap();
+				device.destroy_fence(copy_finished);
+			}
+
+			self.staged_is_dirty = false;
+		}
+
+		&self.buffer
+	}
+}
+
+impl<'a, T: Sized> Index<usize> for StagedBuffer<'a, T> {
+	type Output = T;
+
+	fn index(&self, index: usize) -> &Self::Output {
+		&self.staged_mapped_memory[index]
+	}
+}
+
+impl<'a, T: Sized> IndexMut<usize> for StagedBuffer<'a, T> {
 	fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-		self.stagedIsDirty = true;
-		&mut self.mappedStaged[index]
+		self.staged_is_dirty = true;
+		&mut self.staged_mapped_memory[index]
 	}
 }
 
 // trait VertexLump {
-// 	pub fn new(device: &mut <back::Backend as hal::Backend>::Device, adapter: &Adapter<back::Backend>) -> Result<Self, CreationError> {
+// 	pub fn new(device: &mut Device, adapter: &Adapter<back::Backend>) -> Result<Self, CreationError> {
 // }
 
 // pub(crate) struct VertexLump<T: Into<X>, X: Pod> {
-// 	pub (crate) buffer: ManuallyDrop<<back::Backend as hal::Backend>::Buffer>,
-// 	memory: ManuallyDrop<<back::Backend as hal::Backend>::Memory>,
+// 	pub (crate) buffer: ManuallyDrop<Buffer>,
+// 	memory: ManuallyDrop<Memory>,
 // 	requirements: Requirements,
 
 // 	unit_size_bytes: u64,
@@ -141,7 +208,7 @@ impl<'a> IndexMut<usize> for StagedBuffer<'a> {
 // const BATCH_SIZE: u64 = 3;
 
 // impl<T: Into<X>, X: Pod> VertexLump<T, X> {
-// 	pub fn new(device: &mut <back::Backend as hal::Backend>::Device, adapter: &Adapter<back::Backend>) -> Result<VertexLump<T, X>, CreationError> {
+// 	pub fn new(device: &mut Device, adapter: &Adapter<back::Backend>) -> Result<VertexLump<T, X>, CreationError> {
 // 		let unit_size_bytes = size_of::<X>()  as u64;
 // 		let unit_size_verts = unit_size_bytes / size_of::<f32>() as u64;
 
@@ -286,10 +353,5 @@ impl<'a> IndexMut<usize> for StagedBuffer<'a> {
 // 		})
 // 	}
 
-// 	pub(crate) fn deactivate(&mut self, ctx: &mut RenderingContext) {
-// 		unsafe { ctx.device.free_memory(ManuallyDrop::take(&mut self.memory)) };
-// 		unsafe { ctx.device.destroy_buffer(ManuallyDrop::take(&mut self.buffer)) };
-// 		self.active = false;
-// 	}
 // }
 

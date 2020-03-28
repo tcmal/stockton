@@ -19,4 +19,4 @@ mod context;
 mod buffer;
 
 pub use self::context::RenderingContext;
-pub use self::context::Tri2;
+pub use self::context::UVPoint;
