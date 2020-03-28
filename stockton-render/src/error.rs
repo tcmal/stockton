@@ -27,7 +27,7 @@ pub enum CreationError {
 	WindowError,
 	BadSurface,
 	
-	DeviceError (hal::error::DeviceCreationError),
+	DeviceError (hal::device::CreationError),
 
 	OutOfMemoryError,
 
@@ -42,7 +42,7 @@ pub enum CreationError {
 	BufferNoMemory,
 	
 	SwapchainError (hal::window::CreationError),
-	ImageViewError (hal::image::ViewError)
+	ImageViewError (hal::image::ViewCreationError)
 }
 
 /// An error encountered when rendering.

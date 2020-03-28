@@ -60,7 +60,7 @@ use std::sync::{Arc, RwLock};
 
 pub struct Renderer<'a> {
 	world: Arc<RwLock<World<'a>>>,
-	pub context: RenderingContext
+	pub context: RenderingContext<'a>
 }
 
 

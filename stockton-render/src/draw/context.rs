@@ -16,7 +16,6 @@
 //! Deals with all the Vulkan/HAL details.
 use crate::error as error;
 use crate::error::{CreationError, FrameError};
-use super::VertexLump;
 
 use std::mem::{ManuallyDrop, size_of};
 use std::convert::TryInto;
@@ -28,6 +27,9 @@ use arrayvec::ArrayVec;
 use hal::*;
 use hal::device::Device;
 use hal::format::{AsFormat, Rgba8Srgb as ColorFormat, Format, ChannelType};
+use hal::pool::CommandPool;
+use hal::queue::{QueueGroup, Submission};
+use hal::window::SwapchainConfig;
 
 use hal::Instance as InstanceTrait;
 
@@ -35,6 +37,9 @@ use hal::Instance as InstanceTrait;
 use back::glutin as glutin;
 
 use stockton_types::Vector2;
+use super::buffer::StagedBuffer;
+
+type ModifiableBuffer<'a> = StagedBuffer<'a>;
 
 const ENTRY_NAME: &str = "main";
 const COLOR_RANGE: image::SubresourceRange = image::SubresourceRange {
@@ -74,7 +79,7 @@ type Instance = ();
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
 // TODO: Settings for clear colour, buffer sizes, etc
-pub struct RenderingContext {
+pub struct RenderingContext<'a> {
 	pub events_loop: winit::EventsLoop,
 	surface: <back::Backend as hal::Backend>::Surface,
 
@@ -97,20 +102,20 @@ pub struct RenderingContext {
 	present_complete: Vec<<back::Backend as hal::Backend>::Fence>,
 
 	frames_in_flight: usize,
-	cmd_pools: Vec<ManuallyDrop<CommandPool<back::Backend, Graphics>>>,
-	cmd_buffers: Vec<command::CommandBuffer<back::Backend, Graphics, command::MultiShot>>,
-	queue_group: QueueGroup<back::Backend, Graphics>,
+	cmd_pools: Vec<ManuallyDrop<<back::Backend as hal::Backend>::CommandPool>>,
+	cmd_buffers: Vec<<back::Backend as hal::Backend>::CommandBuffer>,
+	queue_group: QueueGroup<back::Backend>,
 
-	map_verts: VertexLump<Tri2, [f32; 15]>,
+	vert_buffer: ModifiableBuffer<'a>,
+	index_buffer: ModifiableBuffer<'a>,
 
 	descriptor_set_layouts: <back::Backend as hal::Backend>::DescriptorSetLayout,
 	pipeline_layout: ManuallyDrop<<back::Backend as hal::Backend>::PipelineLayout>,
 	pipeline: ManuallyDrop<<back::Backend as hal::Backend>::GraphicsPipeline>,
 	pub (crate) adapter: adapter::Adapter<back::Backend>
-
 }
 
-impl RenderingContext {
+impl<'a> RenderingContext<'a> {
 	/// Create a new RenderingContext for the given window.
 	pub fn new() -> Result<Self, CreationError> {
 	    let events_loop = EventsLoop::new();
@@ -148,12 +153,30 @@ impl RenderingContext {
 	    let mut adapter = adapters.remove(0);
 
 	    // Device & Queue group
-	    let (mut device, queue_group) = adapter
-	    	.open_with::<_, Graphics>(1, |family| surface.supports_queue_family(family))
-	    	.map_err(|e| CreationError::DeviceError (e))?;
+	    let (mut device, queue_group) = {
+	    	// TODO
+	    	let family = adapter
+	            .queue_families
+	            .iter()
+	            .find(|family| {
+	                surface.supports_queue_family(family) && family.queue_type().supports_graphics()
+	            })
+	            .unwrap();
+
+	    	let mut gpu = unsafe {
+	            adapter
+	                .physical_device
+	                .open(&[(family, &[1.0])], hal::Features::empty())
+	                .unwrap()
+	        };
+
+	        (gpu.queue_groups.pop().unwrap(), gpu.device)
+	    };
 
 	    // Swapchain stuff
 	    let (format, viewport, extent, swapchain, backbuffer) = {
+            use hal::window::{PresentMode, CompositeAlphaMode};
+
 		    let (caps, formats, present_modes) = surface.compatibility(&mut adapter.physical_device);
 
 		    let format = formats.map_or(Format::Rgba8Srgb, |formats| {
@@ -164,15 +187,14 @@ impl RenderingContext {
 		    });
 
             let present_mode = {
-                use hal::window::PresentMode::*;
-                [Mailbox, Fifo, Relaxed, Immediate]
+                [PresentMode::Mailbox, PresentMode::Fifo, PresentMode::Relaxed, PresentMode::Immediate]
                     .iter()
                     .cloned()
                     .find(|pm| present_modes.contains(pm))
                     .ok_or(CreationError::BadSurface)?
             };
             let composite_alpha = {
-                [CompositeAlpha::OPAQUE, CompositeAlpha::INHERIT, CompositeAlpha::PREMULTIPLIED, CompositeAlpha::POSTMULTIPLIED]
+                [CompositeAlphaMode::OPAQUE, CompositeAlphaMode::INHERIT, CompositeAlphaMode::PREMULTIPLIED, CompositeAlphaMode::POSTMULTIPLIED]
                     .iter()
                     .cloned()
                     .find(|ca| caps.composite_alpha.contains(*ca))
@@ -243,7 +265,7 @@ impl RenderingContext {
 			};
 
 			let dependency = SubpassDependency {
-				passes: SubpassRef::External..SubpassRef::Pass(0),
+				passes: None..0,
 				stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
 				accesses: Access::empty()
 	                ..(Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)
@@ -259,8 +281,14 @@ impl RenderingContext {
 			main_pass: &renderpass
 		};
 
-	    // Vertex buffer
-	    let map_verts = VertexLump::new(&mut device, &adapter)?;
+	    // Vertex and index buffers
+	    let (vert_buffer, index_buffer) = {
+	    	use hal::buffer::Usage;
+	    	(
+				ModifiableBuffer::new(&mut device, &adapter, Usage::VERTEX | Usage::TRANSFER_DST),
+				ModifiableBuffer::new(&mut device, &adapter, Usage::TRANSFER_SRC)
+	    	)
+	    };
 
 	    // Command Pools, Buffers, imageviews, framebuffers & Sync objects
     	let frames_in_flight = backbuffer.len();
@@ -278,7 +306,7 @@ impl RenderingContext {
 			        device.create_command_pool_typed(&queue_group, pool::CommandPoolCreateFlags::empty())
 			    }.map_err(|_| CreationError::OutOfMemoryError)?));
 
-			    cmd_buffers.push((*cmd_pools[i]).acquire_command_buffer::<command::MultiShot>());
+			    cmd_buffers.push((*cmd_pools[i]).allocate_one(hal::command::Level::Primary));
 			    get_image.push(device.create_semaphore().map_err(|_| CreationError::SyncObjectError)?);
 			    render_complete.push(device.create_semaphore().map_err(|_| CreationError::SyncObjectError)?);
 			    present_complete.push(device.create_fence(true).map_err(|_| CreationError::SyncObjectError)?);
@@ -332,7 +360,8 @@ impl RenderingContext {
     		pipeline_layout: ManuallyDrop::new(pipeline_layout),
     		pipeline: ManuallyDrop::new(pipeline),
 
-    		map_verts,
+    		vert_buffer,
+    		index_buffer,
 
     		adapter
     	})
@@ -660,7 +689,7 @@ impl RenderingContext {
 	}
 }
 
-impl core::ops::Drop for RenderingContext {
+impl<'a> core::ops::Drop for RenderingContext<'a> {
 	fn drop(&mut self) {
 		// TODO: Probably missing some destroy stuff
 		self.device.wait_idle().unwrap();
@@ -687,7 +716,7 @@ impl core::ops::Drop for RenderingContext {
             use core::ptr::read;
             for cmd_pool in self.cmd_pools.drain(..) {
 	            self.device.destroy_command_pool(
-	                ManuallyDrop::into_inner(cmd_pool).into_raw(),
+	                ManuallyDrop::into_inner(cmd_pool),
 	            );
             }
             self.device

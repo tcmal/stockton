@@ -16,8 +16,7 @@
 //! Given 3D points and some camera information, renders to the screen.
 
 mod context;
-mod vertexlump;
+mod buffer;
 
 pub use self::context::RenderingContext;
 pub use self::context::Tri2;
-pub(crate) use self::vertexlump::VertexLump;
