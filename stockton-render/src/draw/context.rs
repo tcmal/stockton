@@ -656,7 +656,6 @@ impl<'a> RenderingContext<'a> {
 					SubpassContents::Inline
 				);
 				buffer.bind_graphics_pipeline(&self.pipeline);
-				buffer.end_render_pass();
 				buffer.bind_vertex_buffers(0, vbufs);
 
 				buffer.bind_index_buffer(IndexBufferView {
@@ -666,6 +665,7 @@ impl<'a> RenderingContext<'a> {
 				});
 
 				buffer.draw_indexed(0..6, 0, 0..1);
+				buffer.end_render_pass();
 			}
 			buffer.finish();
 		};
