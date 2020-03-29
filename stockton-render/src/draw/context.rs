@@ -48,9 +48,9 @@ const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
 /// Source for fragment shader. TODO
 const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
-/// Represents a point of a vertices, including U/V information.
+/// Represents a point of a vertices, including RGB and UV information.
 #[derive(Debug, Clone, Copy)]
-pub struct UVPoint (pub Vector2, pub Vector3);
+pub struct UVPoint (pub Vector2, pub Vector3, pub Vector2);
 
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
@@ -257,8 +257,8 @@ impl<'a> RenderingContext<'a> {
 		let (vert_buffer, index_buffer) = {
 			use hal::buffer::Usage;
 
-			let vert = StagedBuffer::new(&mut device, &adapter, Usage::VERTEX | Usage::TRANSFER_DST)?;
-			let index = StagedBuffer::new(&mut device, &adapter, Usage::TRANSFER_SRC)?;
+			let vert = StagedBuffer::new(&mut device, &adapter, Usage::VERTEX, 4)?;
+			let index = StagedBuffer::new(&mut device, &adapter, Usage::INDEX, 2)?;
 			
 			(vert, index)
 		};
@@ -404,23 +404,30 @@ impl<'a> RenderingContext<'a> {
 		// Vertex buffers
 		let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
 			binding: 0,
-			stride: (size_of::<f32>() * 5) as u32,
+			stride: (size_of::<f32>() * 7) as u32,
 			rate: VertexInputRate::Vertex,
 		}];
 
-		let attributes: Vec<AttributeDesc> = vec![AttributeDesc {
+		let attributes: Vec<AttributeDesc> = vec![AttributeDesc { // XY Attribute
 			location: 0,
 			binding: 0,
 			element: Element {
 				format: Format::Rg32Sfloat,
 				offset: 0,
 			},
-		}, AttributeDesc {
+		}, AttributeDesc { // RGB Attribute
 			location: 1,
 			binding: 0,
 			element: Element {
 				format: Format::Rgb32Sfloat,
 				offset: (size_of::<f32>() * 2) as ElemOffset,
+			}
+		}, AttributeDesc { // UV Attribute
+			location: 2,
+			binding: 0,
+			element: Element {
+				format: Format::Rg32Sfloat,
+				offset: (size_of::<f32>() * 5) as ElemOffset,
 			}
 		}];
 
@@ -663,8 +670,7 @@ impl<'a> RenderingContext<'a> {
 					range: SubRange::WHOLE,
 					index_type: hal::IndexType::U16
 				});
-
-				buffer.draw_indexed(0..6, 0, 0..1);
+				buffer.draw_indexed(0..((self.index_buffer.highest_used as u32 + 1) * 3), 0, 0..1);
 				buffer.end_render_pass();
 			}
 			buffer.finish();

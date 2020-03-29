@@ -28,15 +28,13 @@ use hal::{
 use crate::error::CreationError;
 use crate::types::*;
 
-// TODO: Proper sizing of buffers
-const BUF_SIZE: u64 = 4 * 15 * 2;
-
 fn create_buffer(device: &mut Device,
 	adapter: &Adapter,
 	usage: Usage,
-	properties: Properties) -> Result<(Buffer, Memory), CreationError> {
+	properties: Properties,
+	size: u64) -> Result<(Buffer, Memory), CreationError> {
 	let mut buffer = unsafe { device
-	        .create_buffer(BUF_SIZE, usage) }
+	        .create_buffer(size, usage) }
 	    .map_err(|e| CreationError::BufferError (e))?;
 
 	let requirements = unsafe { device.get_buffer_requirements(&buffer) };
@@ -74,22 +72,23 @@ pub struct StagedBuffer<'a, T: Sized> {
 	memory: ManuallyDrop<Memory>,
 	staged_mapped_memory: &'a mut [T],
 	staged_is_dirty: bool,
+	pub highest_used: usize
 }
 
 
 impl<'a, T: Sized> StagedBuffer<'a, T> {
-	pub fn new(device: &mut Device, adapter: &Adapter, usage: Usage) -> Result<Self, CreationError> {
+	/// size is the size in T
+	pub fn new(device: &mut Device, adapter: &Adapter, usage: Usage, size: u64) -> Result<Self, CreationError> {
 
-		let (staged_buffer, staged_memory) = create_buffer(device, adapter, Usage::TRANSFER_SRC, Properties::CPU_VISIBLE)?;
-		let (buffer, memory) = create_buffer(device, adapter, Usage::TRANSFER_DST | usage, Properties::DEVICE_LOCAL)?;
+		let size_bytes = size * size_of::<T>() as u64;
+		let (staged_buffer, staged_memory) = create_buffer(device, adapter, Usage::TRANSFER_SRC, Properties::CPU_VISIBLE, size_bytes)?;
+		let (buffer, memory) = create_buffer(device, adapter, Usage::TRANSFER_DST | usage, Properties::DEVICE_LOCAL, size_bytes)?;
 
 		// Map it somewhere and get a slice to that memory
 		let staged_mapped_memory = unsafe {
 			let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap();
-			
-			let slice_size: usize = (BUF_SIZE / size_of::<T>() as u64).try_into().unwrap(); // size in f32s
 
-			std::slice::from_raw_parts_mut(ptr as *mut T, slice_size)
+			std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into().unwrap())
 		};
 
 		Ok(StagedBuffer {
@@ -98,7 +97,8 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
 			buffer: ManuallyDrop::new(buffer),
 			memory: ManuallyDrop::new(memory),
 			staged_mapped_memory,
-			staged_is_dirty: false
+			staged_is_dirty: false,
+			highest_used: 0
 		})
 	}
 
@@ -133,7 +133,7 @@ impl <'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
 					BufferCopy {
 						src: 0,
 						dst: 0,
-						size: BUF_SIZE // TODO
+						size: (self.staged_mapped_memory.len() * size_of::<T>()) as u64
 					}
 				]);
 				buf.finish();
@@ -175,6 +175,9 @@ impl<'a, T: Sized> Index<usize> for StagedBuffer<'a, T> {
 impl<'a, T: Sized> IndexMut<usize> for StagedBuffer<'a, T> {
 	fn index_mut(&mut self, index: usize) -> &mut Self::Output {
 		self.staged_is_dirty = true;
+		if index > self.highest_used {
+			self.highest_used = index;
+		}
 		&mut self.staged_mapped_memory[index]
 	}
 }

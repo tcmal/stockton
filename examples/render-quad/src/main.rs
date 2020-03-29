@@ -41,10 +41,10 @@ fn main() {
 	let window = WindowBuilder::new().build(&event_loop).unwrap();
 	let mut ctx = RenderingContext::new(&window).unwrap();
 
-	ctx.vert_buffer[0] = UVPoint(Vector2::new(-0.5, -0.5), Vector3::new(1.0, 0.0, 0.0));
-	ctx.vert_buffer[1] = UVPoint(Vector2::new(0.5, -0.5), Vector3::new(0.0, 1.0, 0.0));
-	ctx.vert_buffer[2] = UVPoint(Vector2::new(0.5, 0.5), Vector3::new(0.0, 0.0, 1.0));
-	ctx.vert_buffer[3] = UVPoint(Vector2::new(-0.5, 0.5), Vector3::new(1.0, 0.0, 1.0));
+	ctx.vert_buffer[0] = UVPoint(Vector2::new(-0.5, -0.5), Vector3::new(1.0, 0.0, 0.0), Vector2::new(0.0, 0.0));
+	ctx.vert_buffer[1] = UVPoint(Vector2::new(0.5, -0.5), Vector3::new(0.0, 1.0, 0.0), Vector2::new(1.0, 0.0));
+	ctx.vert_buffer[2] = UVPoint(Vector2::new(0.5, 0.5), Vector3::new(0.0, 0.0, 1.0), Vector2::new(1.0, 1.0));
+	ctx.vert_buffer[3] = UVPoint(Vector2::new(-0.5, 0.5), Vector3::new(1.0, 0.0, 1.0), Vector2::new(0.0, 1.0));
 
 	ctx.index_buffer[0] = (0, 1, 2);
 	ctx.index_buffer[1] = (0, 2, 3);
@@ -72,7 +72,7 @@ fn main() {
 				let mouse_x: f32 = ((position.x / win_size.width as f64) * 2.0 - 1.0) as f32;
 				let mouse_y: f32 = ((position.y / win_size.height as f64) * 2.0 - 1.0) as f32;
 
-				ctx.vert_buffer[0] = UVPoint(Vector2::new(mouse_x, mouse_y), Vector3::new(1.0, 0.0, 0.0));
+				ctx.vert_buffer[0] = UVPoint(Vector2::new(mouse_x, mouse_y), Vector3::new(1.0, 0.0, 0.0), Vector2::new(0.0, 0.0));
 			}
 
 			Event::MainEventsCleared => {
