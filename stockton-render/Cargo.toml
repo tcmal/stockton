@@ -11,6 +11,7 @@ arrayvec = "0.4.10"
 nalgebra-glm = "0.4.0"
 shaderc = "0.6.1"
 log = "0.4.0"
+image = "0.23.2"
 
 [features]
 default = ["vulkan"]

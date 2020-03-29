@@ -18,6 +18,7 @@ extern crate core;
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 
+extern crate image;
 extern crate log;
 extern crate gfx_hal as hal;
 extern crate stockton_types;

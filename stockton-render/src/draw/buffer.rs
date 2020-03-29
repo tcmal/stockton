@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::iter::once;
 use std::ops::{Index, IndexMut};
 use std::convert::TryInto;
 use core::mem::{ManuallyDrop, size_of};
@@ -28,7 +29,7 @@ use hal::{
 use crate::error::CreationError;
 use crate::types::*;
 
-fn create_buffer(device: &mut Device,
+pub(crate) fn create_buffer(device: &mut Device,
 	adapter: &Adapter,
 	usage: Usage,
 	properties: Properties,
@@ -55,8 +56,7 @@ fn create_buffer(device: &mut Device,
 		.bind_buffer_memory(&memory, 0, &mut buffer) }
 		.map_err(|_| CreationError::BufferNoMemory)?;
 
-	Ok((buffer, memory
-))
+	Ok((buffer, memory))
 }
 
 pub trait ModifiableBuffer: IndexMut<usize> {
@@ -154,7 +154,10 @@ impl <'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
 
 				device
 			        .wait_for_fence(&copy_finished, core::u64::MAX).unwrap();
+
+				// Destroy temporary resources
 				device.destroy_fence(copy_finished);
+				command_pool.free(once(buf));
 			}
 
 			self.staged_is_dirty = false;

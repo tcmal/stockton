@@ -17,9 +17,14 @@
 //! In the end, this takes in vertices and renders them to a window.
 //! You'll need something else to actually generate the vertices though.
 
-use std::mem::{ManuallyDrop, size_of};
+use std::{
+	mem::{ManuallyDrop, size_of},
+	iter::once,
+	ops::Deref
+};
 use winit::window::Window;
 use arrayvec::ArrayVec;
+use image::RgbaImage;
 
 use hal::{
 	prelude::*,
@@ -30,6 +35,7 @@ use stockton_types::{Vector2, Vector3};
 
 use crate::types::*;
 use crate::error;
+use super::texture::TextureStore;
 use super::buffer::{StagedBuffer, ModifiableBuffer};
 
 /// Entry point name for shaders
@@ -42,15 +48,24 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 	layers: 0..1,
 };
 
+/// Size of texturestore. This needs to sync up with the array size in the fragment shader
+const INITIAL_TEX_SIZE: usize = 2;
+
+/// Initial size of vertex buffer. TODO: Way of overriding this
+const INITIAL_VERT_SIZE: u64 = 32;
+
+/// Initial size of index buffer. TODO: Way of overriding this
+const INITIAL_INDEX_SIZE: u64 = 16;
+
 /// Source for vertex shader. TODO
 const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
 
 /// Source for fragment shader. TODO
 const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
-/// Represents a point of a vertices, including RGB and UV information.
+/// Represents a point of a vertices, including RGB, UV and texture information.
 #[derive(Debug, Clone, Copy)]
-pub struct UVPoint (pub Vector2, pub Vector3, pub Vector2);
+pub struct UVPoint (pub Vector2, pub Vector3, pub Vector2, pub i32);
 
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
@@ -59,6 +74,7 @@ pub struct RenderingContext<'a> {
 	// Parents for most of these things
 	instance: ManuallyDrop<back::Instance>,
 	device: ManuallyDrop<Device>,
+	adapter: Adapter,
 
 	// Render destination
 	surface: ManuallyDrop<Surface>,
@@ -78,7 +94,6 @@ pub struct RenderingContext<'a> {
 
 	// Pipeline
 	renderpass: ManuallyDrop<RenderPass>,
-	descriptor_set_layouts: ManuallyDrop<DescriptorSetLayout>,
 	pipeline_layout: ManuallyDrop<PipelineLayout>,
 	pipeline: ManuallyDrop<GraphicsPipeline>,
 
@@ -86,6 +101,9 @@ pub struct RenderingContext<'a> {
 	cmd_pool: ManuallyDrop<CommandPool>,
 	cmd_buffers: Vec<CommandBuffer>,
 	queue_group: QueueGroup,
+
+	// Texture store
+	texture_store: ManuallyDrop<TextureStore>,
 
 	// Vertex and index buffers
 	// These are both staged
@@ -257,8 +275,8 @@ impl<'a> RenderingContext<'a> {
 		let (vert_buffer, index_buffer) = {
 			use hal::buffer::Usage;
 
-			let vert = StagedBuffer::new(&mut device, &adapter, Usage::VERTEX, 4)?;
-			let index = StagedBuffer::new(&mut device, &adapter, Usage::INDEX, 2)?;
+			let vert = StagedBuffer::new(&mut device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)?;
+			let index = StagedBuffer::new(&mut device, &adapter, Usage::INDEX, INITIAL_INDEX_SIZE)?;
 			
 			(vert, index)
 		};
@@ -311,14 +329,18 @@ impl<'a> RenderingContext<'a> {
 			(cmd_pool, cmd_buffers, get_image, render_complete, present_complete, imageviews, framebuffers)
 		};
 
+		// Texture store
+		let texture_store = TextureStore::new(&mut device, INITIAL_TEX_SIZE)?;
+
 		// Graphics pipeline
-		let (descriptor_set_layouts, pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass)?;
+		let (pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass, &texture_store.descriptor_set_layout)?;
 
 		Ok(RenderingContext {
 			instance: ManuallyDrop::new(instance),
 			surface: ManuallyDrop::new(surface),
 
 			device: ManuallyDrop::new(device),
+			adapter,
 			queue_group,
 			swapchain: ManuallyDrop::new(swapchain),
 			viewport,
@@ -336,19 +358,28 @@ impl<'a> RenderingContext<'a> {
 			cmd_pool,
 			cmd_buffers,
 
-			descriptor_set_layouts: ManuallyDrop::new(descriptor_set_layouts),
 			pipeline_layout: ManuallyDrop::new(pipeline_layout),
 			pipeline: ManuallyDrop::new(pipeline),
+
+			texture_store: ManuallyDrop::new(texture_store),
 
 			vert_buffer: ManuallyDrop::new(vert_buffer),
 			index_buffer: ManuallyDrop::new(index_buffer),
 		})
 	}
 
+	/// Load the given image into the texturestore, returning the index or an error.
+	pub fn add_texture(&mut self, image: RgbaImage) -> Result<usize, &'static str> {
+		self.texture_store.add_texture(image,
+			&mut self.device,
+			&mut self.adapter,
+			&mut self.queue_group.queues[0],
+			&mut self.cmd_pool)
+	}
+
 	#[allow(clippy::type_complexity)]
-	pub fn create_pipeline(device: &mut Device, extent: hal::image::Extent, subpass: &hal::pass::Subpass<back::Backend>) -> Result<
+	pub fn create_pipeline(device: &mut Device, extent: hal::image::Extent, subpass: &hal::pass::Subpass<back::Backend>, set_layout: &DescriptorSetLayout) -> Result<
 	(
-	  DescriptorSetLayout,
 	  PipelineLayout,
 	  GraphicsPipeline,
 	), error::CreationError> {
@@ -404,7 +435,7 @@ impl<'a> RenderingContext<'a> {
 		// Vertex buffers
 		let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
 			binding: 0,
-			stride: (size_of::<f32>() * 7) as u32,
+			stride: (size_of::<f32>() * 8) as u32,
 			rate: VertexInputRate::Vertex,
 		}];
 
@@ -429,6 +460,13 @@ impl<'a> RenderingContext<'a> {
 				format: Format::Rg32Sfloat,
 				offset: (size_of::<f32>() * 5) as ElemOffset,
 			}
+		}, AttributeDesc { // Tex Attribute
+			location: 3,
+			binding: 0,
+			element: Element {
+				format: Format::R32Sint,
+				offset: (size_of::<f32>() * 7) as ElemOffset
+			}
 		}];
 
 		// Rasterizer
@@ -449,17 +487,9 @@ impl<'a> RenderingContext<'a> {
 			stencil: None,
 		};
 
-		// Descriptor set layout
-		let set_layout = unsafe {
-			device.create_descriptor_set_layout(
-				&[],
-				&[],
-			)
-		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
-
 		// Pipeline layout
 		let layout = unsafe {
-			device.create_pipeline_layout(std::iter::once(&set_layout), &[])
+			device.create_pipeline_layout(once(set_layout), &[])
 		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
 
 		// Colour blending
@@ -517,7 +547,7 @@ impl<'a> RenderingContext<'a> {
 			device.create_graphics_pipeline(&pipeline_desc, None)
 		}.map_err(|e| error::CreationError::PipelineError (e))?;
 
-		Ok((set_layout, layout, pipeline))
+		Ok((layout, pipeline))
 	}
 
 	/// Draw a frame that's just cleared to the color specified.
@@ -663,8 +693,15 @@ impl<'a> RenderingContext<'a> {
 					SubpassContents::Inline
 				);
 				buffer.bind_graphics_pipeline(&self.pipeline);
-				buffer.bind_vertex_buffers(0, vbufs);
 
+				buffer.bind_graphics_descriptor_sets(
+					&self.pipeline_layout,
+					0,
+					once(self.texture_store.descriptor_set.deref()),
+					&[]
+				);
+
+				buffer.bind_vertex_buffers(0, vbufs);
 				buffer.bind_index_buffer(IndexBufferView {
 					buffer: ibuf,
 					range: SubRange::WHOLE,
@@ -727,6 +764,7 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 			use core::ptr::read;
 			ManuallyDrop::into_inner(read(&self.vert_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.index_buffer)).deactivate(&mut self.device);
+			ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
 
 			self.device.destroy_command_pool(
 				ManuallyDrop::into_inner(read(&self.cmd_pool)),
@@ -737,9 +775,6 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 			self.device
 				.destroy_swapchain(ManuallyDrop::into_inner(read(&self.swapchain)));
 			
-			self.device
-				.destroy_descriptor_set_layout(ManuallyDrop::into_inner(read(&self.descriptor_set_layouts)));
-
 			self.device
 				.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
 
