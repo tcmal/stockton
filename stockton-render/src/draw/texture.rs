@@ -49,7 +49,7 @@ const PIXEL_SIZE: usize = size_of::<image::Rgba<u8>>();
 /// Note that it's possible not all descriptors are actually initialised images
 pub struct TextureStore {
 	descriptor_pool: ManuallyDrop<DescriptorPool>,
-	pub descriptor_set: ManuallyDrop<DescriptorSet>,
+	pub descriptor_set: DescriptorSet,
 	pub descriptor_set_layout: ManuallyDrop<DescriptorSetLayout>,
 	loaded_images: Vec<LoadedImage>,
 	next_index: usize,
@@ -117,7 +117,7 @@ impl TextureStore {
 
 		Ok(TextureStore {
 			descriptor_pool: ManuallyDrop::new(descriptor_pool),
-			descriptor_set: ManuallyDrop::new(descriptor_set),
+			descriptor_set: descriptor_set,
 			loaded_images: Vec::with_capacity(size),
 			descriptor_set_layout: ManuallyDrop::new(descriptor_set_layout),
 			next_index: 0,
@@ -172,7 +172,7 @@ impl TextureStore {
 
 			device.write_descriptor_sets(vec![
 				DescriptorSetWrite {
-					set: self.descriptor_set.deref(),
+					set: &self.descriptor_set,
 					binding: 0,
 					array_offset: idx,
 					descriptors: Some(Descriptor::Image(
@@ -181,7 +181,7 @@ impl TextureStore {
 					)),
 				},
 				DescriptorSetWrite {
-					set: self.descriptor_set.deref(),
+					set: &self.descriptor_set,
 					binding: 1,
 					array_offset: idx,
 					descriptors: Some(Descriptor::Sampler(texture.sampler.deref())),
@@ -204,9 +204,11 @@ impl TextureStore {
 		unsafe {
 			use core::ptr::read;
 
-			self.loaded_images.drain(..).map(|img| img.deactivate(device)).collect();
+			for img in self.loaded_images.drain(..) {
+				img.deactivate(device)
+			}
 
-			self.descriptor_pool.free_sets(once(ManuallyDrop::into_inner(read(&self.descriptor_set))));
+			self.descriptor_pool.reset();
 			device.destroy_descriptor_pool(ManuallyDrop::into_inner(read(&self.descriptor_pool)));
 			device
 				.destroy_descriptor_set_layout(ManuallyDrop::into_inner(read(&self.descriptor_set_layout)));
@@ -251,7 +253,7 @@ impl LoadedImage {
 
 				copy_nonoverlapping(row.as_ptr(), mapped_memory.offset(dest_base), row.len());
 			}
-
+			device.flush_mapped_memory_ranges(once((&staging_memory, Segment::ALL))).map_err(|_| "Couldn't write buffer memory")?;
 			device.unmap_memory(&staging_memory);
 		}
 

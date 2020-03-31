@@ -774,6 +774,8 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 				.destroy_render_pass(ManuallyDrop::into_inner(read(&self.renderpass)));
 			self.device
 				.destroy_swapchain(ManuallyDrop::into_inner(read(&self.swapchain)));
+
+			self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
 			
 			self.device
 				.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
