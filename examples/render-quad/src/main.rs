@@ -34,6 +34,46 @@ use winit::{
 };
 
 fn main() {
+	let cube_points: [UVPoint; 24] = [
+	  // Face 1 (front)
+	  UVPoint(Vector3::new(0.0, 0.0, 0.0), Vector2::new(0.0, 1.0), 0), /* bottom left */
+	  UVPoint(Vector3::new(0.0, 1.0, 0.0), Vector2::new(0.0, 0.0), 0), /* top left */
+	  UVPoint(Vector3::new(1.0, 0.0, 0.0), Vector2::new(1.0, 1.0), 0), /* bottom right */
+	  UVPoint(Vector3::new(1.0, 1.0, 0.0), Vector2::new(1.0, 0.0), 0), /* top right */
+	  // Face 2 (top)
+	  UVPoint(Vector3::new(0.0, 1.0, 0.0), Vector2::new(0.0, 1.0), 0), /* bottom left */
+	  UVPoint(Vector3::new(0.0, 1.0, 1.0), Vector2::new(0.0, 0.0), 0), /* top left */
+	  UVPoint(Vector3::new(1.0, 1.0, 0.0), Vector2::new(1.0, 1.0), 0), /* bottom right */
+	  UVPoint(Vector3::new(1.0, 1.0, 1.0), Vector2::new(1.0, 0.0), 0), /* top right */
+	  // Face 3 (back)
+	  UVPoint(Vector3::new(0.0, 0.0, 1.0), Vector2::new(0.0, 1.0), 1), /* bottom left */
+	  UVPoint(Vector3::new(0.0, 1.0, 1.0), Vector2::new(0.0, 0.0), 1), /* top left */
+	  UVPoint(Vector3::new(1.0, 0.0, 1.0), Vector2::new(1.0, 1.0), 1), /* bottom right */
+	  UVPoint(Vector3::new(1.0, 1.0, 1.0), Vector2::new(1.0, 0.0), 1), /* top right */
+	  // Face 4 (bottom)
+	  UVPoint(Vector3::new(0.0, 0.0, 0.0), Vector2::new(0.0, 1.0), 1), /* bottom left */
+	  UVPoint(Vector3::new(0.0, 0.0, 1.0), Vector2::new(0.0, 0.0), 1), /* top left */
+	  UVPoint(Vector3::new(1.0, 0.0, 0.0), Vector2::new(1.0, 1.0), 1), /* bottom right */
+	  UVPoint(Vector3::new(1.0, 0.0, 1.0), Vector2::new(1.0, 0.0), 1), /* top right */
+	  // Face 5 (left)
+	  UVPoint(Vector3::new(0.0, 0.0, 1.0), Vector2::new(0.0, 1.0), 1), /* bottom left */
+	  UVPoint(Vector3::new(0.0, 1.0, 1.0), Vector2::new(0.0, 0.0), 1), /* top left */
+	  UVPoint(Vector3::new(0.0, 0.0, 0.0), Vector2::new(1.0, 1.0), 1), /* bottom right */
+	  UVPoint(Vector3::new(0.0, 1.0, 0.0), Vector2::new(1.0, 0.0), 1), /* top right */
+	  // Face 6 (right)
+	  UVPoint(Vector3::new(1.0, 0.0, 0.0), Vector2::new(0.0, 1.0), 0), /* bottom left */
+	  UVPoint(Vector3::new(1.0, 1.0, 0.0), Vector2::new(0.0, 0.0), 0), /* top left */
+	  UVPoint(Vector3::new(1.0, 0.0, 1.0), Vector2::new(1.0, 1.0), 0), /* bottom right */
+	  UVPoint(Vector3::new(1.0, 1.0, 1.0), Vector2::new(1.0, 0.0), 0), /* top right */
+	];
+	let cube_indices: [(u16, u16, u16); 12] = [
+		(0,  1,  2),  (2,  1,  3), // front
+		(4,  5,  6),  (7,  6,  5), // top
+		(10,  9,  8),  (9, 10, 11), // back
+		(12, 14, 13), (15, 13, 14), // bottom
+		(16, 17, 18), (19, 18, 17), // left
+		(20, 21, 22), (23, 22, 21), // right
+	];
 
 	simple_logger::init().unwrap();
 
@@ -55,22 +95,13 @@ fn main() {
 	.unwrap();
 
 	// First quad with test1
-	ctx.vert_buffer[0] = UVPoint(Vector2::new(-1.0, -1.0), Vector3::new(1.0, 0.0, 0.0), Vector2::new(0.0, 0.0), 0);
-	ctx.vert_buffer[1] = UVPoint(Vector2::new(0.0, -1.0), Vector3::new(0.0, 1.0, 0.0), Vector2::new(1.0, 0.0), 0);
-	ctx.vert_buffer[2] = UVPoint(Vector2::new(0.0, 0.0), Vector3::new(0.0, 0.0, 1.0), Vector2::new(1.0, 1.0), 0);
-	ctx.vert_buffer[3] = UVPoint(Vector2::new(-1.0, 0.0), Vector3::new(1.0, 0.0, 1.0), Vector2::new(0.0, 1.0), 0);
+	for (index, point) in cube_points.iter().enumerate() {
+		ctx.vert_buffer[index] = *point;
+	}
 
-	ctx.index_buffer[0] = (0, 1, 2);
-	ctx.index_buffer[1] = (0, 2, 3);
-
-	// Second quad with test2
-	ctx.vert_buffer[4] = UVPoint(Vector2::new(0.0, -1.0), Vector3::new(1.0, 0.0, 0.0), Vector2::new(0.0, 0.0), 1);
-	ctx.vert_buffer[5] = UVPoint(Vector2::new(1.0, -1.0), Vector3::new(0.0, 1.0, 0.0), Vector2::new(1.0, 0.0), 1);
-	ctx.vert_buffer[6] = UVPoint(Vector2::new(1.0, 0.0), Vector3::new(0.0, 0.0, 1.0), Vector2::new(1.0, 1.0), 1);
-	ctx.vert_buffer[7] = UVPoint(Vector2::new(0.0, 0.0), Vector3::new(1.0, 0.0, 1.0), Vector2::new(0.0, 1.0), 1);
-
-	ctx.index_buffer[2] = (4, 5, 6);
-	ctx.index_buffer[3] = (4, 7, 6);
+	for (index, value) in cube_indices.iter().enumerate() {
+		ctx.index_buffer[index] = *value;
+	}
 
 	event_loop.run(move |event, _, flow| {
 		*flow = ControlFlow::Poll;
@@ -83,22 +114,6 @@ fn main() {
 			} => {
 				*flow = ControlFlow::Exit
 			},
-
-			Event::WindowEvent {
-				event: WindowEvent::CursorMoved {
-					position,
-					..
-				},
-				..
-			} => {
-				let win_size = window.inner_size();
-				let mouse_x: f32 = ((position.x / win_size.width as f64) * 2.0 - 1.0) as f32;
-				let mouse_y: f32 = ((position.y / win_size.height as f64) * 2.0 - 1.0) as f32;
-
-				// Move a vertex from each quad
-				ctx.vert_buffer[2] = UVPoint(Vector2::new(mouse_x, mouse_y), Vector3::new(1.0, 0.0, 0.0), Vector2::new(1.0, 1.0), 0);
-				ctx.vert_buffer[7] = UVPoint(Vector2::new(mouse_x, mouse_y), Vector3::new(1.0, 0.0, 0.0), Vector2::new(0.0, 1.0), 1);
-			}
 
 			Event::MainEventsCleared => {
 				window.request_redraw()

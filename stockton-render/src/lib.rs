@@ -24,6 +24,7 @@ extern crate gfx_hal as hal;
 extern crate stockton_types;
 extern crate shaderc;
 extern crate winit;
+extern crate nalgebra_glm as na;
 
 extern crate arrayvec;
 

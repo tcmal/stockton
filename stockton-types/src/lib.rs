@@ -37,3 +37,6 @@ pub type Vector2i = na::IVec2;
 
 /// Alias for convenience
 pub type Vector3i = na::IVec3;
+
+/// Alias for convenience
+pub type Matrix4 = na::Mat4x4;

@@ -19,8 +19,8 @@
 
 use std::{
 	mem::{ManuallyDrop, size_of},
-	iter::once,
-	ops::Deref
+	ops::Deref,
+	borrow::Borrow
 };
 use winit::window::Window;
 use arrayvec::ArrayVec;
@@ -35,6 +35,7 @@ use stockton_types::{Vector2, Vector3};
 
 use crate::types::*;
 use crate::error;
+use super::camera::Camera;
 use super::texture::TextureStore;
 use super::buffer::{StagedBuffer, ModifiableBuffer};
 
@@ -63,9 +64,9 @@ const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
 /// Source for fragment shader. TODO
 const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
-/// Represents a point of a vertices, including RGB, UV and texture information.
+/// Represents a point of a triangle, including UV and texture information.
 #[derive(Debug, Clone, Copy)]
-pub struct UVPoint (pub Vector2, pub Vector3, pub Vector2, pub i32);
+pub struct UVPoint (pub Vector3, pub Vector2, pub i32);
 
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
@@ -109,6 +110,8 @@ pub struct RenderingContext<'a> {
 	// These are both staged
 	pub vert_buffer: ManuallyDrop<StagedBuffer<'a, UVPoint>>,
 	pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
+
+	camera: ManuallyDrop<Camera<'a>>
 }
 
 impl<'a> RenderingContext<'a> {
@@ -129,7 +132,7 @@ impl<'a> RenderingContext<'a> {
 		let adapter = adapters.remove(0);
 
 		// Device & Queue group
-		let (mut device, queue_group) = {
+		let (mut device, mut queue_group) = {
 			let family = adapter
 				.queue_families
 				.iter()
@@ -283,12 +286,12 @@ impl<'a> RenderingContext<'a> {
 
 		// Command Pool, Buffers, imageviews, framebuffers & Sync objects
 		let frames_in_flight = backbuffer.len();
-		let (cmd_pool, cmd_buffers, get_image, render_complete, present_complete, imageviews, framebuffers) = {
+		let (mut cmd_pool, cmd_buffers, get_image, render_complete, present_complete, imageviews, framebuffers) = {
 			use hal::pool::CommandPoolCreateFlags;
 			use hal::command::Level;
 
 			let mut cmd_pool = ManuallyDrop::new(unsafe {
-				device.create_command_pool(queue_group.family, CommandPoolCreateFlags::empty())
+				device.create_command_pool(queue_group.family, CommandPoolCreateFlags::RESET_INDIVIDUAL)
 			}.map_err(|_| error::CreationError::OutOfMemoryError)?);
 
 			let mut cmd_buffers = Vec::with_capacity(frames_in_flight);
@@ -332,8 +335,17 @@ impl<'a> RenderingContext<'a> {
 		// Texture store
 		let texture_store = TextureStore::new(&mut device, INITIAL_TEX_SIZE)?;
 
+		// Camera
+		// TODO: Settings
+		let ratio = extent.width as f32 / extent.height as f32;
+		let camera = Camera::defaults(ratio, &mut device, &adapter, &mut queue_group.queues[0], &mut cmd_pool)?;
+
+		let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
+		descriptor_set_layouts.push(camera.descriptor_set_layout.deref());
+		descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
+
 		// Graphics pipeline
-		let (pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass, &texture_store.descriptor_set_layout)?;
+		let (pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass, descriptor_set_layouts)?;
 
 		Ok(RenderingContext {
 			instance: ManuallyDrop::new(instance),
@@ -365,6 +377,8 @@ impl<'a> RenderingContext<'a> {
 
 			vert_buffer: ManuallyDrop::new(vert_buffer),
 			index_buffer: ManuallyDrop::new(index_buffer),
+
+			camera: ManuallyDrop::new(camera)
 		})
 	}
 
@@ -378,11 +392,11 @@ impl<'a> RenderingContext<'a> {
 	}
 
 	#[allow(clippy::type_complexity)]
-	pub fn create_pipeline(device: &mut Device, extent: hal::image::Extent, subpass: &hal::pass::Subpass<back::Backend>, set_layout: &DescriptorSetLayout) -> Result<
+	pub fn create_pipeline<T>(device: &mut Device, extent: hal::image::Extent, subpass: &hal::pass::Subpass<back::Backend>, set_layouts: T) -> Result<
 	(
 	  PipelineLayout,
 	  GraphicsPipeline,
-	), error::CreationError> {
+	), error::CreationError> where T: IntoIterator, T::Item: Borrow<DescriptorSetLayout> {
 		use hal::pso::*;
 		use hal::format::Format;
 
@@ -435,44 +449,37 @@ impl<'a> RenderingContext<'a> {
 		// Vertex buffers
 		let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
 			binding: 0,
-			stride: (size_of::<f32>() * 8) as u32,
+			stride: (size_of::<f32>() * 6) as u32,
 			rate: VertexInputRate::Vertex,
 		}];
 
-		let attributes: Vec<AttributeDesc> = vec![AttributeDesc { // XY Attribute
+		let attributes: Vec<AttributeDesc> = vec![AttributeDesc { // XYZ Attribute
 			location: 0,
 			binding: 0,
 			element: Element {
-				format: Format::Rg32Sfloat,
+				format: Format::Rgb32Sfloat,
 				offset: 0,
 			},
-		}, AttributeDesc { // RGB Attribute
+		}, AttributeDesc { // UV Attribute
 			location: 1,
 			binding: 0,
 			element: Element {
-				format: Format::Rgb32Sfloat,
-				offset: (size_of::<f32>() * 2) as ElemOffset,
+				format: Format::Rg32Sfloat,
+				offset: (size_of::<f32>() * 3) as ElemOffset,
 			}
-		}, AttributeDesc { // UV Attribute
+		}, AttributeDesc { // Tex Attribute
 			location: 2,
 			binding: 0,
 			element: Element {
-				format: Format::Rg32Sfloat,
-				offset: (size_of::<f32>() * 5) as ElemOffset,
-			}
-		}, AttributeDesc { // Tex Attribute
-			location: 3,
-			binding: 0,
-			element: Element {
 				format: Format::R32Sint,
-				offset: (size_of::<f32>() * 7) as ElemOffset
+				offset: (size_of::<f32>() * 5) as ElemOffset
 			}
 		}];
 
 		// Rasterizer
 		let rasterizer = Rasterizer {
 			polygon_mode: PolygonMode::Fill,
-			cull_face: Face::NONE,
+			cull_face: Face::BACK,
 			front_face: FrontFace::Clockwise,
 			depth_clamping: false,
 			depth_bias: None,
@@ -489,7 +496,7 @@ impl<'a> RenderingContext<'a> {
 
 		// Pipeline layout
 		let layout = unsafe {
-			device.create_pipeline_layout(once(set_layout), &[])
+			device.create_pipeline_layout(set_layouts, &[])
 		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
 
 		// Colour blending
@@ -694,10 +701,16 @@ impl<'a> RenderingContext<'a> {
 				);
 				buffer.bind_graphics_pipeline(&self.pipeline);
 
+				let mut descriptor_sets: ArrayVec<[_; 2]> = ArrayVec::new();
+				descriptor_sets.push(self.camera.commit(&self.device,
+					&mut self.queue_group.queues[0],
+					&mut self.cmd_pool));
+				descriptor_sets.push(&self.texture_store.descriptor_set);
+
 				buffer.bind_graphics_descriptor_sets(
 					&self.pipeline_layout,
 					0,
-					once(self.texture_store.descriptor_set.deref()),
+					descriptor_sets,
 					&[]
 				);
 
@@ -765,6 +778,7 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 			ManuallyDrop::into_inner(read(&self.vert_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.index_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
+			ManuallyDrop::into_inner(read(&self.camera)).deactivate(&mut self.device);
 
 			self.device.destroy_command_pool(
 				ManuallyDrop::into_inner(read(&self.cmd_pool)),

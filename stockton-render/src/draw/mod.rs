@@ -18,6 +18,7 @@
 mod context;
 mod buffer;
 mod texture;
+mod camera;
 
 pub use self::context::RenderingContext;
 pub use self::context::UVPoint;

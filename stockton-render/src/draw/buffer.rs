@@ -86,7 +86,7 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
 
 		// Map it somewhere and get a slice to that memory
 		let staged_mapped_memory = unsafe {
-			let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap();
+			let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap(); // TODO
 
 			std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into().unwrap())
 		};

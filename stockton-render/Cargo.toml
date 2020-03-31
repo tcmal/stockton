@@ -8,7 +8,7 @@ stockton-types = { path = "../stockton-types" }
 winit = "^0.21"
 gfx-hal = "^0.5"
 arrayvec = "0.4.10"
-nalgebra-glm = "0.4.0"
+nalgebra-glm = "^0.6"
 shaderc = "0.6.1"
 log = "0.4.0"
 image = "0.23.2"
