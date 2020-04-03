@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) 2019 Oscar Shrimpton
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -13,22 +13,14 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! The thing you play on and all the associated state.
+//! Walks a compiled BSP tree and renders it
 
-use std::pin::Pin;
-
+use crate::draw::RenderingContext;
 use stockton_bsp::BSPFile;
+use std::pin::Pin;
+use std::boxed::Box;
 
-/// A loaded world.
-pub struct World<'a> {
-	pub map: Pin<Box<BSPFile<'a>>>
-}
+fn walk_tree<'a>(ctx: &RenderingContext<'a>, file: &Pin<Box<BSPFile>>) -> (){
+	// TODO
 
-impl<'a> World<'a> {
-	/// Create a new world from a BSPFile.
-	pub fn new(bsp: Pin<Box<BSPFile<'a>>>) -> Option<World<'a>> {
-		Some(World {
-			map: bsp
-		})
-	}
 }

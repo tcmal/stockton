@@ -17,20 +17,23 @@ extern crate core;
 
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
-
-extern crate image;
-extern crate log;
 extern crate gfx_hal as hal;
-extern crate stockton_types;
 extern crate shaderc;
 extern crate winit;
+
 extern crate nalgebra_glm as na;
+extern crate image;
+extern crate log;
+
+extern crate stockton_types;
+extern crate stockton_bsp;
 
 extern crate arrayvec;
 
 pub mod draw;
 mod error;
 mod types;
+mod walk_bsp;
 
 use std::sync::{Arc, RwLock};
 
@@ -41,7 +44,7 @@ use draw::RenderingContext;
 
 /// Renders a world to a window when you tell it to.
 pub struct Renderer<'a> {
-	_world: Arc<RwLock<World<'a>>>,
+	world: Arc<RwLock<World<'a>>>,
 	pub context: RenderingContext<'a>
 }
 
@@ -49,11 +52,12 @@ pub struct Renderer<'a> {
 impl<'a> Renderer<'a> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
-	pub fn new(world: Arc<RwLock<World<'a>>>, window: &winit::window::Window) -> Result<Self, CreationError> {
+	pub fn new(world: World<'a>, window: &winit::window::Window) -> Result<Self, CreationError> {
+		let world = Arc::new(RwLock::new(world));
 		let context = RenderingContext::new(window)?;
 
 		Ok(Renderer {
-			_world: world, context
+			world: world, context
 		})
 	}
 

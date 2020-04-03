@@ -1,5 +1,5 @@
 [package]
-name = "render-quad"
+name = "render-bsp"
 version = "0.1.0"
 authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
 
