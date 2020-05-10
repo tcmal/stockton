@@ -35,7 +35,7 @@ use stockton_types::{Vector2, Vector3};
 
 use crate::types::*;
 use crate::error;
-use super::camera::Camera;
+use super::camera::WorkingCamera;
 use super::texture::TextureStore;
 use super::buffer::{StagedBuffer, ModifiableBuffer};
 
@@ -111,7 +111,7 @@ pub struct RenderingContext<'a> {
 	pub vert_buffer: ManuallyDrop<StagedBuffer<'a, UVPoint>>,
 	pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
 
-	camera: ManuallyDrop<Camera<'a>>
+	camera: ManuallyDrop<WorkingCamera<'a>>
 }
 
 impl<'a> RenderingContext<'a> {
@@ -152,84 +152,7 @@ impl<'a> RenderingContext<'a> {
 		};
 
 		// Swapchain
-		let (format, viewport, extent, swapchain, backbuffer) = {
-			use hal::{
-				window::{PresentMode, CompositeAlphaMode},
-				format::{Format, ChannelType},
-				image::Usage,
-				pso::Viewport
-			};
-
-			// Figure out what the surface supports
-			let caps = surface.capabilities(&adapter.physical_device);
-			let formats = surface.supported_formats(&adapter.physical_device);
-
-			// Find which settings we'll actually use based on preset preferences
-			let format = formats.map_or(Format::Rgba8Srgb, |formats| {
-				formats.iter()
-					.find(|format| format.base_format().1 == ChannelType::Srgb)
-					.map(|format| *format)
-					.unwrap_or(formats[0])
-			});
-
-			let present_mode = {
-				[PresentMode::MAILBOX, PresentMode::FIFO, PresentMode::RELAXED, PresentMode::IMMEDIATE]
-					.iter()
-					.cloned()
-					.find(|pm| caps.present_modes.contains(*pm))
-					.ok_or(error::CreationError::BadSurface)?
-			};
-			let composite_alpha = {
-				[CompositeAlphaMode::OPAQUE, CompositeAlphaMode::INHERIT, CompositeAlphaMode::PREMULTIPLIED, CompositeAlphaMode::POSTMULTIPLIED]
-					.iter()
-					.cloned()
-					.find(|ca| caps.composite_alpha_modes.contains(*ca))
-					.ok_or(error::CreationError::BadSurface)?
-			};
-
-			// Figure out properties for our swapchain
-			let extent = caps.extents.end(); // Size
-
-			// Number of frames to pre-render
-			let image_count = if present_mode == PresentMode::MAILBOX {
-				((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(3))
-			} else {
-				((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
-			};
-
-			let image_layers = 1; // Don't support 3D
-			let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
-				Usage::COLOR_ATTACHMENT
-			} else {
-				Err(error::CreationError::BadSurface)?
-			};
-
-			// Swap config
-			let swap_config = SwapchainConfig {
-				present_mode,
-				composite_alpha_mode: composite_alpha,
-				format,
-				extent: *extent,
-				image_count,
-				image_layers,
-				image_usage,
-			};
-
-			// Viewport
-			let extent = extent.to_extent();
-			let viewport = Viewport {
-				rect: extent.rect(),
-				depth: 0.0..1.0
-			};
-			
-			// Swapchain
-			let (swapchain, backbuffer) = unsafe {
-				device.create_swapchain(&mut surface, swap_config, None)
-					.map_err(|e| error::CreationError::SwapchainError (e))?
-			};
-
-			(format, viewport, extent, swapchain, backbuffer)
-		};
+		let (format, viewport, extent, swapchain, backbuffer) = RenderingContext::create_swapchain(&mut surface, &mut device, &adapter, None)?;
 
 		// Renderpass
 		let renderpass = {
@@ -338,7 +261,7 @@ impl<'a> RenderingContext<'a> {
 		// Camera
 		// TODO: Settings
 		let ratio = extent.width as f32 / extent.height as f32;
-		let camera = Camera::defaults(ratio, &mut device, &adapter, &mut queue_group.queues[0], &mut cmd_pool)?;
+		let camera = WorkingCamera::defaults(ratio, &mut device, &adapter, &mut queue_group.queues[0], &mut cmd_pool)?;
 
 		let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
 		descriptor_set_layouts.push(camera.descriptor_set_layout.deref());
@@ -382,6 +305,168 @@ impl<'a> RenderingContext<'a> {
 		})
 	}
 
+	/// If this function fails the whole context is probably dead
+	/// The context must not be used while this is being called
+	pub unsafe fn handle_surface_change(&mut self) -> Result<(), error::CreationError> {
+		use core::ptr::read;
+
+		self.device.wait_idle().unwrap();
+
+		// Swapchain itself
+		let old_swapchain = unsafe {
+			ManuallyDrop::into_inner(read(&self.swapchain))
+		};
+
+		let (format, viewport, extent, swapchain, backbuffer) = RenderingContext::create_swapchain(&mut self.surface, &mut self.device, &self.adapter, Some(old_swapchain))?;
+
+		self.swapchain = ManuallyDrop::new(swapchain);
+		self.viewport = viewport;
+
+		// Camera settings (aspect ratio)
+		self.camera.update_aspect_ratio(extent.width as f32 / extent.height as f32);
+
+		// Graphics pipeline
+		unsafe {	
+			self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
+			
+			self.device
+				.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
+		}
+
+		let (pipeline_layout, pipeline) = {		
+			let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
+			descriptor_set_layouts.push(self.camera.descriptor_set_layout.deref());
+			descriptor_set_layouts.push(self.texture_store.descriptor_set_layout.deref());
+
+			let subpass = hal::pass::Subpass {
+				index: 0,
+				main_pass: &(*self.renderpass)
+			};
+
+			Self::create_pipeline(&mut self.device, extent, &subpass, descriptor_set_layouts)?
+		};
+
+		self.pipeline_layout = ManuallyDrop::new(pipeline_layout);
+		self.pipeline = ManuallyDrop::new(pipeline);
+
+		// Imageviews, framebuffers
+		// Destroy old objects
+		for framebuffer in self.framebuffers.drain(..) {
+			self.device.destroy_framebuffer(framebuffer);
+		}
+		for image_view in self.imageviews.drain(..) {
+			self.device.destroy_image_view(image_view);
+		}
+		// Make new ones
+		for i in 0..backbuffer.len() {
+			unsafe {
+				use hal::image::ViewKind;
+				use hal::format::Swizzle;
+
+				self.imageviews.push(self.device.create_image_view(
+					&backbuffer[i],
+					ViewKind::D2,
+					format,
+					Swizzle::NO,
+					COLOR_RANGE.clone(),
+				).map_err(|e| error::CreationError::ImageViewError (e))?);
+
+				self.framebuffers.push(self.device.create_framebuffer(
+					&self.renderpass,
+					Some(&self.imageviews[i]),
+					extent
+				).map_err(|_| error::CreationError::OutOfMemoryError)?);
+			}
+		}
+
+		Ok(())
+	} 
+
+	fn create_swapchain(surface: &mut Surface, device: &mut Device, adapter: &Adapter, old_swapchain: Option<Swapchain>) -> Result<(
+			hal::format::Format,
+			hal::pso::Viewport,
+			hal::image::Extent,
+			Swapchain,
+			Vec<Image>
+		), error::CreationError> {
+		use hal::{
+			window::{PresentMode, CompositeAlphaMode},
+			format::{Format, ChannelType},
+			image::Usage,
+			pso::Viewport
+		};
+
+		// Figure out what the surface supports
+		let caps = surface.capabilities(&adapter.physical_device);
+		let formats = surface.supported_formats(&adapter.physical_device);
+
+		// Find which settings we'll actually use based on preset preferences
+		let format = formats.map_or(Format::Rgba8Srgb, |formats| {
+			formats.iter()
+				.find(|format| format.base_format().1 == ChannelType::Srgb)
+				.map(|format| *format)
+				.unwrap_or(formats[0])
+		});
+
+		let present_mode = {
+			[PresentMode::MAILBOX, PresentMode::FIFO, PresentMode::RELAXED, PresentMode::IMMEDIATE]
+				.iter()
+				.cloned()
+				.find(|pm| caps.present_modes.contains(*pm))
+				.ok_or(error::CreationError::BadSurface)?
+		};
+		let composite_alpha = {
+			[CompositeAlphaMode::OPAQUE, CompositeAlphaMode::INHERIT, CompositeAlphaMode::PREMULTIPLIED, CompositeAlphaMode::POSTMULTIPLIED]
+				.iter()
+				.cloned()
+				.find(|ca| caps.composite_alpha_modes.contains(*ca))
+				.ok_or(error::CreationError::BadSurface)?
+		};
+
+		// Figure out properties for our swapchain
+		let extent = caps.extents.end(); // Size
+
+		// Number of frames to pre-render
+		let image_count = if present_mode == PresentMode::MAILBOX {
+			((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(3))
+		} else {
+			((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
+		};
+
+		let image_layers = 1; // Don't support 3D
+		let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
+			Usage::COLOR_ATTACHMENT
+		} else {
+			Err(error::CreationError::BadSurface)?
+		};
+
+		// Swap config
+		let swap_config = SwapchainConfig {
+			present_mode,
+			composite_alpha_mode: composite_alpha,
+			format,
+			extent: *extent,
+			image_count,
+			image_layers,
+			image_usage,
+		};
+
+		// Viewport
+		let extent = extent.to_extent();
+		let viewport = Viewport {
+			rect: extent.rect(),
+			depth: 0.0..1.0
+		};
+		
+		// Swapchain
+		let (swapchain, backbuffer) = unsafe {
+			device.create_swapchain(surface, swap_config, old_swapchain)
+				.map_err(|e| error::CreationError::SwapchainError (e))?
+		};
+
+		Ok((format, viewport, extent, swapchain, backbuffer))
+	}
+
 	/// Load the given image into the texturestore, returning the index or an error.
 	pub fn add_texture(&mut self, image: RgbaImage) -> Result<usize, &'static str> {
 		self.texture_store.add_texture(image,
@@ -392,7 +477,7 @@ impl<'a> RenderingContext<'a> {
 	}
 
 	#[allow(clippy::type_complexity)]
-	pub fn create_pipeline<T>(device: &mut Device, extent: hal::image::Extent, subpass: &hal::pass::Subpass<back::Backend>, set_layouts: T) -> Result<
+	fn create_pipeline<T>(device: &mut Device, extent: hal::image::Extent, subpass: &hal::pass::Subpass<back::Backend>, set_layouts: T) -> Result<
 	(
 	  PipelineLayout,
 	  GraphicsPipeline,

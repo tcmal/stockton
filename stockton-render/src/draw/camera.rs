@@ -27,15 +27,15 @@ use crate::types::*;
 use super::buffer::{StagedBuffer, ModifiableBuffer};
 use stockton_types::{Vector3, Matrix4};
 
-/// Holds settings related to the projection of world space to screen space
-/// Also holds maths for generating important matrices
-pub struct Camera<'a> {
+pub struct CameraSettings {
+	/// Position of the camera
 	position: Vector3,
-	looking_at: Vector3,
-	up: Vector3,
 
-	/// Aspect ratio as a fraction
-	aspect_ratio: f32,
+	/// A point the camera is looking directly at
+	looking_at: Vector3,
+
+	/// The up direction
+	up: Vector3,
 
 	/// FOV in radians
 	fov: f32,
@@ -45,6 +45,16 @@ pub struct Camera<'a> {
 
 	/// Far clipping plane (world units)
 	far: f32,
+}
+
+/// Holds settings related to the projection of world space to screen space
+/// Also holds maths for generating important matrices
+pub struct WorkingCamera<'a> {
+	/// Settings for the camera
+	settings: CameraSettings,
+
+	/// Aspect ratio as a fraction
+	aspect_ratio: f32,
 
 	/// Layout of the descriptor set to pass to the shader
 	pub descriptor_set_layout: ManuallyDrop<DescriptorSetLayout>,
@@ -61,12 +71,25 @@ pub struct Camera<'a> {
 	is_dirty: bool
 }
 
-impl<'a> Camera<'a> {
-	/// Return a camera with default settings
-	// TODO
+impl<'a> WorkingCamera<'a> {
 	pub fn defaults(aspect_ratio: f32, device: &mut Device, adapter: &Adapter,
 		command_queue: &mut CommandQueue, 
-		command_pool: &mut CommandPool) -> Result<Camera<'a>, error::CreationError> {
+		command_pool: &mut CommandPool) -> Result<WorkingCamera<'a>, error::CreationError> {
+		WorkingCamera::with_settings(CameraSettings {
+			position: Vector3::new(-0.5, 1.5, -1.0),
+			looking_at: Vector3::new(0.5, 0.5, 0.5),
+			up: Vector3::new(0.0, 1.0, 0.0),
+			fov: f32::to_radians(90.0),
+			near: 0.1,
+			far: 100.0,
+		}, aspect_ratio, device, adapter, command_queue, command_pool)
+	}
+
+	/// Return a camera with default settings
+	// TODO
+	pub fn with_settings(settings: CameraSettings, aspect_ratio: f32, device: &mut Device, adapter: &Adapter,
+		command_queue: &mut CommandQueue, 
+		command_pool: &mut CommandPool) -> Result<WorkingCamera<'a>, error::CreationError> {
 
 		let descriptor_type = {
 			use hal::pso::{DescriptorType, BufferDescriptorType, BufferDescriptorFormat};
@@ -137,15 +160,9 @@ impl<'a> Camera<'a> {
 			));
 		}
 
-		Ok(Camera {
-			position: Vector3::new(-0.5, 1.5, -1.0),
-			looking_at: Vector3::new(0.5, 0.5, 0.5),
-			up: Vector3::new(0.0, 1.0, 0.0),
-
+		Ok(WorkingCamera {
 			aspect_ratio,
-			fov: f32::to_radians(90.0),
-			near: 0.1,
-			far: 100.0,
+			settings,
 
 			descriptor_set_layout: ManuallyDrop::new(descriptor_set_layout),
 			buffer: ManuallyDrop::new(buffer),
@@ -161,21 +178,21 @@ impl<'a> Camera<'a> {
 	pub fn vp_matrix(&self) -> Matrix4 {
 		// Converts world space to camera space
 		let view_matrix = look_at_lh(
-			&self.position,
-			&self.looking_at,
-			&self.up
+			&self.settings.position,
+			&self.settings.looking_at,
+			&self.settings.up
 		);
 
 		// Converts camera space to screen space
 		let projection_matrix = {
 			let mut temp = perspective_lh_zo(
 				self.aspect_ratio,
-				self.fov,
-				self.near,
-				self.far
+				self.settings.fov,
+				self.settings.near,
+				self.settings.far
 			);
 
-			// Vulkan's co-ord system is different from openGLs
+			// Vulkan's co-ord system is different from OpenGLs
 			temp[(1, 1)] *= -1.0;
 
 			temp
@@ -183,6 +200,11 @@ impl<'a> Camera<'a> {
 
 		// Chain them together into a single matrix
 		projection_matrix * view_matrix
+	}
+
+	pub fn update_aspect_ratio(&mut self, new: f32) {
+		self.aspect_ratio = new;
+		self.is_dirty = true;
 	}
 
 	pub fn commit<'b>(&'b mut self, device: &Device,

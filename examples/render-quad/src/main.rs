@@ -107,19 +107,23 @@ fn main() {
 		*flow = ControlFlow::Poll;
 		
 		match event {
-			// TODO: Handle resize
 			Event::WindowEvent {
-				event: WindowEvent::CloseRequested,
+				event: WindowEvent::CloseRequested, 
 				..
 			} => {
 				*flow = ControlFlow::Exit
-			},
+			}
 
 			Event::MainEventsCleared => {
 				window.request_redraw()
 			},
 			Event::RedrawRequested(_) => {		
-				ctx.draw_vertices().unwrap();
+				if let Err(err) = ctx.draw_vertices() {
+					unsafe {ctx.handle_surface_change().unwrap()};
+
+					// If it fails twice, then panic
+					ctx.draw_vertices().unwrap();
+				}
 			}
 			_ => ()
 		}
