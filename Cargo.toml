@@ -2,6 +2,7 @@
 members = [
     "stockton-types",
     "stockton-render",
+    "stockton-levels",
     "examples/render-quad",
     "examples/render-bsp"
 ]

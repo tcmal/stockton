@@ -1,0 +1,12 @@
+[package]
+name = "stockton-levels"
+version = "0.1.0"
+authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
+description = "Library for parsing different types of .bsp files."
+repository = "https://github.com/tcmal/stockton"
+homepage = "https://github.com/tcmal/stockton"
+
+[dependencies]
+nalgebra = "^0.20"
+bitflags = "^1.2"
+bitvec = "0.17"
