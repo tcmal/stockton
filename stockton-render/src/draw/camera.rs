@@ -29,22 +29,22 @@ use stockton_types::{Vector3, Matrix4};
 
 pub struct CameraSettings {
 	/// Position of the camera
-	position: Vector3,
+	pub position: Vector3,
 
 	/// A point the camera is looking directly at
-	looking_at: Vector3,
+	pub looking_at: Vector3,
 
 	/// The up direction
-	up: Vector3,
+	pub up: Vector3,
 
 	/// FOV in radians
-	fov: f32,
+	pub fov: f32,
 
 	/// Near clipping plane (world units)
-	near: f32,
+	pub near: f32,
 
 	/// Far clipping plane (world units)
-	far: f32,
+	pub far: f32,
 }
 
 /// Holds settings related to the projection of world space to screen space
@@ -76,12 +76,12 @@ impl<'a> WorkingCamera<'a> {
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> Result<WorkingCamera<'a>, error::CreationError> {
 		WorkingCamera::with_settings(CameraSettings {
-			position: Vector3::new(-0.5, 1.5, -1.0),
-			looking_at: Vector3::new(0.5, 0.5, 0.5),
+			position: Vector3::new(-320.0, 0.0, 0.0),
+			looking_at: Vector3::new(0.0, 0.0, 0.0),
 			up: Vector3::new(0.0, 1.0, 0.0),
 			fov: f32::to_radians(90.0),
 			near: 0.1,
-			far: 100.0,
+			far: 1024.0,
 		}, aspect_ratio, device, adapter, command_queue, command_pool)
 	}
 
@@ -202,11 +202,19 @@ impl<'a> WorkingCamera<'a> {
 		projection_matrix * view_matrix
 	}
 
+	/// Update the aspect ratio
 	pub fn update_aspect_ratio(&mut self, new: f32) {
 		self.aspect_ratio = new;
 		self.is_dirty = true;
 	}
 
+	/// Move the camera by `delta`
+	pub fn move_camera(&mut self, delta: Vector3) {
+		self.settings.position += delta;
+		self.is_dirty = true;
+	}
+
+	/// Ensures the VP matrix on the GPU is up-to-date
 	pub fn commit<'b>(&'b mut self, device: &Device,
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> &'b DescriptorSet {
@@ -233,5 +241,9 @@ impl<'a> WorkingCamera<'a> {
 			device.destroy_descriptor_pool(ManuallyDrop::into_inner(read(&self.descriptor_pool)));
 			device.destroy_descriptor_set_layout(ManuallyDrop::into_inner(read(&self.descriptor_set_layout)));
 		}
+	}
+
+	pub fn camera_pos(&self) -> Vector3 {
+		self.settings.position
 	}
 }

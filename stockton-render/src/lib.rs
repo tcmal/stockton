@@ -33,18 +33,17 @@ extern crate arrayvec;
 pub mod draw;
 mod error;
 mod types;
-mod walk_bsp;
-
-use std::sync::{Arc, RwLock};
+mod culling;
 
 use stockton_types::World;
 
 use error::{CreationError, FrameError};
 use draw::RenderingContext;
+use culling::get_visible_faces;
 
 /// Renders a world to a window when you tell it to.
 pub struct Renderer<'a> {
-	world: Arc<RwLock<World<'a>>>,
+	world: World,
 	pub context: RenderingContext<'a>
 }
 
@@ -52,18 +51,30 @@ pub struct Renderer<'a> {
 impl<'a> Renderer<'a> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
-	pub fn new(world: World<'a>, window: &winit::window::Window) -> Result<Self, CreationError> {
-		let world = Arc::new(RwLock::new(world));
+	pub fn new(world: World, window: &winit::window::Window) -> Result<Self, CreationError> {
 		let context = RenderingContext::new(window)?;
 
 		Ok(Renderer {
-			world: world, context
+			world, context
 		})
 	}
 
 	/// Render a single frame of the world
 	pub fn render_frame(&mut self) -> Result<(), FrameError>{
-		self.context.draw_vertices().unwrap();
+		// Get visible faces
+		let faces = get_visible_faces(self.context.camera_pos(), &self.world.map);
+		
+		// Load them in
+		self.context.set_active_faces(faces, &self.world.map);
+
+		// Then draw them
+		if let Err(_) = self.context.draw_vertices() {
+			unsafe {self.context.handle_surface_change().unwrap()};
+
+			// If it fails twice, then error
+			self.context.draw_vertices().map_err(|_| FrameError::PresentError)?;
+		}
+
 		Ok(())
 	}
 }

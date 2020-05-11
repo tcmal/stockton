@@ -20,7 +20,8 @@
 use std::{
 	mem::{ManuallyDrop, size_of},
 	ops::Deref,
-	borrow::Borrow
+	borrow::Borrow,
+	convert::TryInto
 };
 use winit::window::Window;
 use arrayvec::ArrayVec;
@@ -32,12 +33,20 @@ use hal::{
 	window::SwapchainConfig
 };
 use stockton_types::{Vector2, Vector3};
+use stockton_bsp::{
+	BSPFile,
+	lumps::faces::FaceType
+};
 
-use crate::types::*;
-use crate::error;
-use super::camera::WorkingCamera;
-use super::texture::TextureStore;
-use super::buffer::{StagedBuffer, ModifiableBuffer};
+use crate::{
+	types::*,
+	error
+};
+use super::{
+	camera::WorkingCamera,
+	texture::TextureStore,
+	buffer::{StagedBuffer, ModifiableBuffer}
+};
 
 /// Entry point name for shaders
 const ENTRY_NAME: &str = "main";
@@ -53,10 +62,10 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 const INITIAL_TEX_SIZE: usize = 2;
 
 /// Initial size of vertex buffer. TODO: Way of overriding this
-const INITIAL_VERT_SIZE: u64 = 32;
+const INITIAL_VERT_SIZE: u64 = 3 * 3000;
 
 /// Initial size of index buffer. TODO: Way of overriding this
-const INITIAL_INDEX_SIZE: u64 = 16;
+const INITIAL_INDEX_SIZE: u64 = 3000;
 
 /// Source for vertex shader. TODO
 const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
@@ -313,9 +322,7 @@ impl<'a> RenderingContext<'a> {
 		self.device.wait_idle().unwrap();
 
 		// Swapchain itself
-		let old_swapchain = unsafe {
-			ManuallyDrop::into_inner(read(&self.swapchain))
-		};
+		let old_swapchain = ManuallyDrop::into_inner(read(&self.swapchain));
 
 		let (format, viewport, extent, swapchain, backbuffer) = RenderingContext::create_swapchain(&mut self.surface, &mut self.device, &self.adapter, Some(old_swapchain))?;
 
@@ -326,12 +333,11 @@ impl<'a> RenderingContext<'a> {
 		self.camera.update_aspect_ratio(extent.width as f32 / extent.height as f32);
 
 		// Graphics pipeline
-		unsafe {	
-			self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
+		self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
 			
-			self.device
-				.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
-		}
+		self.device
+			.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
+	
 
 		let (pipeline_layout, pipeline) = {		
 			let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
@@ -359,24 +365,22 @@ impl<'a> RenderingContext<'a> {
 		}
 		// Make new ones
 		for i in 0..backbuffer.len() {
-			unsafe {
-				use hal::image::ViewKind;
-				use hal::format::Swizzle;
+			use hal::image::ViewKind;
+			use hal::format::Swizzle;
 
-				self.imageviews.push(self.device.create_image_view(
-					&backbuffer[i],
-					ViewKind::D2,
-					format,
-					Swizzle::NO,
-					COLOR_RANGE.clone(),
-				).map_err(|e| error::CreationError::ImageViewError (e))?);
+			self.imageviews.push(self.device.create_image_view(
+				&backbuffer[i],
+				ViewKind::D2,
+				format,
+				Swizzle::NO,
+				COLOR_RANGE.clone(),
+			).map_err(|e| error::CreationError::ImageViewError (e))?);
 
-				self.framebuffers.push(self.device.create_framebuffer(
-					&self.renderpass,
-					Some(&self.imageviews[i]),
-					extent
-				).map_err(|_| error::CreationError::OutOfMemoryError)?);
-			}
+			self.framebuffers.push(self.device.create_framebuffer(
+				&self.renderpass,
+				Some(&self.imageviews[i]),
+				extent
+			).map_err(|_| error::CreationError::OutOfMemoryError)?);
 		}
 
 		Ok(())
@@ -718,6 +722,7 @@ impl<'a> RenderingContext<'a> {
 		Ok(())
 	}
 
+	/// Draw all vertices in the buffer
 	pub fn draw_vertices(&mut self) -> Result<(), &'static str> {
 		let get_image = &self.get_image[self.current_frame];
 		let render_complete = &self.render_complete[self.current_frame];
@@ -834,6 +839,58 @@ impl<'a> RenderingContext<'a> {
 		};
 
 		Ok(())
+	}
+
+	/// Get current position of camera
+	pub fn camera_pos(&self) -> Vector3 {
+		self.camera.camera_pos()
+	}
+
+	/// Move the camera by `delta`
+	pub fn move_camera(&mut self, delta: Vector3) {
+		self.camera.move_camera(delta)
+	}
+
+	/// Load all active faces into the vertex buffers for drawing
+	// TODO: This is just a POC, we need to restructure things a lot for actually texturing, etc
+	pub fn set_active_faces(&mut self, faces: Vec<usize>, file: &BSPFile) {
+		let mut curr_vert_idx: usize = 0;
+		let mut curr_idx_idx: usize = 0;
+
+		for face in faces.into_iter().map(|idx| &file.faces.faces[idx]) {
+			if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
+				let base = face.vertices_idx.start as i32;
+
+				for idx in face.meshverts_idx.clone().step_by(3) {
+					let start_idx: u16 = curr_vert_idx.try_into().unwrap();
+
+					for mv in &file.meshverts.meshverts[idx..idx+3] {
+						let vert = &file.vertices.vertices[(base + mv.offset) as usize];
+						let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
+
+						let uvp = UVPoint (vert.position, uv, 0);
+						self.vert_buffer[curr_vert_idx] = uvp;
+						
+						curr_vert_idx += 1;
+					}
+
+
+					self.index_buffer[curr_idx_idx] = (start_idx, start_idx + 1, start_idx + 2);
+
+					curr_idx_idx += 1;
+
+					if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
+						break;
+					}
+				}
+			} else {
+				// TODO: Other types of faces
+			}
+
+			if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
+				break;
+			}
+		}
 	}
 }
 
