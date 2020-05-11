@@ -20,7 +20,6 @@ extern crate stockton_bsp;
 extern crate stockton_render;
 extern crate winit;
 extern crate simple_logger;
-extern crate rand;
 extern crate image;
 
 use stockton_render::draw::{RenderingContext, UVPoint};
@@ -118,7 +117,7 @@ fn main() {
 				window.request_redraw()
 			},
 			Event::RedrawRequested(_) => {		
-				if let Err(err) = ctx.draw_vertices() {
+				if let Err(_) = ctx.draw_vertices() {
 					unsafe {ctx.handle_surface_change().unwrap()};
 
 					// If it fails twice, then panic
