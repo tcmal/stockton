@@ -6,9 +6,7 @@ authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
 [dependencies]
 stockton-render = { path = "../../stockton-render", features = ["vulkan"] }
 stockton-types = { path = "../../stockton-types" }
-stockton-bsp = "2.0.0"
+stockton-bsp = { git = "https://github.com/tcmal/rust-bsp.git" }
 winit = "^0.21"
-log = "0.4.0"
 simple_logger = "1.0"
-rand = "0.7"
 image = "0.23.2"

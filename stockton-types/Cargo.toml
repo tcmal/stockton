@@ -6,5 +6,4 @@ edition = "2018"
 
 [dependencies]
 nalgebra-glm = "^0.6"
-stockton-bsp = "2.0.0"
-downcast-rs = "1.0.4"
+stockton-bsp = { git = "https://github.com/tcmal/rust-bsp.git" }
