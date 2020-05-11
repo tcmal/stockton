@@ -16,16 +16,9 @@
 
 extern crate stockton_bsp;
 extern crate nalgebra_glm as na;
-#[macro_use]
-extern crate downcast_rs;
-
-pub mod entity_store;
-pub use entity_store::{EntityStore, Entity};
 
 pub mod world;
 pub use world::World;
-
-pub mod ent_map;
 
 /// Alias for convenience
 pub type Vector2 = na::Vec2;

@@ -15,18 +15,16 @@
 
 //! The thing you play on and all the associated state.
 
-use std::pin::Pin;
-
 use stockton_bsp::BSPFile;
 
 /// A loaded world.
-pub struct World<'a> {
-	pub map: Pin<Box<BSPFile<'a>>>
+pub struct World {
+	pub map: BSPFile
 }
 
-impl<'a> World<'a> {
+impl World {
 	/// Create a new world from a BSPFile.
-	pub fn new(bsp: Pin<Box<BSPFile<'a>>>) -> Option<World<'a>> {
+	pub fn new(bsp: BSPFile) -> Option<World> {
 		Some(World {
 			map: bsp
 		})
