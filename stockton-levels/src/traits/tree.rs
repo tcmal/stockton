@@ -19,6 +19,7 @@
 
 use na::Vector3;
 use super::{HasFaces, HasBrushes, HasVisData};
+use crate::coords::CoordSystem;
 
 /// A node in a BSP tree.
 /// Either has two children *or* a leaf entry.
@@ -46,6 +47,6 @@ pub struct BSPLeaf {
     pub brushes_idx: Box<[u32]>,
 }
 
-pub trait HasBSPTree: HasFaces + HasBrushes + HasVisData {
+pub trait HasBSPTree<S: CoordSystem>: HasFaces<S> + HasBrushes<S> + HasVisData {
     fn get_bsp_root<'a>(&'a self) -> &'a BSPNode;
 }

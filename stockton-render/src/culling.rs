@@ -23,7 +23,7 @@ use stockton_types::Vector3;
 
 /// Get the visible faces according to visdata and frustum culling
 // TODO: Write this. For now, just render all faces
-pub fn get_visible_faces<T: MinBSPFeatures>(_pos: Vector3, file: &T) -> Vec<u32> {
+pub fn get_visible_faces<X: CoordSystem, T: MinBSPFeatures<X>>(_pos: Vector3, file: &T) -> Vec<u32> {
 	let mut visible = Vec::with_capacity(file.faces_len() as usize);
 	for x in 0..file.faces_len() {
 		visible.push(x as u32);
@@ -33,7 +33,7 @@ pub fn get_visible_faces<T: MinBSPFeatures>(_pos: Vector3, file: &T) -> Vec<u32>
 }
 
 /// Get the viscluster pos lies in 
-fn get_cluster_id<T: MinBSPFeatures>(pos: Vector3, file: &T) -> u32 {
+fn get_cluster_id<X: CoordSystem, T: MinBSPFeatures<X>>(pos: Vector3, file: &T) -> u32 {
 	let mut node = file.get_bsp_root();
 	loop {
 		if let BSPNodeValue::Children(front, back) = &node.value{

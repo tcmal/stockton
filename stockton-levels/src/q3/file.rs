@@ -18,9 +18,11 @@
 // Trait implementations are stored in their own files.
 
 use bitvec::prelude::*;
+use std::marker::PhantomData;
 
 use self::header::Header;
 use crate::types::Result;
+use crate::coords::*;
 
 use super::*;
 use crate::traits::textures::Texture;
@@ -36,7 +38,7 @@ use crate::traits::tree::BSPNode;
 use crate::traits::models::Model;
 
 /// A parsed Quake 3 BSP File.
-pub struct Q3BSPFile {
+pub struct Q3BSPFile<T: CoordSystem> {
 	pub(crate) visdata: Box<[BitBox<Local, u8>]>,
 	pub(crate) textures: Box<[Texture]>,
 	pub(crate) entities: Box<[Entity]>,
@@ -50,11 +52,12 @@ pub struct Q3BSPFile {
 	pub(crate) faces: Box<[Face]>,
 	pub(crate) models: Box<[Model]>,
 	pub(crate) tree_root: BSPNode,
+	_phantom: PhantomData<T>
 }
 
-impl Q3BSPFile {
+impl Q3BSPFile<Q3System> {
 	/// Parse `data` as a quake 3 bsp file.
-	pub fn new(data: &[u8]) -> Result<Q3BSPFile> {
+	pub fn parse_file(data: &[u8]) -> Result<Q3BSPFile<Q3System>> {
 		let header = Header::from(data)?;
 
 		let entities = entities::from_data(header.get_lump(&data, 0))?;
@@ -94,7 +97,50 @@ impl Q3BSPFile {
 
 		Ok(Q3BSPFile {
 			visdata, textures, entities, planes, vertices, meshverts, light_maps,
-			light_vols, brushes, effects, faces, tree_root, models
+			light_vols, brushes, effects, faces, tree_root, models,
+			_phantom: PhantomData
 		})
+	}
+}
+
+impl<T: CoordSystem> Q3BSPFile<T> {
+	pub fn swizzle_to<D: CoordSystem>(mut self) -> Q3BSPFile<D>
+		where Swizzler: SwizzleFromTo<T, D> {
+
+		for vertex in self.vertices.iter_mut() {
+			Swizzler::swizzle(&mut vertex.normal);
+			Swizzler::swizzle(&mut vertex.position);
+		}
+
+		for model in self.models.iter_mut() {
+			Swizzler::swizzle(&mut model.mins);
+			Swizzler::swizzle(&mut model.maxs);
+		}
+
+		for face in self.faces.iter_mut() {
+			Swizzler::swizzle(&mut face.normal);
+		}
+
+		for plane in self.planes.iter_mut() {
+			Swizzler::swizzle(&mut plane.normal);
+		}
+
+		// TODO: Possibly don't need to move?
+		Q3BSPFile {
+			visdata: self.visdata,
+			textures: self.textures,
+			entities: self.entities,
+			planes: self.planes,
+			vertices: self.vertices,
+			meshverts: self.meshverts,
+			light_maps: self.light_maps,
+			light_vols: self.light_vols,
+			brushes: self.brushes,
+			effects: self.effects,
+			faces: self.faces,
+			tree_root: self.tree_root,
+			models: self.models,
+			_phantom: PhantomData
+		}
 	}
 }

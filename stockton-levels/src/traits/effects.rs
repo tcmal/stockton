@@ -16,6 +16,7 @@
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
 use super::HasBrushes;
+use crate::coords::CoordSystem;
 
 /// One effect definition
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +30,7 @@ pub struct Effect {
     // todo: unknown: i32
 }
 
-pub trait HasEffects: HasBrushes {
+pub trait HasEffects<S: CoordSystem>: HasBrushes<S> {
     type EffectsIter<'a>: Iterator<Item = &'a Effect>;
 
     fn effects_iter<'a>(&'a self) -> Self::EffectsIter<'a>;

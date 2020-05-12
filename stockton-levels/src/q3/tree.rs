@@ -17,6 +17,7 @@
 
 //! Parses the BSP tree into a usable format
 
+use crate::coords::CoordSystem;
 use crate::helpers::{slice_to_u32, slice_to_i32, slice_to_vec3i};
 use crate::types::{ParseError, Result};
 use crate::traits::tree::*;
@@ -161,7 +162,7 @@ fn compile_node(
     }
 }
 
-impl HasBSPTree for Q3BSPFile {
+impl<T: CoordSystem> HasBSPTree<T> for Q3BSPFile<T> {
     fn get_bsp_root<'a>(&'a self) -> &'a BSPNode {
         &self.tree_root
     }

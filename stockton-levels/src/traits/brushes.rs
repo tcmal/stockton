@@ -18,6 +18,7 @@
 //! Parses the brushes & brushsides lumps from a bsp file
 
 use super::HasPlanes;
+use crate::coords::CoordSystem;
 
 /// One brush record. Used for collision detection.
 /// "Each brush describes a convex volume as defined by its surrounding surfaces."
@@ -35,7 +36,7 @@ pub struct BrushSide {
     pub is_opposing: bool,
 }
 
-pub trait HasBrushes: HasPlanes {
+pub trait HasBrushes<S: CoordSystem>: HasPlanes<S> {
     type BrushesIter<'a>: Iterator<Item = &'a Brush>;
 
     fn brushes_iter<'a>(&'a self) -> Self::BrushesIter<'a>;

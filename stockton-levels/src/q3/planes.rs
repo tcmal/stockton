@@ -21,6 +21,7 @@ use crate::helpers::{slice_to_f32, slice_to_vec3};
 use crate::types::{Result, ParseError};
 use crate::traits::planes::*;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
 
 /// Parse a lump of planes.
 /// A lump is (data length / plane size) planes long
@@ -45,7 +46,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Plane]>> {
     Ok(planes.into_boxed_slice())
 }
 
-impl HasPlanes for Q3BSPFile {
+impl<T: CoordSystem> HasPlanes<T> for Q3BSPFile<T> {
     type PlanesIter<'a> = std::slice::Iter<'a, Plane>;
 
     fn planes_iter<'a>(&'a self) -> Self::PlanesIter<'a> {

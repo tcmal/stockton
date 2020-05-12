@@ -26,6 +26,7 @@ const SIDE_SIZE: usize = 4 * 2;
 use crate::helpers::slice_to_i32;
 use crate::types::{ParseError, Result};
 use crate::traits::brushes::*;
+use crate::coords::CoordSystem;
 use super::Q3BSPFile;
 
 /// Parse the brushes & brushsides lump from a bsp file.
@@ -104,7 +105,7 @@ fn get_sides(
 }
 
 
-impl HasBrushes for Q3BSPFile {
+impl<T: CoordSystem> HasBrushes<T> for Q3BSPFile<T> {
     type BrushesIter<'a> = std::slice::Iter<'a, Brush>;
 
     fn brushes_iter<'a>(&'a self) -> Self::BrushesIter<'a> {

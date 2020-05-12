@@ -20,6 +20,7 @@ use crate::types::{Result, ParseError};
 use na::Vector3;
 use crate::traits::faces::*;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
 
 const FACE_SIZE: usize = (4 * 8) + (4 * 2) + (4 * 2) + (4 * 3) + ((4 * 2) * 3) + (4 * 3) + (4 * 2);
 
@@ -150,9 +151,9 @@ fn face_from_slice(
 }
 
 
-impl HasFaces for Q3BSPFile {
+impl<T: CoordSystem> HasFaces<T> for Q3BSPFile<T> {
     type FacesIter<'a> = std::slice::Iter<'a, Face>;
-
+    
     fn faces_iter<'a>(&'a self) -> Self::FacesIter<'a> {
         self.faces.iter()
     }

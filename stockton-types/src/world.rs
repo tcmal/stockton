@@ -18,11 +18,11 @@
 use stockton_levels::prelude::*;
 
 /// A loaded world.
-pub struct World<T: MinBSPFeatures> {
+pub struct World<T: MinBSPFeatures<VulkanSystem>> {
 	pub map: T,
 }
 
-impl<T: MinBSPFeatures> World<T> {
+impl<T: MinBSPFeatures<VulkanSystem>> World<T> {
 	/// Create a new world from a level.
 	/// The level can be any format, as long as it has the required features of a bsp.
 	pub fn new(map: T) -> World<T> {

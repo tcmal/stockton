@@ -18,6 +18,7 @@
 use crate::types::{Result, RGB, ParseError};
 use crate::traits::light_maps::*;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
 
 /// The size of one LightMap
 const LIGHTMAP_SIZE: usize = 128 * 128 * 3;
@@ -46,7 +47,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightMap]>> {
     Ok(maps.into_boxed_slice())
 }
 
-impl HasLightMaps for Q3BSPFile {
+impl<T: CoordSystem> HasLightMaps for Q3BSPFile<T> {
     type LightMapsIter<'a> = std::slice::Iter<'a, LightMap>;
 
     fn lightmaps_iter<'a>(&'a self) -> Self::LightMapsIter<'a> {

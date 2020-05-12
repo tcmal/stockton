@@ -17,6 +17,7 @@
 
 use crate::helpers::{slice_to_u32, slice_to_vec3};
 use crate::types::{Result, ParseError};
+use crate::coords::CoordSystem;
 use crate::traits::models::*;
 use super::Q3BSPFile;
 
@@ -73,7 +74,7 @@ pub fn from_data(
 }
 
 
-impl HasModels for Q3BSPFile {
+impl<T: CoordSystem> HasModels<T> for Q3BSPFile<T> {
     type ModelsIter<'a> = std::slice::Iter<'a, Model>;
 
     fn models_iter<'a>(&'a self) -> Self::ModelsIter<'a> {

@@ -851,7 +851,7 @@ impl<'a> RenderingContext<'a> {
 
 	/// Load all active faces into the vertex buffers for drawing
 	// TODO: This is just a POC, we need to restructure things a lot for actually texturing, etc
-	pub fn set_active_faces<M: MinBSPFeatures>(&mut self, faces: Vec<u32>, file: &M) -> () {
+	pub fn set_active_faces<M: MinBSPFeatures<VulkanSystem>>(&mut self, faces: Vec<u32>, file: &M) -> () {
 		let mut curr_vert_idx: usize = 0;
 		let mut curr_idx_idx: usize = 0;
 

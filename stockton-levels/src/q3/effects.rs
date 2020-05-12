@@ -21,6 +21,7 @@ use crate::helpers::slice_to_u32;
 use crate::types::{Result, ParseError};
 use crate::traits::effects::*;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
 
 /// The size of one effect definition
 const EFFECT_SIZE: usize = 64 + 4 + 4;
@@ -50,7 +51,7 @@ pub fn from_data(data: &[u8], n_brushes: u32) -> Result<Box<[Effect]>> {
 }
 
 
-impl HasEffects for Q3BSPFile {
+impl<T: CoordSystem> HasEffects<T> for Q3BSPFile<T> {
     type EffectsIter<'a> = std::slice::Iter<'a, Effect>;
 
     fn effects_iter<'a>(&'a self) -> Self::EffectsIter<'a> {

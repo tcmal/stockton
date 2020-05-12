@@ -21,6 +21,7 @@ use super::Q3BSPFile;
 use crate::helpers::{slice_to_u32, slice_to_vec3};
 use crate::types::{Result, ParseError, RGBA};
 use crate::traits::vertices::*;
+use crate::coords::CoordSystem;
 
 /// The size of one vertex
 const VERTEX_SIZE: usize = (4 * 3) + (2 * 2 * 4) + (4 * 3) + 4;
@@ -64,7 +65,7 @@ pub fn meshverts_from_data(data: &[u8]) -> Result<Box<[MeshVert]>> {
     Ok(meshverts.into_boxed_slice())
 }
 
-impl HasVertices for Q3BSPFile {
+impl<T: CoordSystem> HasVertices<T> for Q3BSPFile<T> {
     type VerticesIter<'a> = std::slice::Iter<'a, Vertex>;
 
     fn vertices_iter<'a>(&'a self) -> Self::VerticesIter<'a> {
@@ -76,7 +77,7 @@ impl HasVertices for Q3BSPFile {
     }
 }
 
-impl HasMeshVerts for Q3BSPFile {
+impl<T: CoordSystem> HasMeshVerts<T> for Q3BSPFile<T> {
     type MeshVertsIter<'a> = std::slice::Iter<'a, MeshVert>;
 
     fn meshverts_iter<'a>(&'a self) -> Self::MeshVertsIter<'a> {

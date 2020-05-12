@@ -26,3 +26,4 @@ pub mod types;
 pub mod traits;
 pub mod prelude;
 pub mod features;
+pub mod coords;

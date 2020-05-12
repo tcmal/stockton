@@ -25,6 +25,7 @@ extern crate image;
 use image::load_from_memory;
 use std::time::SystemTime;
 
+use stockton_levels::prelude::*;
 use stockton_levels::q3::Q3BSPFile;
 use stockton_types::{World, Vector3};
 use stockton_render::Renderer;
@@ -91,7 +92,9 @@ fn main() {
 	let event_loop = EventLoop::new();
 	let window = WindowBuilder::new().build(&event_loop).unwrap();
 	let data = include_bytes!("../data/test.bsp").to_vec().into_boxed_slice();
-	let bsp = Q3BSPFile::new(&data).unwrap();
+	let bsp: Result<Q3BSPFile<Q3System>, stockton_levels::types::ParseError> = Q3BSPFile::parse_file(&data);
+	let bsp: Q3BSPFile<Q3System> = bsp.unwrap();
+	let bsp: Q3BSPFile<VulkanSystem> = bsp.swizzle_to();
 	
 	let world = World::new(bsp);
 	let mut renderer = Renderer::new(world, &window).unwrap();

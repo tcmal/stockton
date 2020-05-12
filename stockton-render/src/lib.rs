@@ -43,13 +43,13 @@ use draw::RenderingContext;
 use culling::get_visible_faces;
 
 /// Renders a world to a window when you tell it to.
-pub struct Renderer<'a, T: MinBSPFeatures> {
+pub struct Renderer<'a, T: MinBSPFeatures<VulkanSystem>> {
 	world: World<T>,
 	pub context: RenderingContext<'a>
 }
 
 
-impl<'a, T: MinBSPFeatures> Renderer<'a, T> {
+impl<'a, T: MinBSPFeatures<VulkanSystem>> Renderer<'a, T> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
 	pub fn new(world: World<T>, window: &winit::window::Window) -> Result<Self, CreationError> {

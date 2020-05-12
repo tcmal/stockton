@@ -19,6 +19,7 @@ use na::Vector3;
 use std::ops::Range;
 
 use super::{HasFaces, HasBrushes};
+use crate::coords::CoordSystem;
 
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -28,7 +29,7 @@ pub struct Model {
     pub brushes_idx: Range<u32>,
 }
 
-pub trait HasModels: HasFaces + HasBrushes {
+pub trait HasModels<S: CoordSystem>: HasFaces<S> + HasBrushes<S> {
     type ModelsIter<'a>: Iterator<Item = &'a Model>;
 
     fn models_iter<'a>(&'a self) -> Self::ModelsIter<'a>;

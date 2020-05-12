@@ -17,6 +17,7 @@
 
 use std::iter::Iterator;
 use na::Vector3;
+use crate::coords::CoordSystem;
 
 /// The planes lump from a BSP file.
 /// Found at lump index 2 in a q3 bsp.
@@ -35,7 +36,7 @@ pub struct Plane {
     pub dist: f32,
 }
 
-pub trait HasPlanes {
+pub trait HasPlanes<S: CoordSystem> {
     type PlanesIter<'a>: Iterator<Item = &'a Plane>;
 
     fn planes_iter<'a>(&'a self) -> Self::PlanesIter<'a>;

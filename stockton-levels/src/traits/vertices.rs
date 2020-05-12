@@ -16,6 +16,7 @@
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
 use crate::helpers::{slice_to_f32};
+use crate::coords::CoordSystem;
 use crate::types::RGBA;
 use na::Vector3;
 
@@ -50,14 +51,14 @@ impl TexCoord {
 /// A vertex offset, used to describe generalised triangle meshes
 pub type MeshVert = u32;
 
-pub trait HasVertices {
+pub trait HasVertices<S: CoordSystem> {
     type VerticesIter<'a>: Iterator<Item = &'a Vertex>;
 
     fn vertices_iter<'a>(&'a self) -> Self::VerticesIter<'a>;
     fn get_vertex<'a>(&'a self, index: u32) -> &'a Vertex;
 }
 
-pub trait HasMeshVerts: HasVertices {
+pub trait HasMeshVerts<S: CoordSystem>: HasVertices<S> {
     type MeshVertsIter<'a>: Iterator<Item = &'a MeshVert>;
 
     fn meshverts_iter<'a>(&'a self) -> Self::MeshVertsIter<'a>;

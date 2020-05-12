@@ -15,7 +15,8 @@
 //! Marker traits for different feature sets
 
 use crate::traits::*;
+use crate::coords::CoordSystem;
 
-pub trait MinBSPFeatures: HasBSPTree {}
-impl<T> MinBSPFeatures for T 
-	where T: HasBSPTree {}
+pub trait MinBSPFeatures<S: CoordSystem>: HasBSPTree<S> {}
+impl<T, S: CoordSystem> MinBSPFeatures<S> for T 
+	where T: HasBSPTree<S> {}

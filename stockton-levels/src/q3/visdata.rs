@@ -22,6 +22,7 @@ use crate::types::{Result, ParseError};
 use crate::traits::visdata::*;
 use crate::helpers::slice_to_i32;
 use super::file::Q3BSPFile;
+use crate::coords::CoordSystem;
 
 /// Stores cluster-to-cluster visibility information.
 pub fn from_data(data: &[u8]) -> Result<Box<[BitBox<Local, u8>]>> {
@@ -46,7 +47,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[BitBox<Local, u8>]>> {
     Ok(vecs.into_boxed_slice())
 }
 
-impl HasVisData for Q3BSPFile {
+impl<T: CoordSystem> HasVisData for Q3BSPFile<T> {
     type VisibleIterator = IntoIter<ClusterId>;
 
     fn all_visible_from(&self, from: ClusterId) -> Self::VisibleIterator {

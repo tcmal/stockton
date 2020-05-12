@@ -19,6 +19,7 @@ use std::ops::Range;
 use na::{Vector2, Vector3};
 
 use super::{HasEffects, HasTextures, HasLightMaps, HasMeshVerts};
+use crate::coords::CoordSystem;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(i32)]
@@ -47,7 +48,7 @@ pub struct Face {
     pub size: Vector2<u32>,
 }
 
-pub trait HasFaces: HasTextures + HasEffects + HasLightMaps + HasMeshVerts {
+pub trait HasFaces<S: CoordSystem>: HasTextures + HasEffects<S> + HasLightMaps + HasMeshVerts<S> {
     type FacesIter<'a>: Iterator<Item = &'a Face>;
 
     fn faces_iter<'a>(&'a self) -> Self::FacesIter<'a>;
