@@ -45,10 +45,14 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Plane]>> {
     Ok(planes.into_boxed_slice())
 }
 
-impl<'a> HasPlanes<'a> for Q3BSPFile {
-    type PlanesIter = std::slice::Iter<'a, Plane>;
+impl HasPlanes for Q3BSPFile {
+    type PlanesIter<'a> = std::slice::Iter<'a, Plane>;
 
-    fn planes_iter(&'a self) -> Self::PlanesIter {
+    fn planes_iter<'a>(&'a self) -> Self::PlanesIter<'a> {
         self.planes.iter()
+    }
+
+    fn get_plane<'a>(&'a self, idx: u32) -> &'a Plane {
+        &self.planes[idx as usize]
     }
 }

@@ -15,9 +15,10 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
+use std::ops::Range;
 use na::{Vector2, Vector3};
 
-use std::ops::Range;
+use super::{HasEffects, HasTextures, HasLightMaps, HasMeshVerts};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[repr(i32)]
@@ -31,24 +32,25 @@ pub enum FaceType {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Face {
     pub face_type: FaceType,
-    pub texture_idx: usize,
-    pub effect_idx: Option<usize>,
-    pub lightmap_idx: Option<usize>,
-    pub vertices_idx: Range<usize>,
-    pub meshverts_idx: Range<usize>,
+    pub texture_idx: u32,
+    pub effect_idx: Option<u32>,
+    pub lightmap_idx: Option<u32>,
+    pub vertices_idx: Range<u32>,
+    pub meshverts_idx: Range<u32>,
 
-    pub map_start: Vector2<i32>,
-    pub map_size: Vector2<i32>,
+    pub map_start: Vector2<u32>,
+    pub map_size: Vector2<u32>,
     pub map_origin: Vector3<f32>,
     pub map_vecs: [Vector3<f32>; 2],
     
     pub normal: Vector3<f32>,
-    pub size: Vector2<i32>,
+    pub size: Vector2<u32>,
 }
 
-pub trait HasFaces<'a> {
-    type FacesIter: Iterator<Item = &'a Face>;
+pub trait HasFaces: HasTextures + HasEffects + HasLightMaps + HasMeshVerts {
+    type FacesIter<'a>: Iterator<Item = &'a Face>;
 
-    fn faces_iter(&'a self) -> Self::FacesIter;
-    fn get_face(&'a self, index: u32) -> &'a Face;
+    fn faces_iter<'a>(&'a self) -> Self::FacesIter<'a>;
+    fn faces_len(&self) -> u32;
+    fn get_face<'a>(&'a self, index: u32) -> &'a Face;
 }

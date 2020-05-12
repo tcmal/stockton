@@ -161,8 +161,8 @@ fn compile_node(
     }
 }
 
-impl<'a> HasBSPTree<'a> for Q3BSPFile {
-    fn get_bsp_root(&'a self) -> &'a BSPNode {
+impl HasBSPTree for Q3BSPFile {
+    fn get_bsp_root<'a>(&'a self) -> &'a BSPNode {
         &self.tree_root
     }
 }

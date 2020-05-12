@@ -14,7 +14,7 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Common types for all stockton crates.
 
-extern crate stockton_bsp;
+extern crate stockton_levels;
 extern crate nalgebra_glm as na;
 
 pub mod world;

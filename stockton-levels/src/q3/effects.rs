@@ -50,14 +50,14 @@ pub fn from_data(data: &[u8], n_brushes: u32) -> Result<Box<[Effect]>> {
 }
 
 
-impl<'a> HasEffects<'a> for Q3BSPFile {
-    type EffectsIter = std::slice::Iter<'a, Effect>;
+impl HasEffects for Q3BSPFile {
+    type EffectsIter<'a> = std::slice::Iter<'a, Effect>;
 
-    fn effects_iter(&'a self) -> Self::EffectsIter {
+    fn effects_iter<'a>(&'a self) -> Self::EffectsIter<'a> {
         self.effects.iter()
     }
 
-    fn get_effect(&'a self, index: u32) -> &'a Effect {
+    fn get_effect<'a>(&'a self, index: u32) -> &'a Effect {
         &self.effects[index as usize]
     }
 }

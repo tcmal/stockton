@@ -15,6 +15,8 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
+use super::HasBrushes;
+
 /// One effect definition
 #[derive(Debug, Clone, PartialEq)]
 pub struct Effect {
@@ -27,9 +29,9 @@ pub struct Effect {
     // todo: unknown: i32
 }
 
-pub trait HasEffects<'a> {
-    type EffectsIter: Iterator<Item = &'a Effect>;
+pub trait HasEffects: HasBrushes {
+    type EffectsIter<'a>: Iterator<Item = &'a Effect>;
 
-    fn effects_iter(&'a self) -> Self::EffectsIter;
-    fn get_effect(&'a self, index: u32) -> &'a Effect;
+    fn effects_iter<'a>(&'a self) -> Self::EffectsIter<'a>;
+    fn get_effect<'a>(&'a self, index: u32) -> &'a Effect;
 }

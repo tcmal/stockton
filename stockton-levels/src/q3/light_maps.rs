@@ -46,14 +46,14 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightMap]>> {
     Ok(maps.into_boxed_slice())
 }
 
-impl<'a> HasLightMaps<'a> for Q3BSPFile {
-    type LightMapsIter = std::slice::Iter<'a, LightMap>;
+impl HasLightMaps for Q3BSPFile {
+    type LightMapsIter<'a> = std::slice::Iter<'a, LightMap>;
 
-    fn lightmaps_iter(&'a self) -> Self::LightMapsIter {
+    fn lightmaps_iter<'a>(&'a self) -> Self::LightMapsIter<'a> {
         self.light_maps.iter()
     }
 
-    fn get_lightmap(&'a self, index: u32) -> &'a LightMap {
+    fn get_lightmap<'a>(&'a self, index: u32) -> &'a LightMap {
         &self.light_maps[index as usize]
     }
 }

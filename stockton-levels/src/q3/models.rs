@@ -73,14 +73,14 @@ pub fn from_data(
 }
 
 
-impl<'a> HasModels<'a> for Q3BSPFile {
-    type ModelsIter = std::slice::Iter<'a, Model>;
+impl HasModels for Q3BSPFile {
+    type ModelsIter<'a> = std::slice::Iter<'a, Model>;
 
-    fn models_iter(&'a self) -> Self::ModelsIter {
+    fn models_iter<'a>(&'a self) -> Self::ModelsIter<'a> {
         self.models.iter()
     }
 
-    fn get_model(&'a self, index: u32) -> &'a Model {
+    fn get_model<'a>(&'a self, index: u32) -> &'a Model {
         &self.models[index as usize]
     }
 }

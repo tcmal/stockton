@@ -15,7 +15,7 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::helpers::{slice_to_i32, slice_to_vec2i, slice_to_vec3};
+use crate::helpers::{slice_to_i32, slice_to_u32, slice_to_vec2ui, slice_to_vec3};
 use crate::types::{Result, ParseError};
 use na::Vector3;
 use crate::traits::faces::*;
@@ -41,11 +41,11 @@ pub fn from_data(
     for n in 0..length {
         faces.push(face_from_slice(
             &data[n * FACE_SIZE..(n + 1) * FACE_SIZE],
-            n_textures as usize,
-            n_effects as usize,
-            n_vertices as usize,
-            n_meshverts as usize,
-            n_lightmaps as usize,
+            n_textures,
+            n_effects,
+            n_vertices,
+            n_meshverts,
+            n_lightmaps,
         )?);
     }
 
@@ -55,24 +55,24 @@ pub fn from_data(
 
 fn face_from_slice(
     data: &[u8],
-    n_textures: usize,
-    n_effects: usize,
-    n_vertices: usize,
-    n_meshverts: usize,
-    n_lightmaps: usize,
+    n_textures: u32,
+    n_effects: u32,
+    n_vertices: u32,
+    n_meshverts: u32,
+    n_lightmaps: u32,
 ) -> Result<Face> {
     if data.len() != FACE_SIZE {
         panic!("tried to call face.from_slice with invalid slice size");
     }
 
     // texture
-    let texture_idx = slice_to_i32(&data[0..4]) as usize;
+    let texture_idx = slice_to_u32(&data[0..4]);
     if texture_idx >= n_textures {
         return Err(ParseError::Invalid);
     }
 
     // effects
-    let effect_idx = slice_to_i32(&data[4..8]) as usize;
+    let effect_idx = slice_to_u32(&data[4..8]);
     let effect_idx = if effect_idx < 0xffffffff {
         if effect_idx >= n_effects {
             return Err(ParseError::Invalid);
@@ -85,11 +85,11 @@ fn face_from_slice(
 
     // face type
     // TODO
-    let face_type: FaceType = unsafe { ::std::mem::transmute(slice_to_i32(&data[8..12])) };
+    let face_type: FaceType = unsafe { ::std::mem::transmute(slice_to_u32(&data[8..12])) };
 
     // vertices
-    let vertex_offset = slice_to_i32(&data[12..16]) as usize;
-    let vertex_n = slice_to_i32(&data[16..20]) as usize;
+    let vertex_offset = slice_to_u32(&data[12..16]);
+    let vertex_n = slice_to_u32(&data[16..20]);
     if (vertex_offset + vertex_n) > n_vertices {
         return Err(ParseError::Invalid);
     }
@@ -97,8 +97,8 @@ fn face_from_slice(
     let vertices_idx = vertex_offset..vertex_offset + vertex_n;
 
     // meshverts
-    let meshverts_offset = slice_to_i32(&data[20..24]) as usize;
-    let meshverts_n = slice_to_i32(&data[24..28]) as usize;
+    let meshverts_offset = slice_to_u32(&data[20..24]);
+    let meshverts_n = slice_to_u32(&data[24..28]);
     if (meshverts_offset + meshverts_n) > n_meshverts {
         return Err(ParseError::Invalid);
     }
@@ -106,20 +106,20 @@ fn face_from_slice(
     let meshverts_idx = meshverts_offset..meshverts_offset + meshverts_n;
 
     // lightmap
-    let lightmap_idx = slice_to_i32(&data[28..32]) as usize;
-    let lightmap_idx = if lightmap_idx < 0xffffffff {
-        if lightmap_idx >= n_lightmaps {
+    let lightmap_idx = slice_to_i32(&data[28..32]);
+    let lightmap_idx = if lightmap_idx > 0 {
+        if lightmap_idx as u32 >= n_lightmaps {
             return Err(ParseError::Invalid);
         }
 
-        Some(lightmap_idx)
+        Some(lightmap_idx as u32)
     } else {
         None
     };
 
     // map properties
-    let map_start = slice_to_vec2i(&data[32..40]);
-    let map_size = slice_to_vec2i(&data[40..48]);
+    let map_start = slice_to_vec2ui(&data[32..40]);
+    let map_size = slice_to_vec2ui(&data[40..48]);
     let map_origin = slice_to_vec3(&data[48..60]);
 
     // map_vecs
@@ -131,7 +131,7 @@ fn face_from_slice(
 
     // normal & size
     let normal = slice_to_vec3(&data[84..96]);
-    let size = slice_to_vec2i(&data[96..104]);
+    let size = slice_to_vec2ui(&data[96..104]);
 
     Ok(Face {
         face_type,
@@ -150,14 +150,19 @@ fn face_from_slice(
 }
 
 
-impl<'a> HasFaces<'a> for Q3BSPFile {
-    type FacesIter = std::slice::Iter<'a, Face>;
+impl HasFaces for Q3BSPFile {
+    type FacesIter<'a> = std::slice::Iter<'a, Face>;
 
-    fn faces_iter(&'a self) -> Self::FacesIter {
+    fn faces_iter<'a>(&'a self) -> Self::FacesIter<'a> {
         self.faces.iter()
     }
 
-    fn get_face(&'a self, index: u32) -> &'a Face {
+    fn faces_len(&self) -> u32 {
+        self.faces.len() as u32
+    }
+
+    fn get_face<'a>(&'a self, index: u32) -> &'a Face {
         &self.faces[index as usize]
     }
+
 }

@@ -26,7 +26,7 @@ extern crate image;
 extern crate log;
 
 extern crate stockton_types;
-extern crate stockton_bsp;
+extern crate stockton_levels;
 
 extern crate arrayvec;
 
@@ -36,22 +36,23 @@ mod types;
 mod culling;
 
 use stockton_types::World;
+use stockton_levels::prelude::*;
 
 use error::{CreationError, FrameError};
 use draw::RenderingContext;
 use culling::get_visible_faces;
 
 /// Renders a world to a window when you tell it to.
-pub struct Renderer<'a> {
-	world: World,
+pub struct Renderer<'a, T: MinBSPFeatures> {
+	world: World<T>,
 	pub context: RenderingContext<'a>
 }
 
 
-impl<'a> Renderer<'a> {
+impl<'a, T: MinBSPFeatures> Renderer<'a, T> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
-	pub fn new(world: World, window: &winit::window::Window) -> Result<Self, CreationError> {
+	pub fn new(world: World<T>, window: &winit::window::Window) -> Result<Self, CreationError> {
 		let context = RenderingContext::new(window)?;
 
 		Ok(Renderer {

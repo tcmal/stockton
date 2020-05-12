@@ -12,18 +12,10 @@
 
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
+//! Marker traits for different feature sets
 
-use std::iter::Iterator;
-use std::collections::HashMap;
+use crate::traits::*;
 
-#[derive(Debug, Clone, PartialEq)]
-/// A game entity
-pub struct Entity {
-    pub attributes: HashMap<String, String>,
-}
-
-pub trait HasEntities {
-	type EntitiesIter<'a>: Iterator<Item = &'a Entity>;
-
-	fn entities_iter<'a>(&'a self) -> Self::EntitiesIter<'a>;
-}
+pub trait MinBSPFeatures: HasBSPTree {}
+impl<T> MinBSPFeatures for T 
+	where T: HasBSPTree {}

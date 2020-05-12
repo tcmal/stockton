@@ -16,7 +16,7 @@
 //! Renders ./example.bsp
 
 extern crate stockton_types;
-extern crate stockton_bsp;
+extern crate stockton_levels;
 extern crate stockton_render;
 extern crate winit;
 extern crate simple_logger;
@@ -25,7 +25,7 @@ extern crate image;
 use image::load_from_memory;
 use std::time::SystemTime;
 
-use stockton_bsp::BSPFile;
+use stockton_levels::q3::Q3BSPFile;
 use stockton_types::{World, Vector3};
 use stockton_render::Renderer;
 
@@ -35,7 +35,7 @@ use winit::{
     window::WindowBuilder
 };
 
-const SPEED: f32 = 25.0;
+const SPEED: f32 = 100.0;
 
 #[derive(Debug)]
 struct KeyState {
@@ -91,21 +91,22 @@ fn main() {
 	let event_loop = EventLoop::new();
 	let window = WindowBuilder::new().build(&event_loop).unwrap();
 	let data = include_bytes!("../data/test.bsp").to_vec().into_boxed_slice();
-	let bsp = BSPFile::from_buffer(data).unwrap();
+	let bsp = Q3BSPFile::new(&data).unwrap();
 	
-	let world = World::new(bsp).unwrap();
+	let world = World::new(bsp);
 	let mut renderer = Renderer::new(world, &window).unwrap();
 
+	{
+		renderer.context.add_texture(
+			load_from_memory(include_bytes!("../../render-quad/data/test1.png"))
+				.expect("Couldn't load test texture 1")
+				.into_rgba()).unwrap();
 
-	renderer.context.add_texture(
-		load_from_memory(include_bytes!("../../render-quad/data/test1.png"))
-			.expect("Couldn't load test texture 1")
-			.into_rgba()).unwrap();
-
-	renderer.context.add_texture(
-		load_from_memory(include_bytes!("../../render-quad/data/test2.png"))
-			.expect("Couldn't load test texture 2")
-			.into_rgba()).unwrap();
+		renderer.context.add_texture(
+			load_from_memory(include_bytes!("../../render-quad/data/test2.png"))
+				.expect("Couldn't load test texture 2")
+				.into_rgba()).unwrap();
+	}
 
 	let mut last_update = SystemTime::now();
 	let mut key_state = KeyState::new();
@@ -113,7 +114,6 @@ fn main() {
 	// Keep rendering the world
 	event_loop.run(move |event, _, flow| {
 		*flow = ControlFlow::Poll;
-		
 		match event {
 			Event::WindowEvent {
 				event,

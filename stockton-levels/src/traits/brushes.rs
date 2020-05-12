@@ -17,6 +17,8 @@
 
 //! Parses the brushes & brushsides lumps from a bsp file
 
+use super::HasPlanes;
+
 /// One brush record. Used for collision detection.
 /// "Each brush describes a convex volume as defined by its surrounding surfaces."
 #[derive(Debug, Clone, PartialEq)]
@@ -33,9 +35,9 @@ pub struct BrushSide {
     pub is_opposing: bool,
 }
 
-pub trait HasBrushes<'a> {
-    type BrushesIter: Iterator<Item = &'a Brush>;
+pub trait HasBrushes: HasPlanes {
+    type BrushesIter<'a>: Iterator<Item = &'a Brush>;
 
-    fn brushes_iter(&'a self) -> Self::BrushesIter;
-    fn get_brush(&'a self, index: u32) -> &'a Brush;
+    fn brushes_iter<'a>(&'a self) -> Self::BrushesIter<'a>;
+    fn get_brush<'a>(&'a self, index: u32) -> &'a Brush;
 }

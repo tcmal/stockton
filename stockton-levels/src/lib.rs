@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Parses common features from many BSP file formats.
+#![feature(generic_associated_types)]
 
 #[macro_use]
 extern crate bitflags;
@@ -23,3 +24,5 @@ mod helpers;
 pub mod q3;
 pub mod types;
 pub mod traits;
+pub mod prelude;
+pub mod features;

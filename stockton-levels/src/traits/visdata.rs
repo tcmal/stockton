@@ -22,7 +22,7 @@ pub trait HasVisData {
 	type VisibleIterator: Iterator<Item = ClusterId>; 
 
 	/// Returns an iterator of all clusters visible from the given Cluster ID
-	fn all_visible_from<'a>(&'a self, from: ClusterId) -> Self::VisibleIterator;
+	fn all_visible_from(&self, from: ClusterId) -> Self::VisibleIterator;
 
 	/// Returns true if `dest` is visible from `from`.
 	fn cluster_visible_from(&self, from: ClusterId, dest: ClusterId) -> bool;

@@ -18,6 +18,8 @@
 use na::Vector3;
 use std::ops::Range;
 
+use super::{HasFaces, HasBrushes};
+
 #[derive(Debug, Clone)]
 pub struct Model {
     pub mins: Vector3<f32>,
@@ -26,9 +28,9 @@ pub struct Model {
     pub brushes_idx: Range<u32>,
 }
 
-pub trait HasModels<'a> {
-    type ModelsIter: Iterator<Item = &'a Model>;
+pub trait HasModels: HasFaces + HasBrushes {
+    type ModelsIter<'a>: Iterator<Item = &'a Model>;
 
-    fn models_iter(&'a self) -> Self::ModelsIter;
-    fn get_model(&'a self, index: u32) -> &'a Model;
+    fn models_iter<'a>(&'a self) -> Self::ModelsIter<'a>;
+    fn get_model<'a>(&'a self, index: u32) -> &'a Model;
 }

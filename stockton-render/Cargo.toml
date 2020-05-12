@@ -4,7 +4,7 @@ version = "0.1.0"
 authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
 
 [dependencies]
-stockton-bsp = { git = "https://github.com/tcmal/rust-bsp.git" }
+stockton-levels = { path = "../stockton-levels" }
 stockton-types = { path = "../stockton-types" }
 winit = "^0.21"
 gfx-hal = "^0.5"

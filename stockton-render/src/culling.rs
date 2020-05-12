@@ -14,34 +14,45 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Functions for figuring out what to render
+#![allow(dead_code)]
 
-use stockton_bsp::BSPFile;
+use stockton_levels::prelude::*;
+use stockton_levels::traits::tree::BSPNodeValue;
 use stockton_types::Vector3;
+
 
 /// Get the visible faces according to visdata and frustum culling
 // TODO: Write this. For now, just render all faces
-pub fn get_visible_faces<'a>(pos: Vector3, file: &BSPFile) -> Vec<usize> {
-	let mut visible = Vec::with_capacity(file.faces.faces.len());
-	for x in 0..file.faces.faces.len() {
-		visible.push(x);
+pub fn get_visible_faces<T: MinBSPFeatures>(_pos: Vector3, file: &T) -> Vec<u32> {
+	let mut visible = Vec::with_capacity(file.faces_len() as usize);
+	for x in 0..file.faces_len() {
+		visible.push(x as u32);
 	}
 
 	return visible;
 }
 
 /// Get the viscluster pos lies in 
-fn get_cluster_id(pos: Vector3, file: &BSPFile) -> usize {
-	let mut node = &file.tree.root;
-	while node.leaf.is_none() {
-		let plane = file.planes.planes[node.plane_idx as usize];
-		let dist = plane.normal.dot(&pos) - plane.dist;
+fn get_cluster_id<T: MinBSPFeatures>(pos: Vector3, file: &T) -> u32 {
+	let mut node = file.get_bsp_root();
+	loop {
+		if let BSPNodeValue::Children(front, back) = &node.value{
+			let plane = file.get_plane(node.plane_idx);
+			let dist = plane.normal.dot(&pos) - plane.dist;
 
-		if dist >= 0.0 {
-			node = &node.children.as_ref().unwrap()[0]
+			if dist >= 0.0 {
+				node = front;
+			} else {
+				node = back;
+			}
 		} else {
-			node = &node.children.as_ref().unwrap()[1]
+			break;
 		}
 	}
 
-	node.leaf.as_ref().unwrap().cluster_id as usize
+	if let BSPNodeValue::Leaf(leaf) = &node.value {
+		leaf.cluster_id
+	} else {
+		panic!("should have had a leaf but didn't");
+	}
 }

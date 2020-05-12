@@ -15,18 +15,19 @@
 
 //! The thing you play on and all the associated state.
 
-use stockton_bsp::BSPFile;
+use stockton_levels::prelude::*;
 
 /// A loaded world.
-pub struct World {
-	pub map: BSPFile
+pub struct World<T: MinBSPFeatures> {
+	pub map: T,
 }
 
-impl World {
-	/// Create a new world from a BSPFile.
-	pub fn new(bsp: BSPFile) -> Option<World> {
-		Some(World {
-			map: bsp
-		})
+impl<T: MinBSPFeatures> World<T> {
+	/// Create a new world from a level.
+	/// The level can be any format, as long as it has the required features of a bsp.
+	pub fn new(map: T) -> World<T> {
+		World {
+			map
+		}
 	}
 }

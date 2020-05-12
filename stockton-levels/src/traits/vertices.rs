@@ -18,7 +18,6 @@
 use crate::helpers::{slice_to_f32};
 use crate::types::RGBA;
 use na::Vector3;
-use std::convert::TryInto;
 
 
 /// A vertex, used to describe a face.
@@ -49,22 +48,22 @@ impl TexCoord {
 }
 
 /// A vertex offset, used to describe generalised triangle meshes
-pub type MeshVert = i32;
+pub type MeshVert = u32;
 
-pub trait HasVertices<'a> {
-    type VerticesIter: Iterator<Item = &'a Vertex>;
+pub trait HasVertices {
+    type VerticesIter<'a>: Iterator<Item = &'a Vertex>;
 
-    fn vertices_iter(&'a self) -> Self::VerticesIter;
-    fn get_vertex(&'a self, index: u32) -> &'a Vertex;
+    fn vertices_iter<'a>(&'a self) -> Self::VerticesIter<'a>;
+    fn get_vertex<'a>(&'a self, index: u32) -> &'a Vertex;
 }
 
-pub trait HasMeshVerts<'a>: HasVertices<'a> {
-    type MeshVertsIter: Iterator<Item = &'a MeshVert>;
+pub trait HasMeshVerts: HasVertices {
+    type MeshVertsIter<'a>: Iterator<Item = &'a MeshVert>;
 
-    fn meshverts_iter(&'a self) -> Self::MeshVertsIter;
+    fn meshverts_iter<'a>(&'a self) -> Self::MeshVertsIter<'a>;
     fn get_meshvert(&self, index: u32) -> MeshVert;
 
-    fn resolve_meshvert(&'a self, index: u32) -> &'a Vertex {
-        self.get_vertex(self.get_meshvert(index).try_into().unwrap())
+    fn resolve_meshvert<'a>(&'a self, index: u32, base: u32) -> &'a Vertex {
+        self.get_vertex(self.get_meshvert(index) + base)
     }
 }

@@ -33,10 +33,8 @@ use hal::{
 	window::SwapchainConfig
 };
 use stockton_types::{Vector2, Vector3};
-use stockton_bsp::{
-	BSPFile,
-	lumps::faces::FaceType
-};
+use stockton_levels::prelude::*;
+use stockton_levels::traits::faces::FaceType;
 
 use crate::{
 	types::*,
@@ -853,19 +851,19 @@ impl<'a> RenderingContext<'a> {
 
 	/// Load all active faces into the vertex buffers for drawing
 	// TODO: This is just a POC, we need to restructure things a lot for actually texturing, etc
-	pub fn set_active_faces(&mut self, faces: Vec<usize>, file: &BSPFile) {
+	pub fn set_active_faces<M: MinBSPFeatures>(&mut self, faces: Vec<u32>, file: &M) -> () {
 		let mut curr_vert_idx: usize = 0;
 		let mut curr_idx_idx: usize = 0;
 
-		for face in faces.into_iter().map(|idx| &file.faces.faces[idx]) {
+		for face in faces.into_iter().map(|idx| file.get_face(idx)) {
 			if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
-				let base = face.vertices_idx.start as i32;
+				let base = face.vertices_idx.start;
 
 				for idx in face.meshverts_idx.clone().step_by(3) {
 					let start_idx: u16 = curr_vert_idx.try_into().unwrap();
 
-					for mv in &file.meshverts.meshverts[idx..idx+3] {
-						let vert = &file.vertices.vertices[(base + mv.offset) as usize];
+					for idx2 in idx..idx+3 {
+						let vert = &file.resolve_meshvert(idx2 as u32, base);
 						let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
 
 						let uvp = UVPoint (vert.position, uv, 0);

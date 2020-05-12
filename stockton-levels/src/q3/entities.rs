@@ -99,10 +99,10 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Entity]>> {
     Ok(entities.into_boxed_slice())
 }
 
-impl<'a> HasEntities<'a> for Q3BSPFile {
-    type EntitiesIter = std::slice::Iter<'a, Entity>;
+impl HasEntities for Q3BSPFile {
+    type EntitiesIter<'a> = std::slice::Iter<'a, Entity>;
 
-    fn entities_iter(&'a self) -> Self::EntitiesIter {
+    fn entities_iter<'a>(&'a self) -> Self::EntitiesIter<'a> {
         self.entities.iter()
     }
 }

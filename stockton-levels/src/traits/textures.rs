@@ -142,8 +142,8 @@ bitflags!(
     }
 );
 
-pub trait HasTextures<'a> {
-    type TexturesIter: Iterator<Item = &'a Texture>;
+pub trait HasTextures {
+    type TexturesIter<'a>: Iterator<Item = &'a Texture>;
 
-	fn textures_iter(&'a self) -> Self::TexturesIter;
+	fn textures_iter<'a>(&'a self) -> Self::TexturesIter<'a>;
 }

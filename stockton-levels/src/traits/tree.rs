@@ -18,6 +18,7 @@
 //! Parses the BSP tree into a usable format
 
 use na::Vector3;
+use super::{HasFaces, HasBrushes, HasVisData};
 
 /// A node in a BSP tree.
 /// Either has two children *or* a leaf entry.
@@ -45,6 +46,6 @@ pub struct BSPLeaf {
     pub brushes_idx: Box<[u32]>,
 }
 
-pub trait HasBSPTree<'a> {
-    fn get_bsp_root(&'a self) -> &'a BSPNode;
+pub trait HasBSPTree: HasFaces + HasBrushes + HasVisData {
+    fn get_bsp_root<'a>(&'a self) -> &'a BSPNode;
 }

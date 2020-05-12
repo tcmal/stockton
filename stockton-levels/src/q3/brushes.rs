@@ -104,14 +104,14 @@ fn get_sides(
 }
 
 
-impl<'a> HasBrushes<'a> for Q3BSPFile {
-    type BrushesIter = std::slice::Iter<'a, Brush>;
+impl HasBrushes for Q3BSPFile {
+    type BrushesIter<'a> = std::slice::Iter<'a, Brush>;
 
-    fn brushes_iter(&'a self) -> Self::BrushesIter {
+    fn brushes_iter<'a>(&'a self) -> Self::BrushesIter<'a> {
         self.brushes.iter()
     }
 
-    fn get_brush(&'a self, index: u32) -> &'a Brush {
+    fn get_brush<'a>(&'a self, index: u32) -> &'a Brush {
         &self.brushes[index as usize]
     }
 }

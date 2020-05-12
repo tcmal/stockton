@@ -50,10 +50,10 @@ pub fn from_data(lump: &[u8]) -> Result<Box<[Texture]>> {
     Ok(textures.into_boxed_slice())
 }
 
-impl<'a> HasTextures<'a> for Q3BSPFile {
-    type TexturesIter = std::slice::Iter<'a, Texture>;
+impl HasTextures for Q3BSPFile {
+    type TexturesIter<'a> = std::slice::Iter<'a, Texture>;
 
-    fn textures_iter(&'a self) -> Self::TexturesIter {
+    fn textures_iter<'a>(&'a self) -> Self::TexturesIter<'a> {
         self.textures.iter()
     }
 }

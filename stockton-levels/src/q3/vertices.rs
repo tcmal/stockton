@@ -18,7 +18,7 @@
 use std::convert::TryInto;
 
 use super::Q3BSPFile;
-use crate::helpers::{slice_to_i32, slice_to_vec3};
+use crate::helpers::{slice_to_u32, slice_to_vec3};
 use crate::types::{Result, ParseError, RGBA};
 use crate::traits::vertices::*;
 
@@ -58,32 +58,32 @@ pub fn meshverts_from_data(data: &[u8]) -> Result<Box<[MeshVert]>> {
 
     let mut meshverts = Vec::with_capacity(length as usize);
     for n in 0..length {
-        meshverts.push(slice_to_i32(&data[n * 4..(n + 1) * 4]))
+        meshverts.push(slice_to_u32(&data[n * 4..(n + 1) * 4]))
     }
 
     Ok(meshverts.into_boxed_slice())
 }
 
-impl<'a> HasVertices<'a> for Q3BSPFile {
-    type VerticesIter = std::slice::Iter<'a, Vertex>;
+impl HasVertices for Q3BSPFile {
+    type VerticesIter<'a> = std::slice::Iter<'a, Vertex>;
 
-    fn vertices_iter(&'a self) -> Self::VerticesIter {
+    fn vertices_iter<'a>(&'a self) -> Self::VerticesIter<'a> {
         self.vertices.iter()
     }
 
-    fn get_vertex(&'a self, index: u32) -> &'a Vertex {
+    fn get_vertex<'a>(&'a self, index: u32) -> &'a Vertex {
         &self.vertices[index as usize]
     }
 }
 
-impl<'a> HasMeshVerts<'a> for Q3BSPFile {
-    type MeshVertsIter = std::slice::Iter<'a, MeshVert>;
+impl HasMeshVerts for Q3BSPFile {
+    type MeshVertsIter<'a> = std::slice::Iter<'a, MeshVert>;
 
-    fn meshverts_iter(&'a self) -> Self::MeshVertsIter {
+    fn meshverts_iter<'a>(&'a self) -> Self::MeshVertsIter<'a> {
         self.meshverts.iter()
     }
 
-    fn get_meshvert(&self, index: u32) -> MeshVert {
+    fn get_meshvert<'a>(&self, index: u32) -> MeshVert {
         self.meshverts[index as usize]
     }
 }

@@ -43,14 +43,14 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightVol]>> {
 }
 
 
-impl<'a> HasLightVols<'a> for Q3BSPFile {
-    type LightVolsIter = std::slice::Iter<'a, LightVol>;
+impl HasLightVols for Q3BSPFile {
+    type LightVolsIter<'a> = std::slice::Iter<'a, LightVol>;
 
-    fn lightvols_iter(&'a self) -> Self::LightVolsIter {
+    fn lightvols_iter<'a>(&'a self) -> Self::LightVolsIter<'a> {
         self.light_vols.iter()
     }
 
-    fn get_lightvol(&'a self, index: u32) -> &'a LightVol {
+    fn get_lightvol<'a>(&'a self, index: u32) -> &'a LightVol {
         &self.light_vols[index as usize]
     }
 }

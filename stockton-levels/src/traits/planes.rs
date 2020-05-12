@@ -35,8 +35,9 @@ pub struct Plane {
     pub dist: f32,
 }
 
-pub trait HasPlanes<'a> {
-    type PlanesIter: Iterator<Item = &'a Plane>;
+pub trait HasPlanes {
+    type PlanesIter<'a>: Iterator<Item = &'a Plane>;
 
-    fn planes_iter(&'a self) -> Self::PlanesIter;
+    fn planes_iter<'a>(&'a self) -> Self::PlanesIter<'a>;
+    fn get_plane<'a>(&'a self, idx: u32) -> &'a Plane;
 } 

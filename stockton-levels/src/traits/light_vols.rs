@@ -15,8 +15,6 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::convert::TryInto;
-
 use crate::types::RGB;
 
 #[derive(Debug, Clone, Copy)]
@@ -26,9 +24,9 @@ pub struct LightVol {
     pub dir: [u8; 2],
 }
 
-pub trait HasLightVols<'a> {
-    type LightVolsIter: Iterator<Item = &'a LightVol>;
+pub trait HasLightVols {
+    type LightVolsIter<'a>: Iterator<Item = &'a LightVol>;
 
-    fn lightvols_iter(&'a self) -> Self::LightVolsIter;
-    fn get_lightvol(&'a self, index: u32) -> &'a LightVol;
+    fn lightvols_iter<'a>(&'a self) -> Self::LightVolsIter<'a>;
+    fn get_lightvol<'a>(&'a self, index: u32) -> &'a LightVol;
 }

@@ -54,9 +54,9 @@ impl fmt::Debug for LightMap {
     }
 }
 
-pub trait HasLightMaps<'a> {
-    type LightMapsIter: Iterator<Item = &'a LightMap>;
+pub trait HasLightMaps {
+    type LightMapsIter<'a>: Iterator<Item = &'a LightMap>;
 
-    fn lightmaps_iter(&'a self) -> Self::LightMapsIter;
-    fn get_lightmap(&'a self, index: u32) -> &'a LightMap;
+    fn lightmaps_iter<'a>(&'a self) -> Self::LightMapsIter<'a>;
+    fn get_lightmap<'a>(&'a self, index: u32) -> &'a LightMap;
 }
