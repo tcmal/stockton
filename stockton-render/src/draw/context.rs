@@ -118,7 +118,7 @@ pub struct RenderingContext<'a> {
 	pub vert_buffer: ManuallyDrop<StagedBuffer<'a, UVPoint>>,
 	pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
 
-	camera: ManuallyDrop<WorkingCamera<'a>>
+	camera: WorkingCamera
 }
 
 impl<'a> RenderingContext<'a> {
@@ -268,10 +268,9 @@ impl<'a> RenderingContext<'a> {
 		// Camera
 		// TODO: Settings
 		let ratio = extent.width as f32 / extent.height as f32;
-		let camera = WorkingCamera::defaults(ratio, &mut device, &adapter, &mut queue_group.queues[0], &mut cmd_pool)?;
+		let camera = WorkingCamera::defaults(ratio);
 
 		let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
-		descriptor_set_layouts.push(camera.descriptor_set_layout.deref());
 		descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
 
 		// Graphics pipeline
@@ -308,7 +307,7 @@ impl<'a> RenderingContext<'a> {
 			vert_buffer: ManuallyDrop::new(vert_buffer),
 			index_buffer: ManuallyDrop::new(index_buffer),
 
-			camera: ManuallyDrop::new(camera)
+			camera
 		})
 	}
 
@@ -339,7 +338,6 @@ impl<'a> RenderingContext<'a> {
 
 		let (pipeline_layout, pipeline) = {		
 			let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
-			descriptor_set_layouts.push(self.camera.descriptor_set_layout.deref());
 			descriptor_set_layouts.push(self.texture_store.descriptor_set_layout.deref());
 
 			let subpass = hal::pass::Subpass {
@@ -583,7 +581,11 @@ impl<'a> RenderingContext<'a> {
 
 		// Pipeline layout
 		let layout = unsafe {
-			device.create_pipeline_layout(set_layouts, &[])
+			device.create_pipeline_layout(
+				set_layouts,
+				// vp matrix, 4x4 f32
+				&[(ShaderStageFlags::VERTEX, 0..64)]
+			)
 		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
 
 		// Colour blending
@@ -752,6 +754,7 @@ impl<'a> RenderingContext<'a> {
 		unsafe {
 			use hal::buffer::{IndexBufferView, SubRange};
 			use hal::command::{SubpassContents, CommandBufferFlags, ClearValue, ClearColor};
+			use hal::pso::ShaderStageFlags;
 
 			let buffer = &mut self.cmd_buffers[image_index];
 			let clear_values = [ClearValue {
@@ -789,10 +792,7 @@ impl<'a> RenderingContext<'a> {
 				);
 				buffer.bind_graphics_pipeline(&self.pipeline);
 
-				let mut descriptor_sets: ArrayVec<[_; 2]> = ArrayVec::new();
-				descriptor_sets.push(self.camera.commit(&self.device,
-					&mut self.queue_group.queues[0],
-					&mut self.cmd_pool));
+				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
 				descriptor_sets.push(&self.texture_store.descriptor_set);
 
 				buffer.bind_graphics_descriptor_sets(
@@ -801,6 +801,15 @@ impl<'a> RenderingContext<'a> {
 					descriptor_sets,
 					&[]
 				);
+
+				let vp = self.camera.get_matrix().as_slice();
+				let vp = std::mem::transmute::<&[f32], &[u32]>(vp);
+
+				buffer.push_graphics_constants(
+					&self.pipeline_layout,
+					ShaderStageFlags::VERTEX,
+					0,
+					vp);
 
 				buffer.bind_vertex_buffers(0, vbufs);
 				buffer.bind_index_buffer(IndexBufferView {
@@ -924,7 +933,6 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 			ManuallyDrop::into_inner(read(&self.vert_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.index_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
-			ManuallyDrop::into_inner(read(&self.camera)).deactivate(&mut self.device);
 
 			self.device.destroy_command_pool(
 				ManuallyDrop::into_inner(read(&self.cmd_pool)),
