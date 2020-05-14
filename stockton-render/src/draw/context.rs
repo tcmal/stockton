@@ -567,7 +567,7 @@ impl<'a> RenderingContext<'a> {
 		let rasterizer = Rasterizer {
 			polygon_mode: PolygonMode::Fill,
 			cull_face: Face::BACK,
-			front_face: FrontFace::Clockwise,
+			front_face: FrontFace::CounterClockwise,
 			depth_clamping: false,
 			depth_bias: None,
 			conservative: true,
