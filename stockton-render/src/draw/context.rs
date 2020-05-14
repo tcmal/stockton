@@ -538,28 +538,11 @@ impl<'a> RenderingContext<'a> {
 			rate: VertexInputRate::Vertex,
 		}];
 
-		let attributes: Vec<AttributeDesc> = vec![AttributeDesc { // XYZ Attribute
-			location: 0,
-			binding: 0,
-			element: Element {
-				format: Format::Rgb32Sfloat,
-				offset: 0,
-			},
-		}, AttributeDesc { // UV Attribute
-			location: 1,
-			binding: 0,
-			element: Element {
-				format: Format::Rg32Sfloat,
-				offset: (size_of::<f32>() * 3) as ElemOffset,
-			}
-		}, AttributeDesc { // Tex Attribute
-			location: 2,
-			binding: 0,
-			element: Element {
-				format: Format::R32Sint,
-				offset: (size_of::<f32>() * 5) as ElemOffset
-			}
-		}];
+		let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
+			size_of::<f32>() * 3; Rgb32Sfloat,
+			size_of::<f32>() * 2; Rg32Sfloat,
+			size_of::<u32>(); R32Sint
+		);
 
 		// Rasterizer
 		let rasterizer = Rasterizer {

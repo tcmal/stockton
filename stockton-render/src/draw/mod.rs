@@ -15,6 +15,8 @@
 
 //! Given 3D points and some camera information, renders to the screen.
 
+#[macro_use]
+mod macros;
 mod context;
 mod buffer;
 mod texture;
