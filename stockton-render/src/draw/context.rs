@@ -844,9 +844,15 @@ impl<'a> RenderingContext<'a> {
 		self.camera.camera_pos()
 	}
 
-	/// Move the camera by `delta`
-	pub fn move_camera(&mut self, delta: Vector3) {
-		self.camera.move_camera(delta)
+	/// Move the camera by `delta` relative to its rotation
+	pub fn move_camera_relative(&mut self, delta: Vector3) {
+		self.camera.move_camera_relative(delta)
+	}
+
+	/// Rotate the camera
+	/// `euler` should be euler angles in radians
+	pub fn rotate(&mut self, euler: Vector3) {
+		self.camera.rotate(euler)
 	}
 
 	/// Load all active faces into the vertex buffers for drawing

@@ -22,12 +22,13 @@ extern crate winit;
 extern crate simple_logger;
 extern crate image;
 
-use image::load_from_memory;
 use std::time::SystemTime;
+use std::f32::consts::PI;
+use image::load_from_memory;
 
 use stockton_levels::prelude::*;
 use stockton_levels::q3::Q3BSPFile;
-use stockton_types::{World, Vector3};
+use stockton_types::{World, Vector3, Vector2};
 use stockton_render::Renderer;
 
 use winit::{
@@ -36,7 +37,13 @@ use winit::{
     window::WindowBuilder
 };
 
+/// Movement speed, world units per second
 const SPEED: f32 = 100.0;
+
+/// Pixels required to rotate 90 degrees
+const PIXELS_PER_90D: f32 = 100.0;
+
+const SENSITIVITY: f32 = PI / (2.0	 * PIXELS_PER_90D);
 
 #[derive(Debug)]
 struct KeyState {
@@ -91,6 +98,12 @@ fn main() {
 	// Load the world and renderer
 	let event_loop = EventLoop::new();
 	let window = WindowBuilder::new().build(&event_loop).unwrap();
+
+	if let Err(_) = window.set_cursor_grab(true) {
+		println!("warning: cursor not grabbed");
+	}
+	window.set_cursor_visible(false);
+
 	let data = include_bytes!("../data/test.bsp").to_vec().into_boxed_slice();
 	let bsp: Result<Q3BSPFile<Q3System>, stockton_levels::types::ParseError> = Q3BSPFile::parse_file(&data);
 	let bsp: Q3BSPFile<Q3System> = bsp.unwrap();
@@ -113,6 +126,7 @@ fn main() {
 
 	let mut last_update = SystemTime::now();
 	let mut key_state = KeyState::new();
+	let mut last_cursor_pos = Vector2::new(0.0, 0.0);
 
 	// Keep rendering the world
 	event_loop.run(move |event, _, flow| {
@@ -126,19 +140,38 @@ fn main() {
 					*flow = ControlFlow::Exit
 				},
 				WindowEvent::KeyboardInput {input, ..} => match input.scancode {
-					// Left
-					105 => key_state.left = input.state == ElementState::Pressed,
-					// Right
-					106 => key_state.right = input.state == ElementState::Pressed,
-					// Up (in)
-					103 => key_state.inwards = input.state == ElementState::Pressed,
-					// Down (out)
-					108 => key_state.out = input.state == ElementState::Pressed,
+					// A
+					30 => key_state.left = input.state == ElementState::Pressed,
+					// D
+					32 => key_state.right = input.state == ElementState::Pressed,
+					// W (in)
+					17 => key_state.inwards = input.state == ElementState::Pressed,
+					// S (out)
+					31 => key_state.out = input.state == ElementState::Pressed,
 					// Space (up)
 					57 => key_state.up = input.state == ElementState::Pressed,
 					// Ctrl (down)
-					29 => key_state.down = input.state == ElementState::Pressed,
+					42 => key_state.down = input.state == ElementState::Pressed,
 					_ => ()
+				},
+				WindowEvent::CursorMoved {
+					position,
+					..
+				} => {
+					// Special case: First frame
+					if last_cursor_pos.x != 0.0 || last_cursor_pos.y == 0.0 {
+						let x_offset = (position.x as f32 - last_cursor_pos.x) * SENSITIVITY;
+						let y_offset = (position.y as f32 - last_cursor_pos.y) * SENSITIVITY;
+
+						renderer.context.rotate(Vector3::new(
+							-y_offset,
+							x_offset,
+							0.0
+						));
+					}
+
+					last_cursor_pos.x = position.x as f32;
+					last_cursor_pos.y = position.y as f32;
 				}
 				_ => ()
 			},
@@ -153,8 +186,7 @@ fn main() {
 
 				let delta_pos = key_state.as_vector() * delta * SPEED;
 				if delta_pos.x != 0.0 || delta_pos.y != 0.0 || delta_pos.z != 0.0 {
-					renderer.context.move_camera(delta_pos);
-					println!("camera is at {:?}", renderer.context.camera_pos());
+					renderer.context.move_camera_relative(delta_pos);
 				}
 
 				renderer.render_frame().unwrap()

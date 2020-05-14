@@ -16,9 +16,10 @@
 //! Things related to converting 3D world space to 2D screen space
 
 use std::iter::once;
+use std::f32::consts::PI;
 use hal::prelude::*;
 use hal::buffer::Usage;
-use na::{look_at_lh, perspective_lh_zo};
+use na::{look_at_lh, perspective_lh_zo, radians};
 
 use core::mem::ManuallyDrop;
 
@@ -26,18 +27,37 @@ use crate::error;
 use crate::types::*;
 use super::buffer::{StagedBuffer, ModifiableBuffer};
 use stockton_types::{Vector3, Matrix4};
+use na::{Mat4, Vec4};
+
+/// 90 degrees in radians
+const R90: f32 = PI / 2.0;
+
+/// 180 degrees in radians
+const R180: f32 = PI;
+
+fn euler_to_direction(euler: &Vector3) -> Vector3 {
+	let pitch = euler.x;
+	let yaw = euler.y;
+	let _roll = euler.z; // TODO: Support camera roll
+
+	Vector3::new(
+		yaw.sin() * pitch.cos(),
+		pitch.sin(),
+		yaw.cos() * pitch.cos()
+	)
+}
 
 pub struct CameraSettings {
-	/// Position of the camera
+	/// Position of the camera (world units)
 	pub position: Vector3,
 
-	/// A point the camera is looking directly at
-	pub looking_at: Vector3,
+	/// Rotation of the camera (euler angles in radians)
+	pub rotation: Vector3,
 
-	/// The up direction
+	/// The up direction (normalized)
 	pub up: Vector3,
 
-	/// FOV in radians
+	/// FOV (radians)
 	pub fov: f32,
 
 	/// Near clipping plane (world units)
@@ -76,8 +96,8 @@ impl<'a> WorkingCamera<'a> {
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> Result<WorkingCamera<'a>, error::CreationError> {
 		WorkingCamera::with_settings(CameraSettings {
-			position: Vector3::new(-320.0, 0.0, 0.0),
-			looking_at: Vector3::new(0.0, 0.0, 0.0),
+			position: Vector3::new(0.0, 0.0, 0.0),
+			rotation: Vector3::new(0.0, R90, 0.0),
 			up: Vector3::new(0.0, 1.0, 0.0),
 			fov: f32::to_radians(90.0),
 			near: 0.1,
@@ -176,10 +196,13 @@ impl<'a> WorkingCamera<'a> {
 
 	/// Returns a matrix that transforms from world space to screen space
 	pub fn vp_matrix(&self) -> Matrix4 {
+		// Get look direction from euler angles
+		let direction = euler_to_direction(&self.settings.rotation);
+
 		// Converts world space to camera space
 		let view_matrix = look_at_lh(
 			&self.settings.position,
-			&self.settings.looking_at,
+			&(direction + &self.settings.position),
 			&self.settings.up
 		);
 
@@ -208,9 +231,41 @@ impl<'a> WorkingCamera<'a> {
 		self.is_dirty = true;
 	}
 
-	/// Move the camera by `delta`
-	pub fn move_camera(&mut self, delta: Vector3) {
-		self.settings.position += delta;
+	/// Apply rotation of the camera
+	/// `euler` should be euler angles in degrees
+	pub fn rotate(&mut self, euler: Vector3) {
+		// TODO
+		self.settings.rotation += euler;
+
+		// Clamp -pi/2 < pitch < pi/2
+		if self.settings.rotation.x > R90 {
+			self.settings.rotation.x = R90;
+		} else if self.settings.rotation.x < -R90 {
+			self.settings.rotation.x = -R90;
+		}
+
+		// -pi < yaw <= pi
+		if self.settings.rotation.y <= -R180 {
+			self.settings.rotation.y = R180 - self.settings.rotation.y % -R180;
+		} else if self.settings.rotation.y > 180.0 {
+			self.settings.rotation.y = -R180 + self.settings.rotation.y % R180;
+		}
+
+		self.is_dirty = true;
+	}
+
+	/// Move the camera by `delta`, relative to the camera's rotation
+	pub fn move_camera_relative(&mut self, delta: Vector3) {
+		let rot_matrix = Mat4::from_euler_angles(
+			-self.settings.rotation.x,
+			self.settings.rotation.y,
+			self.settings.rotation.z
+		);
+
+		let new = rot_matrix * Vec4::new(delta.x, delta.y, delta.z, 1.0);
+		self.settings.position.x += new.x;
+		self.settings.position.y += new.y;
+		self.settings.position.z += new.z;
 		self.is_dirty = true;
 	}
 
