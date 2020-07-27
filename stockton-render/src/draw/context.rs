@@ -73,7 +73,7 @@ const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
 /// Represents a point of a triangle, including UV and texture information.
 #[derive(Debug, Clone, Copy)]
-pub struct UVPoint (pub Vector3, pub Vector2, pub i32);
+pub struct UVPoint (pub Vector3, pub i32, pub Vector2);
 
 /// Contains all the hal related stuff.
 /// In the end, this takes some 3D points and puts it on the screen.
@@ -540,8 +540,8 @@ impl<'a> RenderingContext<'a> {
 
 		let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
 			size_of::<f32>() * 3; Rgb32Sfloat,
-			size_of::<f32>() * 2; Rg32Sfloat,
-			size_of::<u32>(); R32Sint
+			size_of::<u32>(); R32Sint,
+			size_of::<f32>() * 2; Rg32Sfloat
 		);
 
 		// Rasterizer
@@ -788,7 +788,7 @@ impl<'a> RenderingContext<'a> {
 						let vert = &file.resolve_meshvert(idx2 as u32, base);
 						let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
 
-						let uvp = UVPoint (vert.position, uv, 0);
+						let uvp = UVPoint (vert.position, face.texture_idx.try_into().unwrap(), uv);
 						self.vert_buffer[curr_vert_idx] = uvp;
 						
 						curr_vert_idx += 1;
