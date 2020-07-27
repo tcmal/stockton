@@ -19,6 +19,7 @@ extern crate stockton_types;
 extern crate stockton_levels;
 extern crate stockton_render;
 extern crate winit;
+extern crate log;
 extern crate simple_logger;
 extern crate image;
 
@@ -93,7 +94,7 @@ impl KeyState {
 }
 
 fn main() {
-	simple_logger::init().unwrap();
+	simple_logger::init_with_level(log::Level::Debug).unwrap();
 
 	// Load the world and renderer
 	let event_loop = EventLoop::new();
@@ -112,17 +113,17 @@ fn main() {
 	let world = World::new(bsp);
 	let mut renderer = Renderer::new(world, &window).unwrap();
 
-	{
-		renderer.context.add_texture(
-			load_from_memory(include_bytes!("../../render-quad/data/test1.png"))
-				.expect("Couldn't load test texture 1")
-				.into_rgba()).unwrap();
+	// {
+	// 	renderer.context.add_texture(
+	// 		load_from_memory(include_bytes!("../../render-quad/data/test1.png"))
+	// 			.expect("Couldn't load test texture 1")
+	// 			.into_rgba()).unwrap();
 
-		renderer.context.add_texture(
-			load_from_memory(include_bytes!("../../render-quad/data/test2.png"))
-				.expect("Couldn't load test texture 2")
-				.into_rgba()).unwrap();
-	}
+	// 	renderer.context.add_texture(
+	// 		load_from_memory(include_bytes!("../../render-quad/data/test2.png"))
+	// 			.expect("Couldn't load test texture 2")
+	// 			.into_rgba()).unwrap();
+	// }
 
 	let mut last_update = SystemTime::now();
 	let mut key_state = KeyState::new();

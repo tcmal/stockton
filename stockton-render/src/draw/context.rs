@@ -123,7 +123,7 @@ pub struct RenderingContext<'a> {
 
 impl<'a> RenderingContext<'a> {
 	/// Create a new RenderingContext for the given window.
-	pub fn new(window: &Window) -> Result<Self, error::CreationError> {
+	pub fn new<T: HasTextures>(window: &Window, file: &T) -> Result<Self, error::CreationError> {
 		// Create surface
 		let (instance, mut surface, mut adapters) = unsafe {
 			use hal::Instance;
@@ -136,7 +136,7 @@ impl<'a> RenderingContext<'a> {
 		};
 
 		// TODO: Properly figure out which adapter to use
-		let adapter = adapters.remove(0);
+		let mut adapter = adapters.remove(0);
 
 		// Device & Queue group
 		let (mut device, mut queue_group) = {
@@ -263,7 +263,10 @@ impl<'a> RenderingContext<'a> {
 		};
 
 		// Texture store
-		let texture_store = TextureStore::new(&mut device, INITIAL_TEX_SIZE)?;
+		let texture_store = TextureStore::new(&mut device,
+			&mut adapter,
+			&mut queue_group.queues[0],
+			&mut cmd_pool, file)?;
 
 		// Camera
 		// TODO: Settings
@@ -465,15 +468,6 @@ impl<'a> RenderingContext<'a> {
 		};
 
 		Ok((format, viewport, extent, swapchain, backbuffer))
-	}
-
-	/// Load the given image into the texturestore, returning the index or an error.
-	pub fn add_texture(&mut self, image: RgbaImage) -> Result<usize, &'static str> {
-		self.texture_store.add_texture(image,
-			&mut self.device,
-			&mut self.adapter,
-			&mut self.queue_group.queues[0],
-			&mut self.cmd_pool)
 	}
 
 	#[allow(clippy::type_complexity)]
@@ -700,7 +694,7 @@ impl<'a> RenderingContext<'a> {
 				buffer.bind_graphics_pipeline(&self.pipeline);
 
 				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-				descriptor_sets.push(&self.texture_store.descriptor_set);
+				descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(0));
 
 				buffer.bind_graphics_descriptor_sets(
 					&self.pipeline_layout,
@@ -773,11 +767,11 @@ impl<'a> RenderingContext<'a> {
 
 	/// Load all active faces into the vertex buffers for drawing
 	// TODO: This is just a POC, we need to restructure things a lot for actually texturing, etc
-	pub fn set_active_faces<M: MinBSPFeatures<VulkanSystem>>(&mut self, faces: Vec<u32>, file: &M) -> () {
+	pub fn set_active_faces<M: MinBSPFeatures<VulkanSystem>>(&mut self, faces: &Vec<u32>, file: &M) -> () {
 		let mut curr_vert_idx: usize = 0;
 		let mut curr_idx_idx: usize = 0;
 
-		for face in faces.into_iter().map(|idx| file.get_face(idx)) {
+		for face in faces.into_iter().map(|idx| file.get_face(*idx)) {
 			if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
 				let base = face.vertices_idx.start;
 

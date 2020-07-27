@@ -13,17 +13,12 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-//! Deals with loading textures into GPU memory
-
-use core::mem::{ManuallyDrop, size_of};
-use std::{
-	mem::replace,
-	ptr::copy_nonoverlapping,
-	convert::TryInto,
-	iter::once,
-	ops::Deref
-};
-
+use core::ptr::copy_nonoverlapping;
+use std::iter::once;
+use core::mem::size_of;
+use image::RgbaImage;
+use draw::buffer::create_buffer;
+use core::mem::ManuallyDrop;
 use hal::{
 	MemoryTypeId,
 	buffer::Usage as BufUsage,
@@ -33,188 +28,12 @@ use hal::{
 	memory::{Properties as MemProperties, Dependencies as MemDependencies, Segment},
 	prelude::*,
 };
-
-use image::RgbaImage;
-
-use crate::error;
+use std::convert::TryInto;
 use crate::types::*;
-use super::buffer::create_buffer;
 
 /// The size of each pixel in an image
 const PIXEL_SIZE: usize = size_of::<image::Rgba<u8>>();
 
-/// Stores all loaded textures in GPU memory.
-/// When rendering, the descriptor sets are bound to the buffer
-/// The descriptor set layout should have the same count of textures as this does.
-/// Note that it's possible not all descriptors are actually initialised images
-pub struct TextureStore {
-	descriptor_pool: ManuallyDrop<DescriptorPool>,
-	pub descriptor_set: DescriptorSet,
-	pub descriptor_set_layout: ManuallyDrop<DescriptorSetLayout>,
-	loaded_images: Vec<LoadedImage>,
-	next_index: usize,
-	size: usize
-}
-
-impl TextureStore {
-	pub fn new(device: &mut Device, size: usize) -> Result<TextureStore, error::CreationError> {
-
-		// Descriptor set layout
-		let descriptor_set_layout = unsafe {
-			use hal::pso::{DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags, ImageDescriptorType};
-
-			device.create_descriptor_set_layout(
-				&[
-					DescriptorSetLayoutBinding {
-						binding: 0,
-						ty: DescriptorType::Image {
-							ty: ImageDescriptorType::Sampled {
-								with_sampler: false
-							}
-						},
-						count: size,
-						stage_flags: ShaderStageFlags::FRAGMENT,
-						immutable_samplers: false
-					},
-					DescriptorSetLayoutBinding {
-						binding: 1,
-						ty: DescriptorType::Sampler,
-						count: size,
-						stage_flags: ShaderStageFlags::FRAGMENT,
-						immutable_samplers: false
-					}
-				],
-				&[],
-			)
-		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
-
-		let (descriptor_pool, descriptor_set) = unsafe {
-			use hal::pso::{DescriptorRangeDesc, DescriptorType, DescriptorPoolCreateFlags, ImageDescriptorType};
-
-			let mut pool = device.create_descriptor_pool(
-				1,
-				&[
-					DescriptorRangeDesc {
-						ty: DescriptorType::Image {
-							ty: ImageDescriptorType::Sampled {
-								with_sampler: false
-							}
-						},
-						count: size
-					},
-					DescriptorRangeDesc {
-						ty: DescriptorType::Sampler,
-						count: size
-					}
-				],
-				DescriptorPoolCreateFlags::empty()
-			).map_err(|_| error::CreationError::OutOfMemoryError)?;
-
-			let set = pool.allocate_set(&descriptor_set_layout).map_err(|_| error::CreationError::OutOfMemoryError)?;
-
-			(pool, set)
-		};
-
-		Ok(TextureStore {
-			descriptor_pool: ManuallyDrop::new(descriptor_pool),
-			descriptor_set: descriptor_set,
-			loaded_images: Vec::with_capacity(size),
-			descriptor_set_layout: ManuallyDrop::new(descriptor_set_layout),
-			next_index: 0,
-			size
-		})
-	}
-
-	/// Add the texture to this texturestore
-	/// Returns the allocated index or the error.
-	// TODO: Better error
-	pub fn add_texture(&mut self, image: RgbaImage,
-		device: &mut Device,
-		adapter: &mut Adapter,
-		command_queue: &mut CommandQueue,
-		command_pool: &mut CommandPool) -> Result<usize, &'static str> {
-
-		if self.next_index == self.size {
-			return Err("Texture requested but store is out of space!");
-		}
-
-		let idx = self.next_index;
-		self.put_texture(image, idx, device, adapter, command_queue, command_pool)?;
-		self.next_index += 1;
-
-		Ok(idx)
-	}
-
-	pub fn put_texture(&mut self, image: RgbaImage,
-		idx: usize,
-		device: &mut Device,
-		adapter: &mut Adapter,
-		command_queue: &mut CommandQueue,
-		command_pool: &mut CommandPool) -> Result<(), &'static str>{
-
-		if idx >= self.size || idx > self.loaded_images.len() {
-			return Err("Texture index out of bounds or non-continuous index!");
-		}
-
-		// Load the image
-		let texture = LoadedImage::load(
-			image,
-			device,
-			adapter,
-			command_queue,
-			command_pool,
-		)?;
-
-		// Write it to the descriptor set
-		unsafe {
-			use hal::pso::{DescriptorSetWrite, Descriptor};
-			use hal::image::Layout;
-
-			device.write_descriptor_sets(vec![
-				DescriptorSetWrite {
-					set: &self.descriptor_set,
-					binding: 0,
-					array_offset: idx,
-					descriptors: Some(Descriptor::Image(
-						texture.image_view.deref(),
-						Layout::ShaderReadOnlyOptimal
-					)),
-				},
-				DescriptorSetWrite {
-					set: &self.descriptor_set,
-					binding: 1,
-					array_offset: idx,
-					descriptors: Some(Descriptor::Sampler(texture.sampler.deref())),
-				},
-			]);
-		};
-
-		// Store it so we can safely deactivate it when we need to
-		// Deactivate the old image if we need to
-		if idx < self.loaded_images.len() {
-			replace(&mut self.loaded_images[idx], texture).deactivate(device);
-		} else {
-			self.loaded_images.push(texture);
-		}
-
-		Ok(())
-	}
-
-	pub fn deactivate(mut self, device: &mut Device) -> () {
-		unsafe {
-			use core::ptr::read;
-
-			for img in self.loaded_images.drain(..) {
-				img.deactivate(device)
-			}
-
-			self.descriptor_pool.reset();
-			device.destroy_descriptor_pool(ManuallyDrop::into_inner(read(&self.descriptor_pool)));
-			device
-				.destroy_descriptor_set_layout(ManuallyDrop::into_inner(read(&self.descriptor_set_layout)));
-		}
-	}
-}
 
 /// Holds an image that's loaded into GPU memory and can be sampled from
 pub struct LoadedImage {

@@ -53,7 +53,7 @@ impl<'a, T: MinBSPFeatures<VulkanSystem>> Renderer<'a, T> {
 	/// Create a new Renderer.
 	/// This initialises all the vulkan context, etc needed.
 	pub fn new(world: World<T>, window: &winit::window::Window) -> Result<Self, CreationError> {
-		let context = RenderingContext::new(window)?;
+		let context = RenderingContext::new(window, &world.map)?;
 
 		Ok(Renderer {
 			world, context
@@ -66,7 +66,7 @@ impl<'a, T: MinBSPFeatures<VulkanSystem>> Renderer<'a, T> {
 		let faces = get_visible_faces(self.context.camera_pos(), &self.world.map);
 		
 		// Load them in
-		self.context.set_active_faces(faces, &self.world.map);
+		self.context.set_active_faces(&faces, &self.world.map);
 
 		// Then draw them
 		if let Err(_) = self.context.draw_vertices() {
