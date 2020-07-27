@@ -25,7 +25,6 @@ use std::{
 };
 use winit::window::Window;
 use arrayvec::ArrayVec;
-use image::RgbaImage;
 
 use hal::{
 	prelude::*,
@@ -55,9 +54,6 @@ const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
 	levels: 0..1,
 	layers: 0..1,
 };
-
-/// Size of texturestore. This needs to sync up with the array size in the fragment shader
-const INITIAL_TEX_SIZE: usize = 2;
 
 /// Initial size of vertex buffer. TODO: Way of overriding this
 const INITIAL_VERT_SIZE: u64 = 3 * 3000;

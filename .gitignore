@@ -54,3 +54,6 @@ GitHub.sublime-settings
 .history
 
 # End of https://www.gitignore.io/api/rust,sublimetext,visualstudiocode
+
+# Game data. Used for testing, but not sure about license yet
+textures/

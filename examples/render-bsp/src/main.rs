@@ -21,16 +21,9 @@ extern crate stockton_render;
 extern crate winit;
 extern crate log;
 extern crate simple_logger;
-extern crate image;
 
 use std::time::SystemTime;
 use std::f32::consts::PI;
-use image::load_from_memory;
-
-use stockton_levels::prelude::*;
-use stockton_levels::q3::Q3BSPFile;
-use stockton_types::{World, Vector3, Vector2};
-use stockton_render::Renderer;
 
 use winit::{
     event::{Event, WindowEvent, ElementState},
@@ -38,12 +31,21 @@ use winit::{
     window::WindowBuilder
 };
 
+use stockton_levels::{
+	prelude::*,
+	q3::Q3BSPFile
+};
+use stockton_types::{World, Vector3, Vector2};
+use stockton_render::Renderer;
+
+
 /// Movement speed, world units per second
 const SPEED: f32 = 100.0;
 
 /// Pixels required to rotate 90 degrees
 const PIXELS_PER_90D: f32 = 100.0;
 
+/// Sensitivity, derived from above
 const SENSITIVITY: f32 = PI / (2.0	 * PIXELS_PER_90D);
 
 #[derive(Debug)]
@@ -68,6 +70,7 @@ impl KeyState {
 		}
 	}
 
+	/// Helper function to get our movement request as a normalized vector
 	pub fn as_vector(&self) -> Vector3 {
 		let mut vec = Vector3::new(0.0, 0.0, 0.0);
 
@@ -89,14 +92,16 @@ impl KeyState {
 			vec.z = -1.0;
 		}
 
+		vec.normalize_mut();
 		vec
 	}
 }
 
 fn main() {
+	// Initialise logger
 	simple_logger::init_with_level(log::Level::Debug).unwrap();
 
-	// Load the world and renderer
+	// Make a window
 	let event_loop = EventLoop::new();
 	let window = WindowBuilder::new().build(&event_loop).unwrap();
 
@@ -105,25 +110,17 @@ fn main() {
 	}
 	window.set_cursor_visible(false);
 
+	// Parse the map file and swizzle the co-ords
 	let data = include_bytes!("../data/test.bsp").to_vec().into_boxed_slice();
 	let bsp: Result<Q3BSPFile<Q3System>, stockton_levels::types::ParseError> = Q3BSPFile::parse_file(&data);
 	let bsp: Q3BSPFile<Q3System> = bsp.unwrap();
 	let bsp: Q3BSPFile<VulkanSystem> = bsp.swizzle_to();
 	
+	// Load into a world and create the new renderer
 	let world = World::new(bsp);
 	let mut renderer = Renderer::new(world, &window).unwrap();
 
-	// {
-	// 	renderer.context.add_texture(
-	// 		load_from_memory(include_bytes!("../../render-quad/data/test1.png"))
-	// 			.expect("Couldn't load test texture 1")
-	// 			.into_rgba()).unwrap();
-
-	// 	renderer.context.add_texture(
-	// 		load_from_memory(include_bytes!("../../render-quad/data/test2.png"))
-	// 			.expect("Couldn't load test texture 2")
-	// 			.into_rgba()).unwrap();
-	// }
+	// Done loading - This is our main loop.
 
 	let mut last_update = SystemTime::now();
 	let mut key_state = KeyState::new();
@@ -137,9 +134,12 @@ fn main() {
 				event,
 				..
 			} => match event {
+				// Close when requested
 				WindowEvent::CloseRequested => {
 					*flow = ControlFlow::Exit
 				},
+
+				// Update our keystates
 				WindowEvent::KeyboardInput {input, ..} => match input.scancode {
 					// A
 					30 => key_state.left = input.state == ElementState::Pressed,
@@ -155,41 +155,53 @@ fn main() {
 					42 => key_state.down = input.state == ElementState::Pressed,
 					_ => ()
 				},
+
+				// Look around with mouse
 				WindowEvent::CursorMoved {
 					position,
 					..
 				} => {
-					// Special case: First frame
+					// Don't do anything on the first frame
 					if last_cursor_pos.x != 0.0 || last_cursor_pos.y == 0.0 {
+						// Figure out how much to rotate by
 						let x_offset = (position.x as f32 - last_cursor_pos.x) * SENSITIVITY;
 						let y_offset = (position.y as f32 - last_cursor_pos.y) * SENSITIVITY;
 
+						// Rotate
 						renderer.context.rotate(Vector3::new(
 							-y_offset,
 							x_offset,
 							0.0
 						));
 					}
-
+ 
+ 					// For tracking how much the mouse has moved
 					last_cursor_pos.x = position.x as f32;
 					last_cursor_pos.y = position.y as f32;
 				}
 				_ => ()
 			},
 
+			// Nothing new happened
 			Event::MainEventsCleared => {
+				// Draw as many frames as we can
+				// This isn't ideal, but it'll do for now.
 				window.request_redraw()
 			},
-			Event::RedrawRequested(_) => {
 
+			// Redraw - either from above or resizing, etc
+			Event::RedrawRequested(_) => {
+				// Time since last frame drawn. Again, not ideal.
 				let delta = last_update.elapsed().unwrap().as_secs_f32();
 				last_update = SystemTime::now();
 
+				// Move our camera if needed
 				let delta_pos = key_state.as_vector() * delta * SPEED;
 				if delta_pos.x != 0.0 || delta_pos.y != 0.0 || delta_pos.z != 0.0 {
 					renderer.context.move_camera_relative(delta_pos);
 				}
 
+				// Render the frame
 				renderer.render_frame().unwrap()
 			}
 			_ => ()

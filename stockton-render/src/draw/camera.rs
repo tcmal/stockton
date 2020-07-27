@@ -15,19 +15,10 @@
 
 //! Things related to converting 3D world space to 2D screen space
 
-use std::iter::once;
-use std::f32::consts::PI;
-use hal::prelude::*;
-use hal::buffer::Usage;
-use na::{look_at_lh, perspective_lh_zo};
-
-use core::mem::ManuallyDrop;
-
-use crate::error;
-use crate::types::*;
-use super::buffer::{StagedBuffer, ModifiableBuffer};
 use stockton_types::{Vector3, Matrix4};
-use na::{Mat4, Vec4};
+
+use std::f32::consts::PI;
+use na::{look_at_lh, perspective_lh_zo, Mat4, Vec4};
 
 /// 90 degrees in radians
 const R89: f32 = (PI / 180.0) * 89.0;
