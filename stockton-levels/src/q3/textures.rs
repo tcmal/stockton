@@ -42,7 +42,7 @@ pub fn from_data(lump: &[u8]) -> Result<Box<[Texture]>> {
     for n in 0..length {
         let offset = n * TEXTURE_LUMP_SIZE;
         textures.push(Texture {
-            name: str::from_utf8(&lump[offset..offset + 64]).map_err(|_| ParseError::Invalid)?.to_owned(),
+            name: str::from_utf8(&lump[offset..offset + 64]).map_err(|_| ParseError::Invalid)?.trim_matches('\0').to_owned(),
             surface: SurfaceFlags::from_bits_truncate(slice_to_u32(&lump[offset + 64..offset + 68])),
             contents: ContentsFlags::from_bits_truncate(slice_to_u32(&lump[offset + 68..offset + 72])),
         });
@@ -56,6 +56,10 @@ impl<T: CoordSystem> HasTextures for Q3BSPFile<T> {
 
     fn textures_iter<'a>(&'a self) -> Self::TexturesIter<'a> {
         self.textures.iter()
+    }
+
+    fn get_texture<'a>(&'a self, idx: u32) -> &'a Texture {
+        &self.textures[idx as usize]
     }
 }
 
@@ -75,7 +79,7 @@ fn textures_single_texture() {
 
     assert_eq!(lump.len(), 1);
 
-    assert_eq!(lump[0].name, format!("{:64}", "TEST TEXTURE"));
+    assert_eq!(lump[0].name, "TEST TEXTURE");
     assert_eq!(
         lump[0].surface,
         SurfaceFlags::NO_DAMAGE | SurfaceFlags::SLICK | SurfaceFlags::FLESH | SurfaceFlags::DUST
