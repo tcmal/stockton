@@ -42,8 +42,8 @@ impl TexCoord {
     /// Internal function. Converts a slice to a TexCoord.
     pub fn from_bytes(bytes: &[u8; 16]) -> TexCoord {
         TexCoord {
-            u: [slice_to_f32(&bytes[0..4]), slice_to_f32(&bytes[4..8])],
-            v: [slice_to_f32(&bytes[8..12]), slice_to_f32(&bytes[12..16])],
+            u: [slice_to_f32(&bytes[0..4]), slice_to_f32(&bytes[8..12])],
+            v: [slice_to_f32(&bytes[4..8]), slice_to_f32(&bytes[12..16])],
         }
     }
 }
