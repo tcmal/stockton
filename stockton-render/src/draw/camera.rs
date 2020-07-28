@@ -184,10 +184,47 @@ impl WorkingCamera {
 		self.settings.position.x += new.x;
 		self.settings.position.y += new.y;
 		self.settings.position.z += new.z;
+
 		self.is_dirty = true;
 	}
 
 	pub fn camera_pos(&self) -> Vector3 {
 		self.settings.position
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use stockton_types::Matrix4;
+use stockton_types::Vector3;
+	use draw::camera::WorkingCamera;
+
+	fn contains_nan(mat: &Matrix4) -> bool{
+		for x in mat.iter() {
+			if *x == std::f32::NAN {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	#[test]
+	fn camera_vp() {
+		let mut camera = WorkingCamera::defaults(16.0 / 9.0);
+
+		let old = camera.calc_vp_matrix();
+		println!("initial vp matrix: {:?}", old);
+
+		assert!(!contains_nan(&old), "No NaNs for initial matrix");
+
+		// Do a 180
+		camera.rotate(Vector3::new(0.0, 180.0, 0.0));
+
+		let new = camera.calc_vp_matrix();
+		assert!(!contains_nan(&new), "No NaNs after rotating");
+
+		println!("new vp matrix: {:?}", new);
+
+		assert!(old != new, "VP Matrix changes when camera rotates");
 	}
 }
