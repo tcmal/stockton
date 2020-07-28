@@ -92,7 +92,6 @@ impl KeyState {
 			vec.z = -1.0;
 		}
 
-		vec.normalize_mut();
 		vec
 	}
 }
