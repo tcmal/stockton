@@ -11,5 +11,5 @@ layout (location = 0) out vec4 color;
 
 void main()
 {
-	color = texture(sampler2D(tex[frag_tex], samp[frag_tex]), frag_uv);
+	color = texture(sampler2D(tex[frag_tex % 8], samp[frag_tex % 8]), frag_uv);
 }

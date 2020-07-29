@@ -57,3 +57,7 @@ GitHub.sublime-settings
 
 # Game data. Used for testing, but not sure about license yet
 textures/
+
+# Intermediate BSP files.
+*.srf
+*.prt

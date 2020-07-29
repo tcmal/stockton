@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -110,11 +110,11 @@ fn main() {
 	window.set_cursor_visible(false);
 
 	// Parse the map file and swizzle the co-ords
-	let data = include_bytes!("../data/test.bsp").to_vec().into_boxed_slice();
+	let data = include_bytes!("../data/newtest.bsp").to_vec().into_boxed_slice();
 	let bsp: Result<Q3BSPFile<Q3System>, stockton_levels::types::ParseError> = Q3BSPFile::parse_file(&data);
 	let bsp: Q3BSPFile<Q3System> = bsp.unwrap();
 	let bsp: Q3BSPFile<VulkanSystem> = bsp.swizzle_to();
-	
+
 	// Load into a world and create the new renderer
 	let world = World::new(bsp);
 	let mut renderer = Renderer::new(world, &window).unwrap();

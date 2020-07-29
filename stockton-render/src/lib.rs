@@ -65,15 +65,12 @@ impl<'a, T: MinBSPFeatures<VulkanSystem>> Renderer<'a, T> {
 		// Get visible faces
 		let faces = get_visible_faces(self.context.camera_pos(), &self.world.map);
 		
-		// Load them in
-		self.context.set_active_faces(&faces, &self.world.map);
-
 		// Then draw them
-		if let Err(_) = self.context.draw_vertices() {
+		if let Err(_) = self.context.draw_vertices(&self.world.map, &faces) {
 			unsafe {self.context.handle_surface_change().unwrap()};
 
 			// If it fails twice, then error
-			self.context.draw_vertices().map_err(|_| FrameError::PresentError)?;
+			self.context.draw_vertices(&self.world.map, &faces).map_err(|_| FrameError::PresentError)?;
 		}
 
 		Ok(())

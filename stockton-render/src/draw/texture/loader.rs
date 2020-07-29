@@ -155,6 +155,10 @@ impl TextureStore {
 		}
 	}
 
+	pub fn get_n_chunks(&self) -> usize {
+		self.chunks.len()
+	}
+
 	pub fn get_chunk_descriptor_set<'a>(&'a self, idx: usize) -> &'a DescriptorSet {
 		&self.chunks[idx].descriptor_set
 	}

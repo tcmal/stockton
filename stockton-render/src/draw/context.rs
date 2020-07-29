@@ -620,7 +620,7 @@ impl<'a> RenderingContext<'a> {
 	}
 
 	/// Draw all vertices in the buffer
-	pub fn draw_vertices(&mut self) -> Result<(), &'static str> {
+	pub fn draw_vertices<M: MinBSPFeatures<VulkanSystem>>(&mut self, file: &M,faces: &Vec<u32>) -> Result<(), &'static str> {
 		let get_image = &self.get_image[self.current_frame];
 		let render_complete = &self.render_complete[self.current_frame];
 		
@@ -662,18 +662,10 @@ impl<'a> RenderingContext<'a> {
 
 			// Commit from staging buffers
 			let (vbufs, ibuf) = {
-				let vbufref: &<back::Backend as hal::Backend>::Buffer = self.vert_buffer.commit(
-					&self.device,
-					&mut self.queue_group.queues[0],
-					&mut self.cmd_pool
-				);
+				let vbufref: &<back::Backend as hal::Backend>::Buffer = self.vert_buffer.get_buffer();
 
 				let vbufs: ArrayVec<[_; 1]> = [(vbufref, SubRange::WHOLE)].into();
-				let ibuf = self.index_buffer.commit(
-					&self.device,
-					&mut self.queue_group.queues[0],
-					&mut self.cmd_pool
-				);
+				let ibuf = self.index_buffer.get_buffer();
 
 				(vbufs, ibuf)
 			};
@@ -688,16 +680,6 @@ impl<'a> RenderingContext<'a> {
 					SubpassContents::Inline
 				);
 				buffer.bind_graphics_pipeline(&self.pipeline);
-
-				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-				descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(0));
-
-				buffer.bind_graphics_descriptor_sets(
-					&self.pipeline_layout,
-					0,
-					descriptor_sets,
-					&[]
-				);
 
 				let vp = self.camera.get_matrix().as_slice();
 				let vp = std::mem::transmute::<&[f32], &[u32]>(vp);
@@ -714,11 +696,93 @@ impl<'a> RenderingContext<'a> {
 					range: SubRange::WHOLE,
 					index_type: hal::IndexType::U16
 				});
-				buffer.draw_indexed(0..((self.index_buffer.highest_used as u32 + 1) * 3), 0, 0..1);
+
+				let mut current_chunk = file.get_face(0).texture_idx as usize / 8;
+				let mut chunk_start = 0;
+
+				let mut curr_vert_idx: usize = 0;
+				let mut curr_idx_idx: usize = 0;
+
+				for face in faces.into_iter().map(|idx| file.get_face(*idx)) {
+					if current_chunk != face.texture_idx as usize / 8 {
+						let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
+						descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
+
+						buffer.bind_graphics_descriptor_sets(
+							&self.pipeline_layout,
+							0,
+							descriptor_sets,
+							&[]
+						);
+
+						buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
+						
+						chunk_start = curr_idx_idx;
+						current_chunk = face.texture_idx as usize / 8;
+					}
+
+					if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
+						let base = face.vertices_idx.start;
+
+						for idx in face.meshverts_idx.clone().step_by(3) {
+							let start_idx: u16 = curr_vert_idx.try_into().unwrap();
+
+							for idx2 in idx..idx+3 {
+								let vert = &file.resolve_meshvert(idx2 as u32, base);
+								let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
+
+								let uvp = UVPoint (vert.position, face.texture_idx.try_into().unwrap(), uv);
+								self.vert_buffer[curr_vert_idx] = uvp;
+								
+								curr_vert_idx += 1;
+							}
+
+
+							self.index_buffer[curr_idx_idx] = (start_idx, start_idx + 1, start_idx + 2);
+
+							curr_idx_idx += 1;
+
+							if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
+								println!("out of vertex buffer space!");
+								break;
+							}
+						}
+					} else {
+						// TODO: Other types of faces
+					}
+
+					if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
+						break;
+					}
+				}
+
+				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
+				descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
+				buffer.bind_graphics_descriptor_sets(
+							&self.pipeline_layout,
+							0,
+							descriptor_sets,
+							&[]
+						);
+				buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
+				
 				buffer.end_render_pass();
 			}
 			buffer.finish();
 		};
+
+		// Update our buffers before we actually start drawing
+		self.vert_buffer.commit(
+			&self.device,
+			&mut self.queue_group.queues[0],
+			&mut self.cmd_pool
+		);
+
+		self.index_buffer.commit(
+			&self.device,
+			&mut self.queue_group.queues[0],
+			&mut self.cmd_pool
+		);
 
 		// Make submission object
 		let command_buffers = &self.cmd_buffers[image_index..=image_index];
@@ -759,48 +823,6 @@ impl<'a> RenderingContext<'a> {
 	/// `euler` should be euler angles in radians
 	pub fn rotate(&mut self, euler: Vector3) {
 		self.camera.rotate(euler)
-	}
-
-	/// Load all active faces into the vertex buffers for drawing
-	// TODO: This is just a POC, we need to restructure things a lot for actually texturing, etc
-	pub fn set_active_faces<M: MinBSPFeatures<VulkanSystem>>(&mut self, faces: &Vec<u32>, file: &M) -> () {
-		let mut curr_vert_idx: usize = 0;
-		let mut curr_idx_idx: usize = 0;
-
-		for face in faces.into_iter().map(|idx| file.get_face(*idx)) {
-			if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
-				let base = face.vertices_idx.start;
-
-				for idx in face.meshverts_idx.clone().step_by(3) {
-					let start_idx: u16 = curr_vert_idx.try_into().unwrap();
-
-					for idx2 in idx..idx+3 {
-						let vert = &file.resolve_meshvert(idx2 as u32, base);
-						let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
-
-						let uvp = UVPoint (vert.position, face.texture_idx.try_into().unwrap(), uv);
-						self.vert_buffer[curr_vert_idx] = uvp;
-						
-						curr_vert_idx += 1;
-					}
-
-
-					self.index_buffer[curr_idx_idx] = (start_idx, start_idx + 1, start_idx + 2);
-
-					curr_idx_idx += 1;
-
-					if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
-						break;
-					}
-				}
-			} else {
-				// TODO: Other types of faces
-			}
-
-			if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
-				break;
-			}
-		}
 	}
 }
 

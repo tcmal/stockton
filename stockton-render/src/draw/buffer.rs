@@ -60,6 +60,7 @@ pub(crate) fn create_buffer(device: &mut Device,
 }
 
 pub trait ModifiableBuffer: IndexMut<usize> {
+	fn get_buffer<'a>(&'a mut self) -> &'a Buffer;
 	fn commit<'a>(&'a mut self, device: &Device,
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> &'a Buffer;
@@ -116,6 +117,10 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
 }
 
 impl <'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
+	fn get_buffer<'b>(&'b mut self) -> &'b Buffer {
+		&self.buffer
+	}
+
 	fn commit<'b>(&'b mut self, device: &Device,
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> &'b Buffer {
