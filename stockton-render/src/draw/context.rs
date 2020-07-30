@@ -14,8 +14,8 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 //! Deals with all the Vulkan/HAL details.
-//! In the end, this takes in vertices and renders them to a window.
-//! You'll need something else to actually generate the vertices though.
+//! In the end, this takes in a depth-sorted list of faces and a map file and renders them.
+//! You'll need something else to actually find/sort the faces though.
 
 use std::{
 	mem::{ManuallyDrop, size_of},
@@ -72,48 +72,87 @@ const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 pub struct UVPoint (pub Vector3, pub i32, pub Vector2);
 
 /// Contains all the hal related stuff.
-/// In the end, this takes some 3D points and puts it on the screen.
+/// In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 // TODO: Settings for clear colour, buffer sizes, etc
 pub struct RenderingContext<'a> {
 	// Parents for most of these things
+
+	/// Vulkan Instance
 	instance: ManuallyDrop<back::Instance>,
+
+	/// Device we're using
 	device: ManuallyDrop<Device>,
+
+	/// Adapter we're using
 	adapter: Adapter,
 
 	// Render destination
+
+	/// Surface to draw to
 	surface: ManuallyDrop<Surface>,
+
+	/// Swapchain we're targeting
 	swapchain: ManuallyDrop<Swapchain>,
+
+	/// Viewport of surface
 	viewport: hal::pso::Viewport,
 	
+	/// The imageviews in our swapchain
 	imageviews: Vec<ImageView>,
+
+	/// The framebuffers of imageviews in our swapchain
 	framebuffers: Vec<Framebuffer>,
+
+	/// The frame we will draw to next
 	current_frame: usize,
+
+	/// The number of frames in our swapchain, ie max pre-rendered frames possible
 	frames_in_flight: usize,
 	
 	// Sync objects
 	// TODO: Collect these together?
+
+	/// Triggered when the image is ready to draw to
 	get_image: Vec<Semaphore>,
+
+	/// Triggered when rendering is done
 	render_complete: Vec<Semaphore>,
+
+	/// Triggered when the image is on screen
 	present_complete: Vec<Fence>,
 
 	// Pipeline
+
+	/// Our main render pass
 	renderpass: ManuallyDrop<RenderPass>,
+
+	/// The layout of our main graphics pipeline
 	pipeline_layout: ManuallyDrop<PipelineLayout>,
+
+	/// Our main graphics pipeline
 	pipeline: ManuallyDrop<GraphicsPipeline>,
 
 	// Command pool and buffers
+
+	/// The command pool used for our buffers
 	cmd_pool: ManuallyDrop<CommandPool>,
+
+	/// The buffers used to draw to our frames
 	cmd_buffers: Vec<CommandBuffer>,
+
+	/// The queue group our buffers belong to
 	queue_group: QueueGroup,
 
-	// Texture store
+	/// Texture store
 	texture_store: ManuallyDrop<TextureStore>,
 
-	// Vertex and index buffers
-	// These are both staged
+	/// (Staged) Vertex Buffer
 	pub vert_buffer: ManuallyDrop<StagedBuffer<'a, UVPoint>>,
+
+	/// (Staged) Index Buffer
 	pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
 
+	/// Our camera settings
 	camera: WorkingCamera
 }
 
@@ -653,14 +692,17 @@ impl<'a> RenderingContext<'a> {
 			use hal::command::{SubpassContents, CommandBufferFlags, ClearValue, ClearColor};
 			use hal::pso::ShaderStageFlags;
 
+			// Command buffer to use
 			let buffer = &mut self.cmd_buffers[image_index];
+
+			// Colour to clear window to
 			let clear_values = [ClearValue {
 				color: ClearColor {
 					float32: [0.0, 0.0, 0.0, 1.0]
 				}
 			}];
 
-			// Commit from staging buffers
+			// Get references to our buffers
 			let (vbufs, ibuf) = {
 				let vbufref: &<back::Backend as hal::Backend>::Buffer = self.vert_buffer.get_buffer();
 
@@ -672,6 +714,7 @@ impl<'a> RenderingContext<'a> {
 
 			buffer.begin_primary(CommandBufferFlags::EMPTY);
 			{
+				// Main render pass / pipeline
 				buffer.begin_render_pass(
 					&self.renderpass,
 					&self.framebuffers[image_index],
@@ -681,6 +724,7 @@ impl<'a> RenderingContext<'a> {
 				);
 				buffer.bind_graphics_pipeline(&self.pipeline);
 
+				// VP Matrix
 				let vp = self.camera.get_matrix().as_slice();
 				let vp = std::mem::transmute::<&[f32], &[u32]>(vp);
 
@@ -690,6 +734,7 @@ impl<'a> RenderingContext<'a> {
 					0,
 					vp);
 
+				// Bind buffers
 				buffer.bind_vertex_buffers(0, vbufs);
 				buffer.bind_index_buffer(IndexBufferView {
 					buffer: ibuf,
@@ -697,6 +742,7 @@ impl<'a> RenderingContext<'a> {
 					index_type: hal::IndexType::U16
 				});
 
+				// Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
 				let mut current_chunk = file.get_face(0).texture_idx as usize / 8;
 				let mut chunk_start = 0;
 
@@ -705,6 +751,7 @@ impl<'a> RenderingContext<'a> {
 
 				for face in faces.into_iter().map(|idx| file.get_face(*idx)) {
 					if current_chunk != face.texture_idx as usize / 8 {
+						// Last index was last of group, so draw it all.
 						let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
 						descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
 
@@ -717,11 +764,13 @@ impl<'a> RenderingContext<'a> {
 
 						buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
 						
+						// Next group of same-chunked faces starts here.
 						chunk_start = curr_idx_idx;
 						current_chunk = face.texture_idx as usize / 8;
 					}
 
 					if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
+						// 2 layers of indirection
 						let base = face.vertices_idx.start;
 
 						for idx in face.meshverts_idx.clone().step_by(3) {
@@ -752,10 +801,12 @@ impl<'a> RenderingContext<'a> {
 					}
 
 					if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
+						println!("out of vertex buffer space!");
 						break;
 					}
 				}
 
+				// Draw the final group of chunks
 				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
 				descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
 				buffer.bind_graphics_descriptor_sets(
@@ -828,7 +879,7 @@ impl<'a> RenderingContext<'a> {
 
 impl<'a> core::ops::Drop for RenderingContext<'a> {
 	fn drop(&mut self) {
-		// TODO: Probably missing some destroy stuff
+		// TODO: Destroy shader modules
 		self.device.wait_idle().unwrap();
 
 		unsafe {

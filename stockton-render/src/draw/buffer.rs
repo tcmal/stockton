@@ -29,6 +29,8 @@ use hal::{
 use crate::error::CreationError;
 use crate::types::*;
 
+/// Create a buffer of the given specifications, allocating more device memory.
+// TODO: Use a different memory allocator?
 pub(crate) fn create_buffer(device: &mut Device,
 	adapter: &Adapter,
 	usage: Usage,
@@ -59,20 +61,38 @@ pub(crate) fn create_buffer(device: &mut Device,
 	Ok((buffer, memory))
 }
 
+/// A buffer that can be modified by the CPU
 pub trait ModifiableBuffer: IndexMut<usize> {
+	/// Get a handle to the underlying GPU buffer
 	fn get_buffer<'a>(&'a mut self) -> &'a Buffer;
+
+	/// Commit all changes to GPU memory, returning a handle to the GPU buffer
 	fn commit<'a>(&'a mut self, device: &Device,
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> &'a Buffer;
 }
 
+/// A GPU buffer that is written to using a staging buffer
 pub struct StagedBuffer<'a, T: Sized> {
+	/// CPU-visible buffer
 	staged_buffer: ManuallyDrop<Buffer>,
+
+	/// CPU-visible memory
 	staged_memory: ManuallyDrop<Memory>,
+
+	/// GPU Buffer
 	buffer: ManuallyDrop<Buffer>,
+
+	/// GPU Memory
 	memory: ManuallyDrop<Memory>,
+
+	/// Where staged buffer is mapped in CPU memory
 	staged_mapped_memory: &'a mut [T],
+
+	/// If staged memory has been changed since last `commit`
 	staged_is_dirty: bool,
+
+	/// The highest index in the buffer that's been written to.
 	pub highest_used: usize
 }
 
@@ -80,9 +100,13 @@ pub struct StagedBuffer<'a, T: Sized> {
 impl<'a, T: Sized> StagedBuffer<'a, T> {
 	/// size is the size in T
 	pub fn new(device: &mut Device, adapter: &Adapter, usage: Usage, size: u64) -> Result<Self, CreationError> {
-
+		// Convert size to bytes
 		let size_bytes = size * size_of::<T>() as u64;
+
+		// Get CPU-visible buffer
 		let (staged_buffer, staged_memory) = create_buffer(device, adapter, Usage::TRANSFER_SRC, Properties::CPU_VISIBLE, size_bytes)?;
+		
+		// Get GPU Buffer
 		let (buffer, memory) = create_buffer(device, adapter, Usage::TRANSFER_DST | usage, Properties::DEVICE_LOCAL, size_bytes)?;
 
 		// Map it somewhere and get a slice to that memory
@@ -103,6 +127,7 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
 		})
 	}
 
+	/// Call this before dropping
 	pub(crate) fn deactivate(mut self, device: &mut Device) {
 		unsafe { 
 			device.unmap_memory(&self.staged_memory);
@@ -124,6 +149,7 @@ impl <'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
 	fn commit<'b>(&'b mut self, device: &Device,
 		command_queue: &mut CommandQueue, 
 		command_pool: &mut CommandPool) -> &'b Buffer {
+		// Only commit if there's changes to commit.
 		if self.staged_is_dirty {
 
 			// Flush mapped memory to ensure the staged buffer is filled

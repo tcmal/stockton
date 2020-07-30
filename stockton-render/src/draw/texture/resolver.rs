@@ -26,9 +26,11 @@ use std::path::Path;
 
 /// An object that can be used to resolve a texture from a BSP File
 pub trait TextureResolver {
-	fn resolve(&mut self, texture: &Texture) -> RgbaImage;
+	/// Get the given texture, or None if it's corrupt/not there.
+	fn resolve(&mut self, texture: &Texture) -> Option<RgbaImage>;
 }
 
+/// A basic filesystem resolver which expects no file extension and guesses the image format
 pub struct BasicFSResolver<'a> {
 	path: &'a Path
 }
@@ -42,13 +44,17 @@ impl<'a> BasicFSResolver<'a> {
 }
 
 impl<'a> TextureResolver for BasicFSResolver<'a> {
-	fn resolve(&mut self, tex: &Texture) -> RgbaImage {
+	fn resolve(&mut self, tex: &Texture) -> Option<RgbaImage> {
 		let path = self.path.join(&tex.name);
-		println!("Loading texture from {:?}", path);
 
-		Reader::open(path).unwrap()
-			.with_guessed_format().unwrap()
-			.decode().unwrap()
-			.into_rgba()
+		if let Ok(file) = Reader::open(path) {
+			if let Ok(guessed) = file.with_guessed_format() {
+				if let Ok(decoded) = guessed.decode() {
+					return Some(decoded.into_rgba());
+				}
+			}
+		}
+
+		None
 	}
 }

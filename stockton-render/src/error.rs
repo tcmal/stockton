@@ -20,7 +20,7 @@
 /// 	- Hardware - No suitable card usually
 /// 	- Sanity - Things that probably aren't true, likely indicating a deeper issue.
 ///				These aren't guaranteed sanity issues, but they are weird issues.
-/// 	- Runtime - Things caused by runtime conditions, usually resource constraints.
+/// 	- Runtime - Things caused by runtime conditions, usually resource constraints. Could also be caused by corrupt files
 #[derive(Debug)]
 pub enum CreationError {
 	WindowError,
@@ -41,7 +41,9 @@ pub enum CreationError {
 	BufferNoMemory,
 	
 	SwapchainError (hal::window::CreationError),
-	ImageViewError (hal::image::ViewCreationError)
+	ImageViewError (hal::image::ViewCreationError),
+
+	BadDataError
 }
 
 /// An error encountered when rendering.

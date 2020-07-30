@@ -13,12 +13,15 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use core::ptr::copy_nonoverlapping;
-use std::iter::once;
-use core::mem::size_of;
+use core::{
+	ptr::copy_nonoverlapping,
+	mem::{size_of, ManuallyDrop}
+};
+use std::{
+	iter::once,
+	convert::TryInto
+};
 use image::RgbaImage;
-use draw::buffer::create_buffer;
-use core::mem::ManuallyDrop;
 use hal::{
 	MemoryTypeId,
 	buffer::Usage as BufUsage,
@@ -28,18 +31,25 @@ use hal::{
 	memory::{Properties as MemProperties, Dependencies as MemDependencies, Segment},
 	prelude::*,
 };
-use std::convert::TryInto;
+
 use crate::types::*;
+use draw::buffer::create_buffer;
 
 /// The size of each pixel in an image
 const PIXEL_SIZE: usize = size_of::<image::Rgba<u8>>();
 
-
 /// Holds an image that's loaded into GPU memory and can be sampled from
 pub struct LoadedImage {
+	/// The GPU Image handle
 	image: ManuallyDrop<Image>,
+
+	/// The full view of the image
 	pub image_view: ManuallyDrop<ImageView>,
+
+	/// A sampler for the image
 	pub sampler: ManuallyDrop<Sampler>,
+
+	/// The memory backing the image
 	memory: ManuallyDrop<Memory>
 }
 
@@ -52,7 +62,7 @@ impl LoadedImage {
 		let initial_row_size = PIXEL_SIZE * (img.width() as usize);
 		let limits = adapter.physical_device.limits();
 		let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
-
+		
 		let row_size = ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
 		debug_assert!(row_size as usize >= initial_row_size);
 

@@ -44,6 +44,8 @@ pub struct TextureChunk {
 }
 
 impl TextureChunk {
+	/// Create a new texture chunk and load in the textures specified by `range` from `file` using `resolver`
+	/// Can error if the descriptor pool is too small or if a texture isn't found
 	pub fn new<T: HasTextures, R: TextureResolver>(device: &mut Device,
 		adapter: &mut Adapter,
 		command_queue: &mut CommandQueue,
@@ -53,6 +55,7 @@ impl TextureChunk {
 		file: &T, range: Range<u32>,
 		resolver: &mut R) -> Result<TextureChunk, error::CreationError> {
 
+		// 
 		let descriptor_set = unsafe {
 			pool.allocate_set(&layout).map_err(|e| {
 				println!("{:?}", e);
@@ -71,10 +74,16 @@ impl TextureChunk {
 		for tex_idx in range {
 			debug!("Loading tex {}", local_idx + 1);
 			let tex = file.get_texture(tex_idx);
-			let img = resolver.resolve(tex);
-			store.put_texture(img, local_idx,
-				device, adapter,
-				command_queue, command_pool).unwrap();
+			if let Some(img) = resolver.resolve(tex) {
+				store.put_texture(img, local_idx,
+					device, adapter,
+					command_queue, command_pool).unwrap();
+			} else {
+				// Texture not found. For now, tear everything down.
+				store.deactivate(device);
+
+				return Err(error::CreationError::BadDataError);
+			}
 
 			local_idx += 1;
 		}

@@ -34,7 +34,7 @@ use crate::types::*;
 /// Stores all loaded textures in GPU memory.
 /// When rendering, the descriptor sets are bound to the buffer
 /// The descriptor set layout should have the same count of textures as this does.
-/// Note that it's possible not all descriptors are actually initialised images
+/// All descriptors will be properly initialised images.
 pub struct TextureStore {
 	descriptor_pool: ManuallyDrop<DescriptorPool>,
 	pub(crate) descriptor_set_layout: ManuallyDrop<DescriptorSetLayout>,
@@ -42,11 +42,12 @@ pub struct TextureStore {
 }
 
 impl TextureStore {
+	/// Create a new texture store for the given file, loading all textures from it.
 	pub fn new<T: HasTextures>(device: &mut Device,
 		adapter: &mut Adapter,
 		command_queue: &mut CommandQueue,
 		command_pool: &mut CommandPool, file: &T) -> Result<TextureStore, error::CreationError> {
-		// Figure out how many textures in this file
+		// Figure out how many textures in this file / how many chunks needed
 		let size = file.textures_iter().count();
 		let num_chunks = {
 			let mut x = size / CHUNK_SIZE;
@@ -57,6 +58,7 @@ impl TextureStore {
 		};
 		let rounded_size = num_chunks * CHUNK_SIZE;
 
+		// Descriptor pool, where we get our sets from
 		let mut descriptor_pool = unsafe {
 			use hal::pso::{DescriptorRangeDesc, DescriptorType, DescriptorPoolCreateFlags, ImageDescriptorType};
 
@@ -83,7 +85,7 @@ impl TextureStore {
 			})?
 		};
 
-		// Descriptor set layout
+		// Layout of our descriptor sets
 		let mut descriptor_set_layout = unsafe {
 			use hal::pso::{DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags, ImageDescriptorType};
 
@@ -112,11 +114,11 @@ impl TextureStore {
 			)
 		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
 
-		// Set up all our chunks
-		debug!("Starting to load textures...");
-
+		// TODO: Proper way to set up resolver
 		let mut resolver = BasicFSResolver::new(Path::new("."));
 
+		// Create texture chunks
+		debug!("Starting to load textures...");
 		let mut chunks = Vec::with_capacity(num_chunks);
 		for i in 0..num_chunks {
 			let range = {
@@ -128,7 +130,14 @@ impl TextureStore {
 			};
 			debug!("Chunk {} / {} covering {:?}", i + 1, num_chunks, range);
 
-			chunks.push(TextureChunk::new(device, adapter, command_queue, command_pool, &mut descriptor_pool, &mut descriptor_set_layout, file, range, &mut resolver)?);
+			chunks.push(
+				TextureChunk::new(
+					device, adapter, command_queue,
+					command_pool, &mut descriptor_pool,
+					&mut descriptor_set_layout, file,
+					range, &mut resolver
+				)?
+			);
 		}
 
 		debug!("All textures loaded.");
@@ -140,6 +149,7 @@ impl TextureStore {
 		})
 	}
 
+	/// Call this before dropping
 	pub fn deactivate(mut self, device: &mut Device) -> () {
 		unsafe {
 			use core::ptr::read;
@@ -155,10 +165,12 @@ impl TextureStore {
 		}
 	}
 
+	/// Get number of chunks being used
 	pub fn get_n_chunks(&self) -> usize {
 		self.chunks.len()
 	}
 
+	/// Get the descriptor set for a given chunk
 	pub fn get_chunk_descriptor_set<'a>(&'a self, idx: usize) -> &'a DescriptorSet {
 		&self.chunks[idx].descriptor_set
 	}

@@ -13,6 +13,8 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+//! Everything related to loading textures into GPU memory
+
 mod resolver;
 mod image;
 mod chunk;
