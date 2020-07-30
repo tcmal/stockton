@@ -2,26 +2,11 @@
 
 [![Build Status](https://travis-ci.org/tcmal/stockton.svg?branch=master)](https://travis-ci.org/tcmal/stockton)
 
-A 3D engine.
+A WIP Quake engine using Vulkan and Rust.
 
-## TODOs
+## State
 
-Render Optimisations:
-  - Make StagedBuffers resizable
-  - Share the same Memory across multiple Buffers
-  - Use the same descriptorpool for all descriptorsets
-  - Handle textures spread across multiple descriptorsets/draw calls
-  - Instanced drawing
-  - Model translation matrices
-  - Use a different command pool for memcpy operations
-  - Sync memcpy operations with semaphores
-  - Add timing/profiling
-  - Fix shadermodules not being destroyed on shutdown
-  - Handle window resize properly
-
-Features:
-  - Moving Camera/Positionable Trait
-  - Entity drawing
+Currently, it can render a BSP file with textures on the filesystem using however many texture arrays are needed. It doesn't properly cull/sort the faces of the BSP file though.
 
 ## License
 
