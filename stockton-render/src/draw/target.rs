@@ -78,7 +78,7 @@ impl SwapchainProperties {
                     .optimal_tiling
                     .contains(ImageFeature::DEPTH_STENCIL_ATTACHMENT)
         })
-        .ok_or_else(|| ())?;
+        .ok_or(())?;
 
         let present_mode = {
             [
