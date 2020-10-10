@@ -30,6 +30,7 @@ pub type DescriptorPool = <back::Backend as hal::Backend>::DescriptorPool;
 pub type DescriptorSet = <back::Backend as hal::Backend>::DescriptorSet;
 pub type PipelineLayout = <back::Backend as hal::Backend>::PipelineLayout;
 pub type GraphicsPipeline = <back::Backend as hal::Backend>::GraphicsPipeline;
+pub type ShaderModule = <back::Backend as hal::Backend>::ShaderModule;
 pub type Sampler = <back::Backend as hal::Backend>::Sampler;
 pub type Image = <back::Backend as hal::Backend>::Image;
 pub type ImageView = <back::Backend as hal::Backend>::ImageView;

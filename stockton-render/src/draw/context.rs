@@ -119,7 +119,13 @@ pub struct RenderingContext<'a> {
 	pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
 
 	/// Our camera settings
-	camera: WorkingCamera
+	camera: WorkingCamera,
+
+	/// The vertex shader module
+	vs_module: ManuallyDrop<ShaderModule>,
+
+	/// The fragment shader module
+	fs_module: ManuallyDrop<ShaderModule>
 }
 
 impl<'a> RenderingContext<'a> {
@@ -262,7 +268,7 @@ impl<'a> RenderingContext<'a> {
 		descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
 
 		// Graphics pipeline
-		let (pipeline_layout, pipeline) = Self::create_pipeline(&mut device, swapchain_properties.extent, &subpass, descriptor_set_layouts)?;
+		let (pipeline_layout, pipeline, vs_module, fs_module) = Self::create_pipeline(&mut device, swapchain_properties.extent, &subpass, descriptor_set_layouts)?;
 		
 		// Swapchain and associated resources
 		let target_chain = TargetChain::new(&mut device, &adapter, &mut surface, &renderpass, &mut cmd_pool, swapchain_properties, None).map_err(|e| error::CreationError::TargetChainCreationError (e) )?;
@@ -286,6 +292,9 @@ impl<'a> RenderingContext<'a> {
 
 			vert_buffer: ManuallyDrop::new(vert_buffer),
 			index_buffer: ManuallyDrop::new(index_buffer),
+
+			vs_module: ManuallyDrop::new(vs_module),
+			fs_module: ManuallyDrop::new(fs_module),
 
 			camera
 		})
@@ -311,7 +320,10 @@ impl<'a> RenderingContext<'a> {
 		self.device
 			.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
 	
-		let (pipeline_layout, pipeline) = {		
+		self.device.destroy_shader_module(ManuallyDrop::into_inner(read(&self.vs_module)));
+		self.device.destroy_shader_module(ManuallyDrop::into_inner(read(&self.fs_module)));
+
+		let (pipeline_layout, pipeline, vs_module, fs_module) = {		
 			let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
 			descriptor_set_layouts.push(self.texture_store.descriptor_set_layout.deref());
 
@@ -326,6 +338,9 @@ impl<'a> RenderingContext<'a> {
 		self.pipeline_layout = ManuallyDrop::new(pipeline_layout);
 		self.pipeline = ManuallyDrop::new(pipeline);
 
+		self.vs_module = ManuallyDrop::new(vs_module);
+		self.fs_module = ManuallyDrop::new(fs_module);
+
 		let old_swapchain = ManuallyDrop::into_inner(read(&self.target_chain)).deactivate_with_recyling(&mut self.device, &mut self.cmd_pool);
 		self.target_chain = ManuallyDrop::new(TargetChain::new(&mut self.device, &self.adapter, &mut self.surface, &self.renderpass, &mut self.cmd_pool, properties, Some(old_swapchain))
 			.map_err(|e| error::CreationError::TargetChainCreationError (e) )?);
@@ -338,6 +353,8 @@ impl<'a> RenderingContext<'a> {
 	(
 	  PipelineLayout,
 	  GraphicsPipeline,
+	  ShaderModule,
+	  ShaderModule
 	), error::CreationError> where T: IntoIterator, T::Item: Borrow<DescriptorSetLayout> {
 		use hal::pso::*;
 		use hal::format::Format;
@@ -486,7 +503,7 @@ impl<'a> RenderingContext<'a> {
 			device.create_graphics_pipeline(&pipeline_desc, None)
 		}.map_err(|e| error::CreationError::PipelineError (e))?;
 
-		Ok((layout, pipeline))
+		Ok((layout, pipeline, vs_module, fs_module))
 	}
 
 	/// Draw all vertices in the buffer
@@ -618,7 +635,6 @@ impl<'a> RenderingContext<'a> {
 
 impl<'a> core::ops::Drop for RenderingContext<'a> {
 	fn drop(&mut self) {
-		// TODO: Destroy shader modules
 		self.device.wait_idle().unwrap();
 
 		unsafe {
@@ -635,6 +651,9 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 			);
 			self.device
 				.destroy_render_pass(ManuallyDrop::into_inner(read(&self.renderpass)));
+
+			self.device.destroy_shader_module(ManuallyDrop::into_inner(read(&self.vs_module)));
+			self.device.destroy_shader_module(ManuallyDrop::into_inner(read(&self.fs_module)));
 
 			self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
 			
