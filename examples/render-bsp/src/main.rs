@@ -138,6 +138,10 @@ fn main() {
 					*flow = ControlFlow::Exit
 				},
 
+				WindowEvent::Resized(_) => {
+					unsafe { renderer.context.handle_surface_change().unwrap() };
+				}
+
 				// Update our keystates
 				WindowEvent::KeyboardInput {input, ..} => match input.scancode {
 					// A
