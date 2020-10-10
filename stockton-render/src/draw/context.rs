@@ -17,20 +17,22 @@
 //! In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 //! You'll need something else to actually find/sort the faces though.
 
+
 use std::{
 	mem::{ManuallyDrop, size_of},
 	ops::Deref,
 	borrow::Borrow,
 	convert::TryInto
 };
-use winit::window::Window;
-use arrayvec::ArrayVec;
 
+use arrayvec::ArrayVec;
 use hal::{
 	prelude::*,
-	queue::{Submission},
-	window::SwapchainConfig
+	pool::CommandPoolCreateFlags
 };
+use log::debug;
+use winit::window::Window;
+
 use stockton_types::{Vector2, Vector3};
 use stockton_levels::prelude::*;
 use stockton_levels::traits::faces::FaceType;
@@ -40,6 +42,7 @@ use crate::{
 	error
 };
 use super::{
+	target::{TargetChain, SwapchainProperties},
 	camera::WorkingCamera,
 	texture::TextureStore,
 	buffer::{StagedBuffer, ModifiableBuffer}
@@ -47,13 +50,6 @@ use super::{
 
 /// Entry point name for shaders
 const ENTRY_NAME: &str = "main";
-
-/// Defines the colour range we use.
-const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
-	aspects: hal::format::Aspects::COLOR,
-	levels: 0..1,
-	layers: 0..1,
-};
 
 /// Initial size of vertex buffer. TODO: Way of overriding this
 const INITIAL_VERT_SIZE: u64 = 3 * 3000;
@@ -91,35 +87,8 @@ pub struct RenderingContext<'a> {
 	/// Surface to draw to
 	surface: ManuallyDrop<Surface>,
 
-	/// Swapchain we're targeting
-	swapchain: ManuallyDrop<Swapchain>,
-
-	/// Viewport of surface
-	viewport: hal::pso::Viewport,
-	
-	/// The imageviews in our swapchain
-	imageviews: Vec<ImageView>,
-
-	/// The framebuffers of imageviews in our swapchain
-	framebuffers: Vec<Framebuffer>,
-
-	/// The frame we will draw to next
-	current_frame: usize,
-
-	/// The number of frames in our swapchain, ie max pre-rendered frames possible
-	frames_in_flight: usize,
-	
-	// Sync objects
-	// TODO: Collect these together?
-
-	/// Triggered when the image is ready to draw to
-	get_image: Vec<Semaphore>,
-
-	/// Triggered when rendering is done
-	render_complete: Vec<Semaphore>,
-
-	/// Triggered when the image is on screen
-	present_complete: Vec<Fence>,
+	/// Swapchain and stuff
+	target_chain: ManuallyDrop<TargetChain>,
 
 	// Pipeline
 
@@ -136,9 +105,6 @@ pub struct RenderingContext<'a> {
 
 	/// The command pool used for our buffers
 	cmd_pool: ManuallyDrop<CommandPool>,
-
-	/// The buffers used to draw to our frames
-	cmd_buffers: Vec<CommandBuffer>,
 
 	/// The queue group our buffers belong to
 	queue_group: QueueGroup,
@@ -193,8 +159,15 @@ impl<'a> RenderingContext<'a> {
 			(gpu.device, gpu.queue_groups.pop().unwrap())
 		};
 
-		// Swapchain
-		let (format, viewport, extent, swapchain, backbuffer) = RenderingContext::create_swapchain(&mut surface, &mut device, &adapter, None)?;
+		// Figure out what our swapchain will look like
+		let swapchain_properties = SwapchainProperties::find_best(&adapter, &surface).map_err(|_| error::CreationError::BadSurface)?;
+
+		debug!("Detected following swapchain properties: {:?}", swapchain_properties);
+
+		// Command pool
+		let mut cmd_pool = unsafe {
+			device.create_command_pool(queue_group.family, CommandPoolCreateFlags::RESET_INDIVIDUAL)
+		}.map_err(|_| error::CreationError::OutOfMemoryError)?;
 
 		// Renderpass
 		let renderpass = {
@@ -205,31 +178,55 @@ impl<'a> RenderingContext<'a> {
 				memory::Dependencies
 			};
 
-			let attachment = Attachment {
-				format: Some(format),
+			let img_attachment = Attachment {
+				format: Some(swapchain_properties.format),
 				samples: 1,
 				ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
-				stencil_ops: AttachmentOps::new(AttachmentLoadOp::DontCare, AttachmentStoreOp::DontCare),
+				stencil_ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
 				layouts: Layout::Undefined..Layout::Present
+			};
+
+			let depth_attachment = Attachment {
+				format: Some(swapchain_properties.depth_format),
+				samples: 1,
+				ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
+				stencil_ops: AttachmentOps::new(AttachmentLoadOp::DontCare, AttachmentStoreOp::DontCare),
+				layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal
 			};
 
 			let subpass = SubpassDesc {
 				colors: &[(0, Layout::ColorAttachmentOptimal)],
-				depth_stencil: None,
+				depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
 				inputs: &[],
 				resolves: &[],
 				preserves: &[]
 			};
 
-			let dependency = SubpassDependency {
+			let in_dependency = SubpassDependency {
 				flags: Dependencies::empty(),
 				passes: None..Some(0),
-				stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+				stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT..
+						(PipelineStage::COLOR_ATTACHMENT_OUTPUT | PipelineStage::EARLY_FRAGMENT_TESTS),
 				accesses: Access::empty()
-					..(Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE)
+					..(Access::COLOR_ATTACHMENT_READ
+						| Access::COLOR_ATTACHMENT_WRITE
+						| Access::DEPTH_STENCIL_ATTACHMENT_READ
+						| Access::DEPTH_STENCIL_ATTACHMENT_WRITE)
 			};
 
-			unsafe { device.create_render_pass(&[attachment], &[subpass], &[dependency]) }
+			let out_dependency = SubpassDependency {
+				flags: Dependencies::empty(),
+				passes: Some(0)..None,
+				stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT | PipelineStage::EARLY_FRAGMENT_TESTS..
+						PipelineStage::COLOR_ATTACHMENT_OUTPUT,
+				accesses: (Access::COLOR_ATTACHMENT_READ
+						| Access::COLOR_ATTACHMENT_WRITE
+						| Access::DEPTH_STENCIL_ATTACHMENT_READ
+						| Access::DEPTH_STENCIL_ATTACHMENT_WRITE)..
+						Access::empty()
+			};
+
+			unsafe { device.create_render_pass(&[img_attachment, depth_attachment], &[subpass], &[in_dependency, out_dependency]) }
 				.map_err(|_| error::CreationError::OutOfMemoryError)?
 		};
 
@@ -238,6 +235,12 @@ impl<'a> RenderingContext<'a> {
 			index: 0,
 			main_pass: &renderpass
 		};
+
+		// Camera
+		// TODO: Settings
+		let ratio = swapchain_properties.extent.width as f32 / swapchain_properties.extent.height as f32;
+		let camera = WorkingCamera::defaults(ratio);
+
 
 		// Vertex and index buffers
 		let (vert_buffer, index_buffer) = {
@@ -249,70 +252,20 @@ impl<'a> RenderingContext<'a> {
 			(vert, index)
 		};
 
-		// Command Pool, Buffers, imageviews, framebuffers & Sync objects
-		let frames_in_flight = backbuffer.len();
-		let (mut cmd_pool, cmd_buffers, get_image, render_complete, present_complete, imageviews, framebuffers) = {
-			use hal::pool::CommandPoolCreateFlags;
-			use hal::command::Level;
-
-			let mut cmd_pool = ManuallyDrop::new(unsafe {
-				device.create_command_pool(queue_group.family, CommandPoolCreateFlags::RESET_INDIVIDUAL)
-			}.map_err(|_| error::CreationError::OutOfMemoryError)?);
-
-			let mut cmd_buffers = Vec::with_capacity(frames_in_flight);
-			let mut get_image = Vec::with_capacity(frames_in_flight);
-			let mut render_complete = Vec::with_capacity(frames_in_flight);
-			let mut present_complete = Vec::with_capacity(frames_in_flight);
-			let mut imageviews = Vec::with_capacity(frames_in_flight);
-			let mut framebuffers = Vec::with_capacity(frames_in_flight);
-
-			for i in 0..frames_in_flight {
-				unsafe {
-					cmd_buffers.push(cmd_pool.allocate_one(Level::Primary)); // TODO: We can do this all at once outside the loop
-				}
-
-				get_image.push(device.create_semaphore().map_err(|_| error::CreationError::SyncObjectError)?);
-				render_complete.push(device.create_semaphore().map_err(|_| error::CreationError::SyncObjectError)?);
-				present_complete.push(device.create_fence(true).map_err(|_| error::CreationError::SyncObjectError)?);
-				
-				unsafe {
-					use hal::image::ViewKind;
-					use hal::format::Swizzle;
-
-					imageviews.push(device.create_image_view(
-						&backbuffer[i],
-						ViewKind::D2,
-						format,
-						Swizzle::NO,
-						COLOR_RANGE.clone(),
-					).map_err(|e| error::CreationError::ImageViewError (e))?);
-					framebuffers.push(device.create_framebuffer(
-						&renderpass,
-						Some(&imageviews[i]),
-						extent
-					).map_err(|_| error::CreationError::OutOfMemoryError)?);
-				}
-			}
-
-			(cmd_pool, cmd_buffers, get_image, render_complete, present_complete, imageviews, framebuffers)
-		};
-
 		// Texture store
 		let texture_store = TextureStore::new(&mut device,
 			&mut adapter,
 			&mut queue_group.queues[0],
 			&mut cmd_pool, file)?;
 
-		// Camera
-		// TODO: Settings
-		let ratio = extent.width as f32 / extent.height as f32;
-		let camera = WorkingCamera::defaults(ratio);
-
 		let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
 		descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
 
 		// Graphics pipeline
-		let (pipeline_layout, pipeline) = Self::create_pipeline(&mut device, extent, &subpass, descriptor_set_layouts)?;
+		let (pipeline_layout, pipeline) = Self::create_pipeline(&mut device, swapchain_properties.extent, &subpass, descriptor_set_layouts)?;
+		
+		// Swapchain and associated resources
+		let target_chain = TargetChain::new(&mut device, &adapter, &mut surface, &renderpass, &mut cmd_pool, swapchain_properties, None).map_err(|e| error::CreationError::TargetChainCreationError (e) )?;
 
 		Ok(RenderingContext {
 			instance: ManuallyDrop::new(instance),
@@ -321,21 +274,10 @@ impl<'a> RenderingContext<'a> {
 			device: ManuallyDrop::new(device),
 			adapter,
 			queue_group,
-			swapchain: ManuallyDrop::new(swapchain),
-			viewport,
-
-			imageviews,
-			framebuffers,
 
 			renderpass: ManuallyDrop::new(renderpass),
-			current_frame: 0,
-
-			get_image,
-			render_complete,
-			present_complete,
-			frames_in_flight,
-			cmd_pool,
-			cmd_buffers,
+			target_chain: ManuallyDrop::new(target_chain),
+			cmd_pool: ManuallyDrop::new(cmd_pool),
 
 			pipeline_layout: ManuallyDrop::new(pipeline_layout),
 			pipeline: ManuallyDrop::new(pipeline),
@@ -352,20 +294,16 @@ impl<'a> RenderingContext<'a> {
 	/// If this function fails the whole context is probably dead
 	/// The context must not be used while this is being called
 	pub unsafe fn handle_surface_change(&mut self) -> Result<(), error::CreationError> {
-		use core::ptr::read;
-
 		self.device.wait_idle().unwrap();
 
-		// Swapchain itself
-		let old_swapchain = ManuallyDrop::into_inner(read(&self.swapchain));
-
-		let (format, viewport, extent, swapchain, backbuffer) = RenderingContext::create_swapchain(&mut self.surface, &mut self.device, &self.adapter, Some(old_swapchain))?;
-
-		self.swapchain = ManuallyDrop::new(swapchain);
-		self.viewport = viewport;
+		let properties = SwapchainProperties::find_best(&self.adapter, &self.surface).map_err(|_| error::CreationError::BadSurface)?;
 
 		// Camera settings (aspect ratio)
-		self.camera.update_aspect_ratio(extent.width as f32 / extent.height as f32);
+		self.camera.update_aspect_ratio(
+			properties.extent.width as f32 / 
+			properties.extent.height as f32);
+
+		use core::ptr::read;
 
 		// Graphics pipeline
 		self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
@@ -373,7 +311,6 @@ impl<'a> RenderingContext<'a> {
 		self.device
 			.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
 	
-
 		let (pipeline_layout, pipeline) = {		
 			let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
 			descriptor_set_layouts.push(self.texture_store.descriptor_set_layout.deref());
@@ -383,126 +320,17 @@ impl<'a> RenderingContext<'a> {
 				main_pass: &(*self.renderpass)
 			};
 
-			Self::create_pipeline(&mut self.device, extent, &subpass, descriptor_set_layouts)?
+			Self::create_pipeline(&mut self.device, properties.extent, &subpass, descriptor_set_layouts)?
 		};
 
 		self.pipeline_layout = ManuallyDrop::new(pipeline_layout);
 		self.pipeline = ManuallyDrop::new(pipeline);
 
-		// Imageviews, framebuffers
-		// Destroy old objects
-		for framebuffer in self.framebuffers.drain(..) {
-			self.device.destroy_framebuffer(framebuffer);
-		}
-		for image_view in self.imageviews.drain(..) {
-			self.device.destroy_image_view(image_view);
-		}
-		// Make new ones
-		for i in 0..backbuffer.len() {
-			use hal::image::ViewKind;
-			use hal::format::Swizzle;
-
-			self.imageviews.push(self.device.create_image_view(
-				&backbuffer[i],
-				ViewKind::D2,
-				format,
-				Swizzle::NO,
-				COLOR_RANGE.clone(),
-			).map_err(|e| error::CreationError::ImageViewError (e))?);
-
-			self.framebuffers.push(self.device.create_framebuffer(
-				&self.renderpass,
-				Some(&self.imageviews[i]),
-				extent
-			).map_err(|_| error::CreationError::OutOfMemoryError)?);
-		}
+		let old_swapchain = ManuallyDrop::into_inner(read(&self.target_chain)).deactivate_with_recyling(&mut self.device, &mut self.cmd_pool);
+		self.target_chain = ManuallyDrop::new(TargetChain::new(&mut self.device, &self.adapter, &mut self.surface, &self.renderpass, &mut self.cmd_pool, properties, Some(old_swapchain))
+			.map_err(|e| error::CreationError::TargetChainCreationError (e) )?);
 
 		Ok(())
-	} 
-
-	fn create_swapchain(surface: &mut Surface, device: &mut Device, adapter: &Adapter, old_swapchain: Option<Swapchain>) -> Result<(
-			hal::format::Format,
-			hal::pso::Viewport,
-			hal::image::Extent,
-			Swapchain,
-			Vec<Image>
-		), error::CreationError> {
-		use hal::{
-			window::{PresentMode, CompositeAlphaMode},
-			format::{Format, ChannelType},
-			image::Usage,
-			pso::Viewport
-		};
-
-		// Figure out what the surface supports
-		let caps = surface.capabilities(&adapter.physical_device);
-		let formats = surface.supported_formats(&adapter.physical_device);
-
-		// Find which settings we'll actually use based on preset preferences
-		let format = formats.map_or(Format::Rgba8Srgb, |formats| {
-			formats.iter()
-				.find(|format| format.base_format().1 == ChannelType::Srgb)
-				.map(|format| *format)
-				.unwrap_or(formats[0])
-		});
-
-		let present_mode = {
-			[PresentMode::MAILBOX, PresentMode::FIFO, PresentMode::RELAXED, PresentMode::IMMEDIATE]
-				.iter()
-				.cloned()
-				.find(|pm| caps.present_modes.contains(*pm))
-				.ok_or(error::CreationError::BadSurface)?
-		};
-		let composite_alpha = {
-			[CompositeAlphaMode::OPAQUE, CompositeAlphaMode::INHERIT, CompositeAlphaMode::PREMULTIPLIED, CompositeAlphaMode::POSTMULTIPLIED]
-				.iter()
-				.cloned()
-				.find(|ca| caps.composite_alpha_modes.contains(*ca))
-				.ok_or(error::CreationError::BadSurface)?
-		};
-
-		// Figure out properties for our swapchain
-		let extent = caps.extents.end(); // Size
-
-		// Number of frames to pre-render
-		let image_count = if present_mode == PresentMode::MAILBOX {
-			((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(3))
-		} else {
-			((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
-		};
-
-		let image_layers = 1; // Don't support 3D
-		let image_usage = if caps.usage.contains(Usage::COLOR_ATTACHMENT) {
-			Usage::COLOR_ATTACHMENT
-		} else {
-			Err(error::CreationError::BadSurface)?
-		};
-
-		// Swap config
-		let swap_config = SwapchainConfig {
-			present_mode,
-			composite_alpha_mode: composite_alpha,
-			format,
-			extent: *extent,
-			image_count,
-			image_layers,
-			image_usage,
-		};
-
-		// Viewport
-		let extent = extent.to_extent();
-		let viewport = Viewport {
-			rect: extent.rect(),
-			depth: 0.0..1.0
-		};
-		
-		// Swapchain
-		let (swapchain, backbuffer) = unsafe {
-			device.create_swapchain(surface, swap_config, old_swapchain)
-				.map_err(|e| error::CreationError::SwapchainError (e))?
-		};
-
-		Ok((format, viewport, extent, swapchain, backbuffer))
 	}
 
 	#[allow(clippy::type_complexity)]
@@ -586,7 +414,10 @@ impl<'a> RenderingContext<'a> {
 
 		// Depth stencil
 		let depth_stencil = DepthStencilDesc {
-			depth: None,
+			depth: Some(DepthTest {
+				fun: Comparison::Less,
+				write: true
+			}),
 			depth_bounds: false,
 			stencil: None,
 		};
@@ -660,167 +491,94 @@ impl<'a> RenderingContext<'a> {
 
 	/// Draw all vertices in the buffer
 	pub fn draw_vertices<M: MinBSPFeatures<VulkanSystem>>(&mut self, file: &M,faces: &Vec<u32>) -> Result<(), &'static str> {
-		let get_image = &self.get_image[self.current_frame];
-		let render_complete = &self.render_complete[self.current_frame];
-		
-		// Advance the frame _before_ we start using the `?` operator
-		self.current_frame = (self.current_frame + 1) % self.frames_in_flight;
+		// Prepare command buffer
+		let cmd_buffer = self.target_chain.prep_next_target(
+			&mut self.device,
+			self.vert_buffer.get_buffer(),
+			self.index_buffer.get_buffer(),
+			&self.renderpass,
+			&self.pipeline,
+			&self.pipeline_layout,
+			&mut self.camera
+		)?;
 
-		// Get the image
-		let (image_index, _) = unsafe {
-			self
-				.swapchain
-				.acquire_image(core::u64::MAX, Some(get_image), None)
-				.map_err(|_| "FrameError::AcquireError")?
-		};
-		let image_index = image_index as usize;
+		// Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
+		let mut current_chunk = file.get_face(0).texture_idx as usize / 8;
+		let mut chunk_start = 0;
 
-		// Make sure whatever was last using this has finished
-		let present_complete = &self.present_complete[image_index];
-		unsafe {
-			self.device
-				.wait_for_fence(present_complete, core::u64::MAX)
-				.map_err(|_| "FrameError::SyncObjectError")?;
-			self.device
-				.reset_fence(present_complete)
-				.map_err(|_| "FrameError::SyncObjectError")?;
-		};
+		let mut curr_vert_idx: usize = 0;
+		let mut curr_idx_idx: usize = 0;
 
-		// Record commands
-		unsafe {
-			use hal::buffer::{IndexBufferView, SubRange};
-			use hal::command::{SubpassContents, CommandBufferFlags, ClearValue, ClearColor};
-			use hal::pso::ShaderStageFlags;
+		for face in faces.into_iter().map(|idx| file.get_face(*idx)) {
+			if current_chunk != face.texture_idx as usize / 8 {
+				// Last index was last of group, so draw it all.
+				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
+				descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
+				unsafe {
 
-			// Command buffer to use
-			let buffer = &mut self.cmd_buffers[image_index];
-
-			// Colour to clear window to
-			let clear_values = [ClearValue {
-				color: ClearColor {
-					float32: [0.0, 0.0, 0.0, 1.0]
+					cmd_buffer.bind_graphics_descriptor_sets(
+						&self.pipeline_layout,
+						0,
+						descriptor_sets,
+						&[]
+					);
+					cmd_buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
 				}
-			}];
+				
+				// Next group of same-chunked faces starts here.
+				chunk_start = curr_idx_idx;
+				current_chunk = face.texture_idx as usize / 8;
+			}
 
-			// Get references to our buffers
-			let (vbufs, ibuf) = {
-				let vbufref: &<back::Backend as hal::Backend>::Buffer = self.vert_buffer.get_buffer();
+			if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
+				// 2 layers of indirection
+				let base = face.vertices_idx.start;
 
-				let vbufs: ArrayVec<[_; 1]> = [(vbufref, SubRange::WHOLE)].into();
-				let ibuf = self.index_buffer.get_buffer();
+				for idx in face.meshverts_idx.clone().step_by(3) {
+					let start_idx: u16 = curr_vert_idx.try_into().unwrap();
 
-				(vbufs, ibuf)
-			};
+					for idx2 in idx..idx+3 {
+						let vert = &file.resolve_meshvert(idx2 as u32, base);
+						let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
 
-			buffer.begin_primary(CommandBufferFlags::EMPTY);
-			{
-				// Main render pass / pipeline
-				buffer.begin_render_pass(
-					&self.renderpass,
-					&self.framebuffers[image_index],
-					self.viewport.rect,
-					clear_values.iter(),
-					SubpassContents::Inline
-				);
-				buffer.bind_graphics_pipeline(&self.pipeline);
-
-				// VP Matrix
-				let vp = self.camera.get_matrix().as_slice();
-				let vp = std::mem::transmute::<&[f32], &[u32]>(vp);
-
-				buffer.push_graphics_constants(
-					&self.pipeline_layout,
-					ShaderStageFlags::VERTEX,
-					0,
-					vp);
-
-				// Bind buffers
-				buffer.bind_vertex_buffers(0, vbufs);
-				buffer.bind_index_buffer(IndexBufferView {
-					buffer: ibuf,
-					range: SubRange::WHOLE,
-					index_type: hal::IndexType::U16
-				});
-
-				// Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
-				let mut current_chunk = file.get_face(0).texture_idx as usize / 8;
-				let mut chunk_start = 0;
-
-				let mut curr_vert_idx: usize = 0;
-				let mut curr_idx_idx: usize = 0;
-
-				for face in faces.into_iter().map(|idx| file.get_face(*idx)) {
-					if current_chunk != face.texture_idx as usize / 8 {
-						// Last index was last of group, so draw it all.
-						let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-						descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
-
-						buffer.bind_graphics_descriptor_sets(
-							&self.pipeline_layout,
-							0,
-							descriptor_sets,
-							&[]
-						);
-
-						buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
+						let uvp = UVPoint (vert.position, face.texture_idx.try_into().unwrap(), uv);
+						self.vert_buffer[curr_vert_idx] = uvp;
 						
-						// Next group of same-chunked faces starts here.
-						chunk_start = curr_idx_idx;
-						current_chunk = face.texture_idx as usize / 8;
+						curr_vert_idx += 1;
 					}
 
-					if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
-						// 2 layers of indirection
-						let base = face.vertices_idx.start;
 
-						for idx in face.meshverts_idx.clone().step_by(3) {
-							let start_idx: u16 = curr_vert_idx.try_into().unwrap();
+					self.index_buffer[curr_idx_idx] = (start_idx, start_idx + 1, start_idx + 2);
 
-							for idx2 in idx..idx+3 {
-								let vert = &file.resolve_meshvert(idx2 as u32, base);
-								let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
-
-								let uvp = UVPoint (vert.position, face.texture_idx.try_into().unwrap(), uv);
-								self.vert_buffer[curr_vert_idx] = uvp;
-								
-								curr_vert_idx += 1;
-							}
-
-
-							self.index_buffer[curr_idx_idx] = (start_idx, start_idx + 1, start_idx + 2);
-
-							curr_idx_idx += 1;
-
-							if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
-								println!("out of vertex buffer space!");
-								break;
-							}
-						}
-					} else {
-						// TODO: Other types of faces
-					}
+					curr_idx_idx += 1;
 
 					if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
 						println!("out of vertex buffer space!");
 						break;
 					}
 				}
-
-				// Draw the final group of chunks
-				let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-				descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
-				buffer.bind_graphics_descriptor_sets(
-							&self.pipeline_layout,
-							0,
-							descriptor_sets,
-							&[]
-						);
-				buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
-				
-				buffer.end_render_pass();
+			} else {
+				// TODO: Other types of faces
 			}
-			buffer.finish();
-		};
+
+			if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap() || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap() {
+				println!("out of vertex buffer space!");
+				break;
+			}
+		}
+
+		// Draw the final group of chunks
+		let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
+		descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
+		unsafe {
+			cmd_buffer.bind_graphics_descriptor_sets(
+					&self.pipeline_layout,
+					0,
+					descriptor_sets,
+					&[]
+				);
+			cmd_buffer.draw_indexed(chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1, 0, 0..1);
+		}
 
 		// Update our buffers before we actually start drawing
 		self.vert_buffer.commit(
@@ -835,27 +593,8 @@ impl<'a> RenderingContext<'a> {
 			&mut self.cmd_pool
 		);
 
-		// Make submission object
-		let command_buffers = &self.cmd_buffers[image_index..=image_index];
-		let wait_semaphores: ArrayVec<[_; 1]> = [(get_image, hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT)].into();
-		let signal_semaphores: ArrayVec<[_; 1]> = [render_complete].into();
-
-		let present_wait_semaphores: ArrayVec<[_; 1]> = [render_complete].into();
-
-		let submission = Submission {
-			command_buffers,
-			wait_semaphores,
-			signal_semaphores,
-		};
-
-		// Submit it
-		let command_queue = &mut self.queue_group.queues[0];
-		unsafe {
-			command_queue.submit(submission, Some(present_complete));
-			self.swapchain
-				.present(command_queue, image_index as u32, present_wait_semaphores)
-				.map_err(|_| "FrameError::PresentError")?
-		};
+		// Send commands off to GPU
+		self.target_chain.finish_and_submit_target(&mut self.queue_group.queues[0])?;
 
 		Ok(())
 	}
@@ -883,35 +622,19 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 		self.device.wait_idle().unwrap();
 
 		unsafe {
-			for fence in self.present_complete.drain(..) {
-				self.device.destroy_fence(fence)
-			}
-			for semaphore in self.render_complete.drain(..) {
-				self.device.destroy_semaphore(semaphore)
-			}
-			for semaphore in self.get_image.drain(..) {
-				self.device.destroy_semaphore(semaphore)
-			}
-			for framebuffer in self.framebuffers.drain(..) {
-				self.device.destroy_framebuffer(framebuffer);
-			}
-			for image_view in self.imageviews.drain(..) {
-				self.device.destroy_image_view(image_view);
-			}
-
 			use core::ptr::read;
+			
 			ManuallyDrop::into_inner(read(&self.vert_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.index_buffer)).deactivate(&mut self.device);
 			ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
 
+			ManuallyDrop::into_inner(read(&self.target_chain)).deactivate(&mut self.device, &mut self.cmd_pool);
+
 			self.device.destroy_command_pool(
 				ManuallyDrop::into_inner(read(&self.cmd_pool)),
 			);
-
 			self.device
 				.destroy_render_pass(ManuallyDrop::into_inner(read(&self.renderpass)));
-			self.device
-				.destroy_swapchain(ManuallyDrop::into_inner(read(&self.swapchain)));
 
 			self.device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
 			

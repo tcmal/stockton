@@ -15,6 +15,8 @@
 
 //! Error types
 
+use super::draw::target::TargetChainCreationError;
+
 /// An error encountered creating a rendering context.
 /// Falls into 3 main types:
 /// 	- Hardware - No suitable card usually
@@ -23,6 +25,7 @@
 /// 	- Runtime - Things caused by runtime conditions, usually resource constraints. Could also be caused by corrupt files
 #[derive(Debug)]
 pub enum CreationError {
+	TargetChainCreationError (TargetChainCreationError),
 	WindowError,
 	BadSurface,
 	

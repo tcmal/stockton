@@ -165,11 +165,6 @@ impl TextureStore {
 		}
 	}
 
-	/// Get number of chunks being used
-	pub fn get_n_chunks(&self) -> usize {
-		self.chunks.len()
-	}
-
 	/// Get the descriptor set for a given chunk
 	pub fn get_chunk_descriptor_set<'a>(&'a self, idx: usize) -> &'a DescriptorSet {
 		&self.chunks[idx].descriptor_set

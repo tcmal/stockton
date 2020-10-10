@@ -31,7 +31,7 @@ use crate::{
 
 use log::debug;
 use super::resolver::TextureResolver;
-use super::image::LoadedImage;
+use super::image::SampledImage;
 use stockton_levels::prelude::*;
 
 /// The size of a chunk. Needs to match up with the fragment shader
@@ -40,7 +40,7 @@ pub const CHUNK_SIZE: usize = 8;
 /// An array of textures
 pub struct TextureChunk {
 	pub(crate) descriptor_set: DescriptorSet,
-	loaded_images: Vec<LoadedImage>,
+	sampled_images: Vec<SampledImage>,
 }
 
 impl TextureChunk {
@@ -65,7 +65,7 @@ impl TextureChunk {
 
 		let mut store = TextureChunk {
 			descriptor_set: descriptor_set,
-			loaded_images: Vec::with_capacity(CHUNK_SIZE),
+			sampled_images: Vec::with_capacity(CHUNK_SIZE),
 		};
 
 		let mut local_idx = 0;
@@ -110,12 +110,14 @@ impl TextureChunk {
 		command_pool: &mut CommandPool) -> Result<(), &'static str>{
 
 		// Load the image
-		let texture = LoadedImage::load(
+		let texture = SampledImage::load_into_new(
 			image,
 			device,
 			adapter,
 			command_queue,
 			command_pool,
+			hal::format::Format::Rgba8Srgb, // TODO
+			hal::image::Usage::empty()
 		)?;
 
 		// Write it to the descriptor set
@@ -129,7 +131,7 @@ impl TextureChunk {
 					binding: 0,
 					array_offset: idx,
 					descriptors: Some(Descriptor::Image(
-						texture.image_view.deref(),
+						texture.image.image_view.deref(),
 						Layout::ShaderReadOnlyOptimal
 					)),
 				},
@@ -144,17 +146,17 @@ impl TextureChunk {
 
 		// Store it so we can safely deactivate it when we need to
 		// Deactivate the old image if we need to
-		if idx < self.loaded_images.len() {
-			replace(&mut self.loaded_images[idx], texture).deactivate(device);
+		if idx < self.sampled_images.len() {
+			replace(&mut self.sampled_images[idx], texture).deactivate(device);
 		} else {
-			self.loaded_images.push(texture);
+			self.sampled_images.push(texture);
 		}
 
 		Ok(())
 	}
 
 	pub fn deactivate(mut self, device: &mut Device) -> () {
-		for img in self.loaded_images.drain(..) {
+		for img in self.sampled_images.drain(..) {
 			img.deactivate(device);
 		}
 	}

@@ -26,7 +26,7 @@ use hal::{
 	MemoryTypeId,
 	buffer::Usage as BufUsage,
 	format::{Format, Swizzle, Aspects},
-	image::{ViewKind, SubresourceRange},
+	image::{ViewKind, SubresourceRange, Usage as ImgUsage},
 	queue::Submission,
 	memory::{Properties as MemProperties, Dependencies as MemDependencies, Segment},
 	prelude::*,
@@ -46,27 +46,90 @@ pub struct LoadedImage {
 	/// The full view of the image
 	pub image_view: ManuallyDrop<ImageView>,
 
-	/// A sampler for the image
-	pub sampler: ManuallyDrop<Sampler>,
-
 	/// The memory backing the image
 	memory: ManuallyDrop<Memory>
 }
 
+pub fn create_image_view(device: &mut Device, adapter: &Adapter, format: Format, usage: ImgUsage, width: usize, height: usize) -> Result<(Memory, Image), &'static str> {
+	// Round up the size to align properly
+	let initial_row_size = PIXEL_SIZE * width;
+	let limits = adapter.physical_device.limits();
+	let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
+	
+	let row_size = ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
+	debug_assert!(row_size as usize >= initial_row_size);
+
+	// Make the image
+	let mut image_ref = unsafe {
+		use hal::image::{Kind, Tiling, ViewCapabilities};
+
+		device.create_image(
+			Kind::D2(width as u32, height as u32, 1, 1),
+			1,
+			format,
+			Tiling::Optimal,
+			usage,
+			ViewCapabilities::empty()
+		)
+	}.map_err(|_| "Couldn't create image")?;
+
+	// Allocate memory
+	let memory = unsafe {
+		let requirements = device.get_image_requirements(&image_ref);
+
+		let memory_type_id = adapter.physical_device
+			.memory_properties().memory_types
+			.iter().enumerate()
+			.find(|&(id, memory_type)| {
+				requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(MemProperties::DEVICE_LOCAL)
+			})
+			.map(|(id, _)| MemoryTypeId(id))
+			.ok_or("Couldn't find a memory type for image memory")?;
+
+		let memory = device
+			.allocate_memory(memory_type_id, requirements.size)
+			.map_err(|_| "Couldn't allocate image memory")?;
+
+		device.bind_image_memory(&memory, 0, &mut image_ref)
+			.map_err(|_| "Couldn't bind memory to image")?;
+
+		Ok(memory)
+	}?;
+
+	Ok((memory, image_ref))
+
+}
+
 impl LoadedImage {
-	/// Load the given image into a new buffer
-	pub fn load(img: RgbaImage, device: &mut Device, adapter: &Adapter,
-		command_queue: &mut CommandQueue,
-		command_pool: &mut CommandPool) -> Result<LoadedImage, &'static str> {
-		// Round up the size to align properly
-		let initial_row_size = PIXEL_SIZE * (img.width() as usize);
+	pub fn new(device: &mut Device, adapter: &Adapter, format: Format, usage: ImgUsage, resources: SubresourceRange, width: usize, height: usize) -> Result<LoadedImage, &'static str> {
+		let (memory, image_ref) = create_image_view(device, adapter, format, usage, width, height)?;
+
+		// Create ImageView and sampler
+		let image_view = unsafe { device.create_image_view(
+			&image_ref,
+			ViewKind::D2,
+			format,
+			Swizzle::NO,
+			resources,
+		)}.map_err(|_| "Couldn't create the image view!")?;
+
+		Ok(LoadedImage {
+			image: ManuallyDrop::new(image_ref),
+			image_view: ManuallyDrop::new(image_view),
+			memory: ManuallyDrop::new(memory)
+		})
+	}
+
+	/// Load the given image
+	pub fn load(&mut self, img: RgbaImage, device: &mut Device, adapter: &Adapter, command_queue: &mut CommandQueue,
+		command_pool: &mut CommandPool) -> Result<(), &'static str> {
+		let initial_row_size = PIXEL_SIZE * img.width() as usize;
 		let limits = adapter.physical_device.limits();
 		let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
-		
-		let row_size = ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
-		debug_assert!(row_size as usize >= initial_row_size);
 
-		let total_size = (row_size * img.height() as usize) as u64;
+		let row_size = ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
+		let total_size = (row_size * (img.height() as usize)) as u64;
+		debug_assert!(row_size as usize >= initial_row_size);
 
 		// Make a staging buffer
 		let (staging_buffer, staging_memory) = create_buffer(device, adapter, BufUsage::TRANSFER_SRC, MemProperties::CPU_VISIBLE, total_size)
@@ -86,43 +149,6 @@ impl LoadedImage {
 			device.unmap_memory(&staging_memory);
 		}
 
-		// Make the image
-		let mut image_ref = unsafe {
-			use hal::image::{Kind, Tiling, Usage, ViewCapabilities};
-
-			device.create_image(
-				Kind::D2(img.width(), img.height(), 1, 1),
-				1,
-				Format::Rgba8Srgb,
-				Tiling::Optimal,
-				Usage::TRANSFER_DST | Usage::SAMPLED,
-				ViewCapabilities::empty()
-			)
-		}.map_err(|_| "Couldn't create image")?;
-
-		// Allocate memory
-		let memory = unsafe {
-			let requirements = device.get_image_requirements(&image_ref);
-
-			let memory_type_id = adapter.physical_device
-				.memory_properties().memory_types
-				.iter().enumerate()
-				.find(|&(id, memory_type)| {
-					requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(MemProperties::DEVICE_LOCAL)
-				})
-				.map(|(id, _)| MemoryTypeId(id))
-				.ok_or("Couldn't find a memory type for image memory")?;
-
-			let memory = device
-				.allocate_memory(memory_type_id, requirements.size)
-				.map_err(|_| "Couldn't allocate image memory")?;
-
-			device.bind_image_memory(&memory, 0, &mut image_ref)
-				.map_err(|_| "Couldn't bind memory to image")?;
-
-			Ok(memory)
-		}?;
-
 		// Copy from staging to image memory
 		let buf = unsafe {
 			use hal::command::{CommandBufferFlags, BufferImageCopy};
@@ -141,7 +167,7 @@ impl LoadedImage {
 						Access::TRANSFER_WRITE,
 						Layout::TransferDstOptimal,
 					),
-				target: &image_ref,
+				target: &(*self.image),
 				families: None,
 				range: SubresourceRange {
 					aspects: Aspects::COLOR,
@@ -156,7 +182,7 @@ impl LoadedImage {
 			);
 
 			// Copy from buffer to image
-			buf.copy_buffer_to_image(&staging_buffer, &image_ref,
+			buf.copy_buffer_to_image(&staging_buffer, &(*self.image),
 				Layout::TransferDstOptimal, &[
 				BufferImageCopy {
 					buffer_offset: 0,
@@ -187,7 +213,7 @@ impl LoadedImage {
 					Access::SHADER_READ,
 					Layout::ShaderReadOnlyOptimal,
 				),
-				target: &image_ref,
+				target: &(*self.image),
 				families: None,
 				range: SubresourceRange {
 					aspects: Aspects::COLOR,
@@ -229,18 +255,49 @@ impl LoadedImage {
 			device.destroy_buffer(staging_buffer);
 		}
 
-		// Create ImageView and sampler
-		let image_view = unsafe { device.create_image_view(
-			&image_ref,
-			ViewKind::D2,
-			Format::Rgba8Srgb,
-			Swizzle::NO,
-			SubresourceRange {
-				aspects: Aspects::COLOR,
-				levels: 0..1,
-				layers: 0..1,
-			},
-		)}.map_err(|_| "Couldn't create the image view!")?;
+		Ok(())
+	}
+
+	/// Load the given image into a new buffer
+	pub fn load_into_new(img: RgbaImage, device: &mut Device, adapter: &Adapter,
+		command_queue: &mut CommandQueue,
+		command_pool: &mut CommandPool, format: Format, usage: ImgUsage) -> Result<LoadedImage, &'static str> {
+		let mut loaded_image = Self::new(device, adapter, format, usage | ImgUsage::TRANSFER_DST, SubresourceRange {
+			aspects: Aspects::COLOR,
+			levels: 0..1,
+			layers: 0..1,
+		}, img.width() as usize, img.height() as usize)?;
+		loaded_image.load(img, device, adapter, command_queue, command_pool)?;
+
+		Ok(loaded_image)
+	}
+
+	/// Properly frees/destroys all the objects in this struct
+	/// Dropping without doing this is a bad idea
+	pub fn deactivate(self, device: &Device) -> () {
+		unsafe {
+			use core::ptr::read;
+			
+			device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));
+			device.destroy_image(ManuallyDrop::into_inner(read(&self.image)));
+			device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
+		}
+	}
+}
+
+
+pub struct SampledImage {
+	pub image: ManuallyDrop<LoadedImage>,
+	pub sampler: ManuallyDrop<Sampler>
+}
+
+impl SampledImage {
+	pub fn new(device: &mut Device, adapter: &Adapter, format: Format, usage: ImgUsage, width: usize, height: usize) -> Result<SampledImage, &'static str> {
+		let image = LoadedImage::new(device, adapter, format, usage | ImgUsage::SAMPLED, SubresourceRange {
+			aspects: Aspects::COLOR,
+			levels: 0..1,
+			layers: 0..1,
+		}, width, height)?;
 
 		let sampler = unsafe {
 			use hal::image::{SamplerDesc, Filter, WrapMode};
@@ -251,24 +308,29 @@ impl LoadedImage {
 			))
 		}.map_err(|_| "Couldn't create the sampler!")?;
 
-		Ok(LoadedImage {
-			image: ManuallyDrop::new(image_ref),
-			image_view: ManuallyDrop::new(image_view),
-			sampler: ManuallyDrop::new(sampler),
-			memory: ManuallyDrop::new(memory)
+		Ok(SampledImage {
+			image: ManuallyDrop::new(image),
+			sampler: ManuallyDrop::new(sampler)
 		})
 	}
 
-	/// Properly frees/destroys all the objects in this struct
-	/// Dropping without doing this is a bad idea
-	pub fn deactivate(self, device: &Device) -> () {
+	pub fn load_into_new(img: RgbaImage, device: &mut Device, adapter: &Adapter,
+		command_queue: &mut CommandQueue,
+		command_pool: &mut CommandPool, format: Format, usage: ImgUsage) -> Result<SampledImage, &'static str> {
+		let mut sampled_image = SampledImage::new(device, adapter, format, usage | ImgUsage::TRANSFER_DST, img.width() as usize, img.height() as usize)?;
+		sampled_image.image.load(img, device, adapter, command_queue, command_pool)?;
+
+		Ok(sampled_image)
+
+	}
+
+	pub fn deactivate(self, device: &mut Device) -> () {
 		unsafe {
 			use core::ptr::read;
 			
 			device.destroy_sampler(ManuallyDrop::into_inner(read(&self.sampler)));
-			device.destroy_image_view(ManuallyDrop::into_inner(read(&self.image_view)));
-			device.destroy_image(ManuallyDrop::into_inner(read(&self.image)));
-			device.free_memory(ManuallyDrop::into_inner(read(&self.memory)));
+
+			ManuallyDrop::into_inner(read(&self.image)).deactivate(device);
 		}
 	}
 }
