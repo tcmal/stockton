@@ -34,8 +34,9 @@ use stockton_levels::traits::faces::FaceType;
 use stockton_types::{Vector2, Vector3};
 
 use super::{
-    buffer::{ModifiableBuffer, StagedBuffer},
+    buffer::ModifiableBuffer,
     camera::WorkingCamera,
+    draw_buffers::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
     target::{SwapchainProperties, TargetChain},
     texture::TextureStore,
 };
@@ -43,12 +44,6 @@ use crate::{error, types::*};
 
 /// Entry point name for shaders
 const ENTRY_NAME: &str = "main";
-
-/// Initial size of vertex buffer. TODO: Way of overriding this
-const INITIAL_VERT_SIZE: u64 = 3 * 3000;
-
-/// Initial size of index buffer. TODO: Way of overriding this
-const INITIAL_INDEX_SIZE: u64 = 3000;
 
 /// Source for vertex shader. TODO
 const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
@@ -101,11 +96,8 @@ pub struct RenderingContext<'a> {
     /// Texture store
     texture_store: ManuallyDrop<TextureStore>,
 
-    /// (Staged) Vertex Buffer
-    pub vert_buffer: ManuallyDrop<StagedBuffer<'a, UVPoint>>,
-
-    /// (Staged) Index Buffer
-    pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
+    /// Buffers used for drawing
+    draw_buffers: ManuallyDrop<DrawBuffers<'a>>,
 
     /// Our camera settings
     camera: WorkingCamera,
@@ -259,14 +251,7 @@ impl<'a> RenderingContext<'a> {
         let camera = WorkingCamera::defaults(ratio);
 
         // Vertex and index buffers
-        let (vert_buffer, index_buffer) = {
-            use hal::buffer::Usage;
-
-            let vert = StagedBuffer::new(&mut device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)?;
-            let index = StagedBuffer::new(&mut device, &adapter, Usage::INDEX, INITIAL_INDEX_SIZE)?;
-
-            (vert, index)
-        };
+        let draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
 
         // Texture store
         let texture_store = TextureStore::new(
@@ -317,8 +302,7 @@ impl<'a> RenderingContext<'a> {
 
             texture_store: ManuallyDrop::new(texture_store),
 
-            vert_buffer: ManuallyDrop::new(vert_buffer),
-            index_buffer: ManuallyDrop::new(index_buffer),
+            draw_buffers: ManuallyDrop::new(draw_buffers),
 
             vs_module: ManuallyDrop::new(vs_module),
             fs_module: ManuallyDrop::new(fs_module),
@@ -582,8 +566,7 @@ impl<'a> RenderingContext<'a> {
         // Prepare command buffer
         let cmd_buffer = self.target_chain.prep_next_target(
             &mut self.device,
-            self.vert_buffer.get_buffer(),
-            self.index_buffer.get_buffer(),
+            &mut self.draw_buffers,
             &self.renderpass,
             &self.pipeline,
             &self.pipeline_layout,
@@ -633,12 +616,13 @@ impl<'a> RenderingContext<'a> {
                         let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
 
                         let uvp = UVPoint(vert.position, face.texture_idx.try_into().unwrap(), uv);
-                        self.vert_buffer[curr_vert_idx] = uvp;
+                        self.draw_buffers.vertex_buffer[curr_vert_idx] = uvp;
 
                         curr_vert_idx += 1;
                     }
 
-                    self.index_buffer[curr_idx_idx] = (start_idx, start_idx + 1, start_idx + 2);
+                    self.draw_buffers.index_buffer[curr_idx_idx] =
+                        (start_idx, start_idx + 1, start_idx + 2);
 
                     curr_idx_idx += 1;
 
@@ -679,13 +663,13 @@ impl<'a> RenderingContext<'a> {
         }
 
         // Update our buffers before we actually start drawing
-        self.vert_buffer.commit(
+        self.draw_buffers.vertex_buffer.commit(
             &self.device,
             &mut self.queue_group.queues[0],
             &mut self.cmd_pool,
         );
 
-        self.index_buffer.commit(
+        self.draw_buffers.index_buffer.commit(
             &self.device,
             &mut self.queue_group.queues[0],
             &mut self.cmd_pool,
@@ -722,8 +706,7 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
         unsafe {
             use core::ptr::read;
 
-            ManuallyDrop::into_inner(read(&self.vert_buffer)).deactivate(&mut self.device);
-            ManuallyDrop::into_inner(read(&self.index_buffer)).deactivate(&mut self.device);
+            ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
 
             ManuallyDrop::into_inner(read(&self.target_chain))

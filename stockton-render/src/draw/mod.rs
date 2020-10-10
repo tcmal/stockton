@@ -22,6 +22,7 @@ mod macros;
 mod buffer;
 mod camera;
 mod context;
+mod draw_buffers;
 mod texture;
 
 pub use self::context::RenderingContext;

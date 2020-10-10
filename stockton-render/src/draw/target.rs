@@ -20,6 +20,8 @@ use crate::types::*;
 use core::{iter::once, mem::ManuallyDrop};
 
 use arrayvec::ArrayVec;
+use draw::buffer::ModifiableBuffer;
+use draw::draw_buffers::DrawBuffers;
 use hal::{
     format::{ChannelType, Format, Swizzle},
     image::{Extent, Usage as ImgUsage, ViewKind},
@@ -258,8 +260,7 @@ impl TargetChain {
     pub fn prep_next_target<'a>(
         &'a mut self,
         device: &mut Device,
-        vert_buffer: &Buffer,
-        index_buffer: &Buffer,
+        draw_buffers: &mut DrawBuffers,
         renderpass: &RenderPass,
         pipeline: &GraphicsPipeline,
         pipeline_layout: &PipelineLayout,
@@ -313,10 +314,11 @@ impl TargetChain {
 
             // Get references to our buffers
             let (vbufs, ibuf) = {
-                let vbufref: &<back::Backend as hal::Backend>::Buffer = vert_buffer;
+                let vbufref: &<back::Backend as hal::Backend>::Buffer =
+                    draw_buffers.vertex_buffer.get_buffer();
 
                 let vbufs: ArrayVec<[_; 1]> = [(vbufref, SubRange::WHOLE)].into();
-                let ibuf = index_buffer;
+                let ibuf = draw_buffers.index_buffer.get_buffer();
 
                 (vbufs, ibuf)
             };

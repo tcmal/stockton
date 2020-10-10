@@ -129,24 +129,20 @@ impl TextureStore {
         debug!("Starting to load textures...");
         let mut chunks = Vec::with_capacity(num_chunks);
         for i in 0..num_chunks {
-            let range = {
-                let mut r = (i * CHUNK_SIZE) as u32..((i + 1) * CHUNK_SIZE) as u32;
-                if r.end > size as u32 {
-                    r.end = size as u32;
-                }
-                r
-            };
-            debug!("Chunk {} / {} covering {:?}", i + 1, num_chunks, range);
+            debug!("Chunk {} / {}", i + 1, num_chunks);
 
+            let descriptor_set = unsafe {
+                descriptor_pool
+                    .allocate_set(&descriptor_set_layout)
+                    .map_err(|_| error::CreationError::OutOfMemoryError)?
+            };
             chunks.push(TextureChunk::new(
                 device,
                 adapter,
                 command_queue,
                 command_pool,
-                &mut descriptor_pool,
-                &descriptor_set_layout,
-                file,
-                range,
+                descriptor_set,
+                file.textures_iter().skip(i * CHUNK_SIZE).take(CHUNK_SIZE),
                 &mut resolver,
             )?);
         }

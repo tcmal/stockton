@@ -20,14 +20,15 @@ use hal::prelude::*;
 use image::{Rgba, RgbaImage};
 
 use core::mem::replace;
-use std::ops::{Deref, Range};
+use std::ops::Deref;
 
 use crate::{error, types::*};
 
 use super::image::SampledImage;
 use super::resolver::TextureResolver;
 use log::debug;
-use stockton_levels::prelude::*;
+use std::iter::Iterator;
+use stockton_levels::traits::textures::Texture;
 
 /// The size of a chunk. Needs to match up with the fragment shader
 pub const CHUNK_SIZE: usize = 8;
@@ -41,25 +42,18 @@ pub struct TextureChunk {
 impl TextureChunk {
     /// Create a new texture chunk and load in the textures specified by `range` from `file` using `resolver`
     /// Can error if the descriptor pool is too small or if a texture isn't found
-    pub fn new<T: HasTextures, R: TextureResolver>(
+    pub fn new<'a, I, R: TextureResolver>(
         device: &mut Device,
         adapter: &mut Adapter,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
-        pool: &mut DescriptorPool,
-        layout: &DescriptorSetLayout,
-        file: &T,
-        range: Range<u32>,
+        descriptor_set: DescriptorSet,
+        textures: I,
         resolver: &mut R,
-    ) -> Result<TextureChunk, error::CreationError> {
-        //
-        let descriptor_set = unsafe {
-            pool.allocate_set(&layout).map_err(|e| {
-                println!("{:?}", e);
-                error::CreationError::OutOfMemoryError
-            })?
-        };
-
+    ) -> Result<TextureChunk, error::CreationError>
+    where
+        I: 'a + Iterator<Item = &'a Texture>,
+    {
         let mut store = TextureChunk {
             descriptor_set,
             sampled_images: Vec::with_capacity(CHUNK_SIZE),
@@ -68,9 +62,7 @@ impl TextureChunk {
         let mut local_idx = 0;
 
         debug!("Created descriptor set");
-        for tex_idx in range {
-            debug!("Loading tex {}", local_idx + 1);
-            let tex = file.get_texture(tex_idx);
+        for tex in textures {
             if let Some(img) = resolver.resolve(tex) {
                 store
                     .put_texture(img, local_idx, device, adapter, command_queue, command_pool)
