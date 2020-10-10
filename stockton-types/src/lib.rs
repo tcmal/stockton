@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -14,8 +14,8 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Common types for all stockton crates.
 
-extern crate stockton_levels;
 extern crate nalgebra_glm as na;
+extern crate stockton_levels;
 
 pub mod world;
 pub use world::World;

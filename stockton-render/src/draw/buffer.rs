@@ -1,4 +1,4 @@
-// Copyright (C) 2019 Oscar Shrimpton  
+// Copyright (C) 2019 Oscar Shrimpton
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -13,17 +13,17 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+use core::mem::{size_of, ManuallyDrop};
+use std::convert::TryInto;
 use std::iter::once;
 use std::ops::{Index, IndexMut};
-use std::convert::TryInto;
-use core::mem::{ManuallyDrop, size_of};
 
 use hal::prelude::*;
 use hal::{
-	MemoryTypeId,
-	buffer::Usage,
-	memory::{Properties, Segment},
-	queue::Submission
+    buffer::Usage,
+    memory::{Properties, Segment},
+    queue::Submission,
+    MemoryTypeId,
 };
 
 use crate::error::CreationError;
@@ -31,193 +31,224 @@ use crate::types::*;
 
 /// Create a buffer of the given specifications, allocating more device memory.
 // TODO: Use a different memory allocator?
-pub(crate) fn create_buffer(device: &mut Device,
-	adapter: &Adapter,
-	usage: Usage,
-	properties: Properties,
-	size: u64) -> Result<(Buffer, Memory), CreationError> {
-	let mut buffer = unsafe { device
-	        .create_buffer(size, usage) }
-	    .map_err(|e| CreationError::BufferError (e))?;
+pub(crate) fn create_buffer(
+    device: &mut Device,
+    adapter: &Adapter,
+    usage: Usage,
+    properties: Properties,
+    size: u64,
+) -> Result<(Buffer, Memory), CreationError> {
+    let mut buffer =
+        unsafe { device.create_buffer(size, usage) }.map_err(CreationError::BufferError)?;
 
-	let requirements = unsafe { device.get_buffer_requirements(&buffer) };
-	let memory_type_id = adapter.physical_device
-	    .memory_properties().memory_types
-	    .iter().enumerate()
-	    .find(|&(id, memory_type)| {
-	    	requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(properties)
-	    })
-	    .map(|(id, _)| MemoryTypeId(id))
-	    .ok_or(CreationError::BufferNoMemory)?;
+    let requirements = unsafe { device.get_buffer_requirements(&buffer) };
+    let memory_type_id = adapter
+        .physical_device
+        .memory_properties()
+        .memory_types
+        .iter()
+        .enumerate()
+        .find(|&(id, memory_type)| {
+            requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(properties)
+        })
+        .map(|(id, _)| MemoryTypeId(id))
+        .ok_or(CreationError::BufferNoMemory)?;
 
-	let memory = unsafe {device
-		.allocate_memory(memory_type_id, requirements.size) }
-		.map_err(|_| CreationError::OutOfMemoryError)?;
+    let memory = unsafe { device.allocate_memory(memory_type_id, requirements.size) }
+        .map_err(|_| CreationError::OutOfMemoryError)?;
 
-	unsafe { device
-		.bind_buffer_memory(&memory, 0, &mut buffer) }
-		.map_err(|_| CreationError::BufferNoMemory)?;
+    unsafe { device.bind_buffer_memory(&memory, 0, &mut buffer) }
+        .map_err(|_| CreationError::BufferNoMemory)?;
 
-	Ok((buffer, memory))
+    Ok((buffer, memory))
 }
 
 /// A buffer that can be modified by the CPU
 pub trait ModifiableBuffer: IndexMut<usize> {
-	/// Get a handle to the underlying GPU buffer
-	fn get_buffer<'a>(&'a mut self) -> &'a Buffer;
+    /// Get a handle to the underlying GPU buffer
+    fn get_buffer(&mut self) -> &Buffer;
 
-	/// Commit all changes to GPU memory, returning a handle to the GPU buffer
-	fn commit<'a>(&'a mut self, device: &Device,
-		command_queue: &mut CommandQueue, 
-		command_pool: &mut CommandPool) -> &'a Buffer;
+    /// Commit all changes to GPU memory, returning a handle to the GPU buffer
+    fn commit<'a>(
+        &'a mut self,
+        device: &Device,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+    ) -> &'a Buffer;
 }
 
 /// A GPU buffer that is written to using a staging buffer
 pub struct StagedBuffer<'a, T: Sized> {
-	/// CPU-visible buffer
-	staged_buffer: ManuallyDrop<Buffer>,
+    /// CPU-visible buffer
+    staged_buffer: ManuallyDrop<Buffer>,
 
-	/// CPU-visible memory
-	staged_memory: ManuallyDrop<Memory>,
+    /// CPU-visible memory
+    staged_memory: ManuallyDrop<Memory>,
 
-	/// GPU Buffer
-	buffer: ManuallyDrop<Buffer>,
+    /// GPU Buffer
+    buffer: ManuallyDrop<Buffer>,
 
-	/// GPU Memory
-	memory: ManuallyDrop<Memory>,
+    /// GPU Memory
+    memory: ManuallyDrop<Memory>,
 
-	/// Where staged buffer is mapped in CPU memory
-	staged_mapped_memory: &'a mut [T],
+    /// Where staged buffer is mapped in CPU memory
+    staged_mapped_memory: &'a mut [T],
 
-	/// If staged memory has been changed since last `commit`
-	staged_is_dirty: bool,
+    /// If staged memory has been changed since last `commit`
+    staged_is_dirty: bool,
 
-	/// The highest index in the buffer that's been written to.
-	pub highest_used: usize
+    /// The highest index in the buffer that's been written to.
+    pub highest_used: usize,
 }
-
 
 impl<'a, T: Sized> StagedBuffer<'a, T> {
-	/// size is the size in T
-	pub fn new(device: &mut Device, adapter: &Adapter, usage: Usage, size: u64) -> Result<Self, CreationError> {
-		// Convert size to bytes
-		let size_bytes = size * size_of::<T>() as u64;
+    /// size is the size in T
+    pub fn new(
+        device: &mut Device,
+        adapter: &Adapter,
+        usage: Usage,
+        size: u64,
+    ) -> Result<Self, CreationError> {
+        // Convert size to bytes
+        let size_bytes = size * size_of::<T>() as u64;
 
-		// Get CPU-visible buffer
-		let (staged_buffer, staged_memory) = create_buffer(device, adapter, Usage::TRANSFER_SRC, Properties::CPU_VISIBLE, size_bytes)?;
-		
-		// Get GPU Buffer
-		let (buffer, memory) = create_buffer(device, adapter, Usage::TRANSFER_DST | usage, Properties::DEVICE_LOCAL, size_bytes)?;
+        // Get CPU-visible buffer
+        let (staged_buffer, staged_memory) = create_buffer(
+            device,
+            adapter,
+            Usage::TRANSFER_SRC,
+            Properties::CPU_VISIBLE,
+            size_bytes,
+        )?;
 
-		// Map it somewhere and get a slice to that memory
-		let staged_mapped_memory = unsafe {
-			let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap(); // TODO
+        // Get GPU Buffer
+        let (buffer, memory) = create_buffer(
+            device,
+            adapter,
+            Usage::TRANSFER_DST | usage,
+            Properties::DEVICE_LOCAL,
+            size_bytes,
+        )?;
 
-			std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into().unwrap())
-		};
+        // Map it somewhere and get a slice to that memory
+        let staged_mapped_memory = unsafe {
+            let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap(); // TODO
 
-		Ok(StagedBuffer {
-			staged_buffer: ManuallyDrop::new(staged_buffer),
-			staged_memory: ManuallyDrop::new(staged_memory),
-			buffer: ManuallyDrop::new(buffer),
-			memory: ManuallyDrop::new(memory),
-			staged_mapped_memory,
-			staged_is_dirty: false,
-			highest_used: 0
-		})
-	}
+            std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into().unwrap())
+        };
 
-	/// Call this before dropping
-	pub(crate) fn deactivate(mut self, device: &mut Device) {
-		unsafe { 
-			device.unmap_memory(&self.staged_memory);
+        Ok(StagedBuffer {
+            staged_buffer: ManuallyDrop::new(staged_buffer),
+            staged_memory: ManuallyDrop::new(staged_memory),
+            buffer: ManuallyDrop::new(buffer),
+            memory: ManuallyDrop::new(memory),
+            staged_mapped_memory,
+            staged_is_dirty: false,
+            highest_used: 0,
+        })
+    }
 
-			device.free_memory(ManuallyDrop::take(&mut self.staged_memory));
-			device.destroy_buffer(ManuallyDrop::take(&mut self.staged_buffer));
+    /// Call this before dropping
+    pub(crate) fn deactivate(mut self, device: &mut Device) {
+        unsafe {
+            device.unmap_memory(&self.staged_memory);
 
-			device.free_memory(ManuallyDrop::take(&mut self.memory));
-			device.destroy_buffer(ManuallyDrop::take(&mut self.buffer));
-		};
-	}
+            device.free_memory(ManuallyDrop::take(&mut self.staged_memory));
+            device.destroy_buffer(ManuallyDrop::take(&mut self.staged_buffer));
+
+            device.free_memory(ManuallyDrop::take(&mut self.memory));
+            device.destroy_buffer(ManuallyDrop::take(&mut self.buffer));
+        };
+    }
 }
 
-impl <'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
-	fn get_buffer<'b>(&'b mut self) -> &'b Buffer {
-		&self.buffer
-	}
+impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
+    fn get_buffer(&mut self) -> &Buffer {
+        &self.buffer
+    }
 
-	fn commit<'b>(&'b mut self, device: &Device,
-		command_queue: &mut CommandQueue, 
-		command_pool: &mut CommandPool) -> &'b Buffer {
-		// Only commit if there's changes to commit.
-		if self.staged_is_dirty {
+    fn commit<'b>(
+        &'b mut self,
+        device: &Device,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+    ) -> &'b Buffer {
+        // Only commit if there's changes to commit.
+        if self.staged_is_dirty {
+            // Flush mapped memory to ensure the staged buffer is filled
+            unsafe {
+                use std::ops::Deref;
+                device
+                    .flush_mapped_memory_ranges(once((self.staged_memory.deref(), Segment::ALL)))
+                    .unwrap();
+            }
 
-			// Flush mapped memory to ensure the staged buffer is filled
-			unsafe {
-				use std::ops::Deref;
-				device.flush_mapped_memory_ranges(once((self.staged_memory.deref(), Segment::ALL))).unwrap();
-			}
+            // Copy from staged to buffer
+            let buf = unsafe {
+                use hal::command::{BufferCopy, CommandBufferFlags};
+                // Get a command buffer
+                let mut buf = command_pool.allocate_one(hal::command::Level::Primary);
 
-			// Copy from staged to buffer
-			let buf = unsafe {
-				use hal::command::{CommandBufferFlags, BufferCopy};
-				// Get a command buffer
-				let mut buf = command_pool.allocate_one(hal::command::Level::Primary);
+                // Put in our copy command
+                buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
+                buf.copy_buffer(
+                    &self.staged_buffer,
+                    &self.buffer,
+                    &[BufferCopy {
+                        src: 0,
+                        dst: 0,
+                        size: ((self.highest_used + 1) * size_of::<T>()) as u64,
+                    }],
+                );
+                buf.finish();
 
-				// Put in our copy command
-				buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
-				buf.copy_buffer(&self.staged_buffer, &self.buffer, &[
-					BufferCopy {
-						src: 0,
-						dst: 0,
-						size: ((self.highest_used + 1) * size_of::<T>()) as u64
-					}
-				]);
-				buf.finish();
+                buf
+            };
 
-				buf
-			};
+            // Submit it and wait for completion
+            // TODO: We could use more semaphores or something?
+            // TODO: Better error handling
+            unsafe {
+                let copy_finished = device.create_fence(false).unwrap();
+                command_queue.submit::<_, _, Semaphore, _, _>(
+                    Submission {
+                        command_buffers: &[&buf],
+                        wait_semaphores: std::iter::empty::<_>(),
+                        signal_semaphores: std::iter::empty::<_>(),
+                    },
+                    Some(&copy_finished),
+                );
 
-			// Submit it and wait for completion
-			// TODO: We could use more semaphores or something?
-			// TODO: Better error handling
-			unsafe {
-				let copy_finished = device.create_fence(false).unwrap();
-				command_queue.submit::<_, _, Semaphore, _, _>(Submission {
-					command_buffers: &[&buf],
-					wait_semaphores: std::iter::empty::<_>(),
-					signal_semaphores: std::iter::empty::<_>()
-				}, Some(&copy_finished));
+                device
+                    .wait_for_fence(&copy_finished, core::u64::MAX)
+                    .unwrap();
 
-				device
-			        .wait_for_fence(&copy_finished, core::u64::MAX).unwrap();
+                // Destroy temporary resources
+                device.destroy_fence(copy_finished);
+                command_pool.free(once(buf));
+            }
 
-				// Destroy temporary resources
-				device.destroy_fence(copy_finished);
-				command_pool.free(once(buf));
-			}
+            self.staged_is_dirty = false;
+        }
 
-			self.staged_is_dirty = false;
-		}
-
-		&self.buffer
-	}
+        &self.buffer
+    }
 }
 
 impl<'a, T: Sized> Index<usize> for StagedBuffer<'a, T> {
-	type Output = T;
+    type Output = T;
 
-	fn index(&self, index: usize) -> &Self::Output {
-		&self.staged_mapped_memory[index]
-	}
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.staged_mapped_memory[index]
+    }
 }
 
 impl<'a, T: Sized> IndexMut<usize> for StagedBuffer<'a, T> {
-	fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-		self.staged_is_dirty = true;
-		if index > self.highest_used {
-			self.highest_used = index;
-		}
-		&mut self.staged_mapped_memory[index]
-	}
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        self.staged_is_dirty = true;
+        if index > self.highest_used {
+            self.highest_used = index;
+        }
+        &mut self.staged_mapped_memory[index]
+    }
 }

@@ -15,19 +15,15 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::helpers::{slice_to_u32, slice_to_vec3};
-use crate::types::{Result, ParseError};
-use crate::coords::CoordSystem;
-use crate::traits::models::*;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
+use crate::helpers::{slice_to_u32, slice_to_vec3};
+use crate::traits::models::*;
+use crate::types::{ParseError, Result};
 
 const MODEL_SIZE: usize = (4 * 3 * 2) + (4 * 4);
 
-pub fn from_data(
-    data: &[u8],
-    n_faces: u32,
-    n_brushes: u32,
-) -> Result<Box<[Model]>> {
+pub fn from_data(data: &[u8], n_faces: u32, n_brushes: u32) -> Result<Box<[Model]>> {
     if data.len() % MODEL_SIZE != 0 {
         return Err(ParseError::Invalid);
     }
@@ -48,7 +44,7 @@ pub fn from_data(
                 return Err(ParseError::Invalid);
             }
 
-            start..start+n
+            start..start + n
         };
 
         let brushes_idx = {
@@ -59,7 +55,7 @@ pub fn from_data(
                 return Err(ParseError::Invalid);
             }
 
-            start..start+n
+            start..start + n
         };
 
         models.push(Model {
@@ -73,15 +69,14 @@ pub fn from_data(
     Ok(models.into_boxed_slice())
 }
 
-
 impl<T: CoordSystem> HasModels<T> for Q3BSPFile<T> {
     type ModelsIter<'a> = std::slice::Iter<'a, Model>;
 
-    fn models_iter<'a>(&'a self) -> Self::ModelsIter<'a> {
+    fn models_iter(&self) -> Self::ModelsIter<'_> {
         self.models.iter()
     }
 
-    fn get_model<'a>(&'a self, index: u32) -> &'a Model {
+    fn get_model(&self, index: u32) -> &Model {
         &self.models[index as usize]
     }
 }

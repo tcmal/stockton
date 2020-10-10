@@ -18,10 +18,10 @@
 use std::str;
 
 use super::Q3BSPFile;
-use crate::traits::textures::*;
-use crate::helpers::slice_to_u32;
-use crate::types::{Result, ParseError};
 use crate::coords::CoordSystem;
+use crate::helpers::slice_to_u32;
+use crate::traits::textures::*;
+use crate::types::{ParseError, Result};
 
 const TEXTURE_LUMP_SIZE: usize = 64 + 4 + 4;
 
@@ -42,9 +42,16 @@ pub fn from_data(lump: &[u8]) -> Result<Box<[Texture]>> {
     for n in 0..length {
         let offset = n * TEXTURE_LUMP_SIZE;
         textures.push(Texture {
-            name: str::from_utf8(&lump[offset..offset + 64]).map_err(|_| ParseError::Invalid)?.trim_matches('\0').to_owned(),
-            surface: SurfaceFlags::from_bits_truncate(slice_to_u32(&lump[offset + 64..offset + 68])),
-            contents: ContentsFlags::from_bits_truncate(slice_to_u32(&lump[offset + 68..offset + 72])),
+            name: str::from_utf8(&lump[offset..offset + 64])
+                .map_err(|_| ParseError::Invalid)?
+                .trim_matches('\0')
+                .to_owned(),
+            surface: SurfaceFlags::from_bits_truncate(slice_to_u32(
+                &lump[offset + 64..offset + 68],
+            )),
+            contents: ContentsFlags::from_bits_truncate(slice_to_u32(
+                &lump[offset + 68..offset + 72],
+            )),
         });
     }
 
@@ -54,11 +61,11 @@ pub fn from_data(lump: &[u8]) -> Result<Box<[Texture]>> {
 impl<T: CoordSystem> HasTextures for Q3BSPFile<T> {
     type TexturesIter<'a> = std::slice::Iter<'a, Texture>;
 
-    fn textures_iter<'a>(&'a self) -> Self::TexturesIter<'a> {
+    fn textures_iter(&self) -> Self::TexturesIter<'_> {
         self.textures.iter()
     }
 
-    fn get_texture<'a>(&'a self, idx: u32) -> &'a Texture {
+    fn get_texture(&self, idx: u32) -> &Texture {
         &self.textures[idx as usize]
     }
 }
@@ -84,10 +91,7 @@ fn textures_single_texture() {
         lump[0].surface,
         SurfaceFlags::NO_DAMAGE | SurfaceFlags::SLICK | SurfaceFlags::FLESH | SurfaceFlags::DUST
     );
-    assert_eq!(
-        lump[0].contents,
-        ContentsFlags::SOLID | ContentsFlags::LAVA
-    );
+    assert_eq!(lump[0].contents, ContentsFlags::SOLID | ContentsFlags::LAVA);
 }
 
 #[test]
@@ -140,13 +144,7 @@ fn textures_multiple_textures() {
         SurfaceFlags::POINT_LIGHT | SurfaceFlags::SKIP
     );
 
-    assert_eq!(
-        lump[0].contents,
-        ContentsFlags::SOLID | ContentsFlags::LAVA
-    );
+    assert_eq!(lump[0].contents, ContentsFlags::SOLID | ContentsFlags::LAVA);
     assert_eq!(lump[1].contents, ContentsFlags::SOLID);
-    assert_eq!(
-        lump[2].contents,
-        ContentsFlags::SOLID | ContentsFlags::FOG
-    );
+    assert_eq!(lump[2].contents, ContentsFlags::SOLID | ContentsFlags::FOG);
 }

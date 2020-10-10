@@ -17,21 +17,19 @@
 
 const PLANE_SIZE: usize = (4 * 3) + 4;
 
-use crate::helpers::{slice_to_f32, slice_to_vec3};
-use crate::types::{Result, ParseError};
-use crate::traits::planes::*;
 use super::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::helpers::{slice_to_f32, slice_to_vec3};
+use crate::traits::planes::*;
+use crate::types::{ParseError, Result};
 
 /// Parse a lump of planes.
 /// A lump is (data length / plane size) planes long
 pub fn from_data(data: &[u8]) -> Result<Box<[Plane]>> {
-
     let length = data.len() / PLANE_SIZE;
     if data.is_empty() || data.len() % PLANE_SIZE != 0 || length % 2 != 0 {
         return Err(ParseError::Invalid);
     }
-
 
     let mut planes = Vec::with_capacity(length / 2);
     for n in 0..length {
@@ -49,11 +47,11 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Plane]>> {
 impl<T: CoordSystem> HasPlanes<T> for Q3BSPFile<T> {
     type PlanesIter<'a> = std::slice::Iter<'a, Plane>;
 
-    fn planes_iter<'a>(&'a self) -> Self::PlanesIter<'a> {
+    fn planes_iter(&self) -> Self::PlanesIter<'_> {
         self.planes.iter()
     }
 
-    fn get_plane<'a>(&'a self, idx: u32) -> &'a Plane {
+    fn get_plane(&self, idx: u32) -> &Plane {
         &self.planes[idx as usize]
     }
 }

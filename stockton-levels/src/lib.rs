@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -13,6 +13,7 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Parses common features from many BSP file formats.
+#![allow(incomplete_features)]
 #![feature(generic_associated_types)]
 
 #[macro_use]
@@ -20,10 +21,10 @@ extern crate bitflags;
 extern crate bitvec;
 extern crate nalgebra as na;
 
-mod helpers;
-pub mod q3;
-pub mod types;
-pub mod traits;
-pub mod prelude;
-pub mod features;
 pub mod coords;
+pub mod features;
+mod helpers;
+pub mod prelude;
+pub mod q3;
+pub mod traits;
+pub mod types;

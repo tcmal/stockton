@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -14,9 +14,8 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Marker traits for different feature sets
 
-use crate::traits::*;
 use crate::coords::CoordSystem;
+use crate::traits::*;
 
 pub trait MinBSPFeatures<S: CoordSystem>: HasBSPTree<S> {}
-impl<T, S: CoordSystem> MinBSPFeatures<S> for T 
-	where T: HasBSPTree<S> {}
+impl<T, S: CoordSystem> MinBSPFeatures<S> for T where T: HasBSPTree<S> {}

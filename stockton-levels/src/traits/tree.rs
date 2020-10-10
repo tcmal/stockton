@@ -17,9 +17,9 @@
 
 //! Parses the BSP tree into a usable format
 
-use na::Vector3;
-use super::{HasFaces, HasBrushes, HasVisData};
+use super::{HasBrushes, HasFaces, HasVisData};
 use crate::coords::CoordSystem;
+use na::Vector3;
 
 /// A node in a BSP tree.
 /// Either has two children *or* a leaf entry.
@@ -28,13 +28,13 @@ pub struct BSPNode {
     pub plane_idx: u32,
     pub min: Vector3<i32>,
     pub max: Vector3<i32>,
-    pub value: BSPNodeValue
+    pub value: BSPNodeValue,
 }
 
 #[derive(Debug, Clone)]
 pub enum BSPNodeValue {
-    Leaf (BSPLeaf),
-    Children (Box<BSPNode>, Box<BSPNode>)
+    Leaf(BSPLeaf),
+    Children(Box<BSPNode>, Box<BSPNode>),
 }
 
 /// A leaf in a BSP tree.
@@ -48,5 +48,5 @@ pub struct BSPLeaf {
 }
 
 pub trait HasBSPTree<S: CoordSystem>: HasFaces<S> + HasBrushes<S> + HasVisData {
-    fn get_bsp_root<'a>(&'a self) -> &'a BSPNode;
+    fn get_bsp_root(&self) -> &BSPNode;
 }

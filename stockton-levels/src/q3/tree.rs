@@ -17,11 +17,11 @@
 
 //! Parses the BSP tree into a usable format
 
-use crate::coords::CoordSystem;
-use crate::helpers::{slice_to_u32, slice_to_i32, slice_to_vec3i};
-use crate::types::{ParseError, Result};
-use crate::traits::tree::*;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
+use crate::helpers::{slice_to_i32, slice_to_u32, slice_to_vec3i};
+use crate::traits::tree::*;
+use crate::types::{ParseError, Result};
 
 const NODE_SIZE: usize = 4 + (4 * 2) + (4 * 3) + (4 * 3);
 const LEAF_SIZE: usize = 4 * 6 + (4 * 3 * 2);
@@ -39,18 +39,17 @@ pub fn from_data(
     }
 
     Ok(compile_node(
-            0,
-            nodes,
-            leaves,
-            leaf_faces,
-            leaf_brushes,
-            n_faces,
-            n_brushes,
-        )?,
-    )
+        0,
+        nodes,
+        leaves,
+        leaf_faces,
+        leaf_brushes,
+        n_faces,
+        n_brushes,
+    )?)
 }
 
-    /// Internal function. Visits given node and all its children. Used to recursively build tree.
+/// Internal function. Visits given node and all its children. Used to recursively build tree.
 fn compile_node(
     i: i32,
     nodes: &[u8],
@@ -93,7 +92,7 @@ fn compile_node(
             let start = slice_to_u32(&raw[40..44]) as usize;
             let n = slice_to_u32(&raw[44..48]) as usize;
             let mut brushes = Vec::with_capacity(n);
-        
+
             if n > 0 {
                 if start + n > leaf_brushes.len() / 4 {
                     return Err(ParseError::Invalid);
@@ -163,7 +162,7 @@ fn compile_node(
 }
 
 impl<T: CoordSystem> HasBSPTree<T> for Q3BSPFile<T> {
-    fn get_bsp_root<'a>(&'a self) -> &'a BSPNode {
+    fn get_bsp_root(&self) -> &BSPNode {
         &self.tree_root
     }
 }

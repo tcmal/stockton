@@ -27,6 +27,6 @@ pub struct LightVol {
 pub trait HasLightVols {
     type LightVolsIter<'a>: Iterator<Item = &'a LightVol>;
 
-    fn lightvols_iter<'a>(&'a self) -> Self::LightVolsIter<'a>;
-    fn get_lightvol<'a>(&'a self, index: u32) -> &'a LightVol;
+    fn lightvols_iter(&self) -> Self::LightVolsIter<'_>;
+    fn get_lightvol(&self, index: u32) -> &LightVol;
 }

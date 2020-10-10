@@ -17,44 +17,39 @@
 
 use stockton_levels::traits::textures::Texture;
 
-use image::{
-	RgbaImage,
-	io::Reader
-};
+use image::{io::Reader, RgbaImage};
 
 use std::path::Path;
 
 /// An object that can be used to resolve a texture from a BSP File
 pub trait TextureResolver {
-	/// Get the given texture, or None if it's corrupt/not there.
-	fn resolve(&mut self, texture: &Texture) -> Option<RgbaImage>;
+    /// Get the given texture, or None if it's corrupt/not there.
+    fn resolve(&mut self, texture: &Texture) -> Option<RgbaImage>;
 }
 
 /// A basic filesystem resolver which expects no file extension and guesses the image format
 pub struct BasicFSResolver<'a> {
-	path: &'a Path
+    path: &'a Path,
 }
 
 impl<'a> BasicFSResolver<'a> {
-	pub fn new(path: &'a Path) -> BasicFSResolver<'a> {
-		BasicFSResolver {
-			path
-		}
-	}
+    pub fn new(path: &'a Path) -> BasicFSResolver<'a> {
+        BasicFSResolver { path }
+    }
 }
 
 impl<'a> TextureResolver for BasicFSResolver<'a> {
-	fn resolve(&mut self, tex: &Texture) -> Option<RgbaImage> {
-		let path = self.path.join(&tex.name);
+    fn resolve(&mut self, tex: &Texture) -> Option<RgbaImage> {
+        let path = self.path.join(&tex.name);
 
-		if let Ok(file) = Reader::open(path) {
-			if let Ok(guessed) = file.with_guessed_format() {
-				if let Ok(decoded) = guessed.decode() {
-					return Some(decoded.into_rgba());
-				}
-			}
-		}
+        if let Ok(file) = Reader::open(path) {
+            if let Ok(guessed) = file.with_guessed_format() {
+                if let Ok(decoded) = guessed.decode() {
+                    return Some(decoded.into_rgba());
+                }
+            }
+        }
 
-		None
-	}
+        None
+    }
 }

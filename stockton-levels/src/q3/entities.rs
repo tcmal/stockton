@@ -15,13 +15,13 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::str;
 use std::collections::HashMap;
+use std::str;
 
-use crate::types::{Result, ParseError};
-use crate::traits::entities::*;
 use super::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::traits::entities::*;
+use crate::types::{ParseError, Result};
 
 const QUOTE: u8 = b'"';
 const END_BRACKET: u8 = b'}';
@@ -72,7 +72,10 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Entity]>> {
                     state = ParseState::InsideEntity;
                     val_end = i;
 
-                    attrs.insert(string[key_start..key_end].to_owned(), string[val_start..val_end].to_owned());
+                    attrs.insert(
+                        string[key_start..key_end].to_owned(),
+                        string[val_start..val_end].to_owned(),
+                    );
                 }
                 _ => {
                     return Err(ParseError::Invalid);
@@ -103,7 +106,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Entity]>> {
 impl<T: CoordSystem> HasEntities for Q3BSPFile<T> {
     type EntitiesIter<'a> = std::slice::Iter<'a, Entity>;
 
-    fn entities_iter<'a>(&'a self) -> Self::EntitiesIter<'a> {
+    fn entities_iter(&self) -> Self::EntitiesIter<'_> {
         self.entities.iter()
     }
 }

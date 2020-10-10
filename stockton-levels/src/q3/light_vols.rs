@@ -17,10 +17,10 @@
 
 use std::convert::TryInto;
 
-use crate::types::{Result, ParseError, RGB};
-use crate::traits::light_vols::*;
 use super::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::traits::light_vols::*;
+use crate::types::{ParseError, Result, RGB};
 
 const VOL_LENGTH: usize = (3 * 2) + 2;
 
@@ -43,15 +43,14 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightVol]>> {
     Ok(vols.into_boxed_slice())
 }
 
-
 impl<T: CoordSystem> HasLightVols for Q3BSPFile<T> {
     type LightVolsIter<'a> = std::slice::Iter<'a, LightVol>;
 
-    fn lightvols_iter<'a>(&'a self) -> Self::LightVolsIter<'a> {
+    fn lightvols_iter(&self) -> Self::LightVolsIter<'_> {
         self.light_vols.iter()
     }
 
-    fn get_lightvol<'a>(&'a self, index: u32) -> &'a LightVol {
+    fn get_lightvol(&self, index: u32) -> &LightVol {
         &self.light_vols[index as usize]
     }
 }

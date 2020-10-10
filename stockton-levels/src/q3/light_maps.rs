@@ -15,10 +15,10 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::types::{Result, RGB, ParseError};
-use crate::traits::light_maps::*;
 use super::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::traits::light_maps::*;
+use crate::types::{ParseError, Result, RGB};
 
 /// The size of one LightMap
 const LIGHTMAP_SIZE: usize = 128 * 128 * 3;
@@ -35,10 +35,10 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightMap]>> {
         let raw = &data[n * LIGHTMAP_SIZE..(n + 1) * LIGHTMAP_SIZE];
         let mut map: [[RGB; 128]; 128] = [[RGB::white(); 128]; 128];
 
-        for x in 0..128 {
-            for y in 0..128 {
+        for (x, outer) in map.iter_mut().enumerate() {
+            for (y, inner) in outer.iter_mut().enumerate() {
                 let offset = (x * 128 * 3) + (y * 3);
-                map[x][y] = RGB::from_slice(&raw[offset..offset + 3]);
+                *inner = RGB::from_slice(&raw[offset..offset + 3]);
             }
         }
         maps.push(LightMap { map })
@@ -50,11 +50,11 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightMap]>> {
 impl<T: CoordSystem> HasLightMaps for Q3BSPFile<T> {
     type LightMapsIter<'a> = std::slice::Iter<'a, LightMap>;
 
-    fn lightmaps_iter<'a>(&'a self) -> Self::LightMapsIter<'a> {
+    fn lightmaps_iter(&self) -> Self::LightMapsIter<'_> {
         self.light_maps.iter()
     }
 
-    fn get_lightmap<'a>(&'a self, index: u32) -> &'a LightMap {
+    fn get_lightmap(&self, index: u32) -> &LightMap {
         &self.light_maps[index as usize]
     }
 }

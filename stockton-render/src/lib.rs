@@ -21,58 +21,57 @@ extern crate gfx_hal as hal;
 extern crate shaderc;
 extern crate winit;
 
-extern crate nalgebra_glm as na;
 extern crate image;
 extern crate log;
+extern crate nalgebra_glm as na;
 
-extern crate stockton_types;
 extern crate stockton_levels;
+extern crate stockton_types;
 
 extern crate arrayvec;
 
+mod culling;
 pub mod draw;
 mod error;
 mod types;
-mod culling;
 
-use stockton_types::World;
 use stockton_levels::prelude::*;
+use stockton_types::World;
 
-use error::{CreationError, FrameError};
-use draw::RenderingContext;
 use culling::get_visible_faces;
+use draw::RenderingContext;
+use error::{CreationError, FrameError};
 
 /// Renders a world to a window when you tell it to.
 pub struct Renderer<'a, T: MinBSPFeatures<VulkanSystem>> {
-	world: World<T>,
-	pub context: RenderingContext<'a>
+    world: World<T>,
+    pub context: RenderingContext<'a>,
 }
 
-
 impl<'a, T: MinBSPFeatures<VulkanSystem>> Renderer<'a, T> {
-	/// Create a new Renderer.
-	/// This initialises all the vulkan context, etc needed.
-	pub fn new(world: World<T>, window: &winit::window::Window) -> Result<Self, CreationError> {
-		let context = RenderingContext::new(window, &world.map)?;
+    /// Create a new Renderer.
+    /// This initialises all the vulkan context, etc needed.
+    pub fn new(world: World<T>, window: &winit::window::Window) -> Result<Self, CreationError> {
+        let context = RenderingContext::new(window, &world.map)?;
 
-		Ok(Renderer {
-			world, context
-		})
-	}
+        Ok(Renderer { world, context })
+    }
 
-	/// Render a single frame of the world
-	pub fn render_frame(&mut self) -> Result<(), FrameError>{
-		// Get visible faces
-		let faces = get_visible_faces(self.context.camera_pos(), &self.world.map);
-		
-		// Then draw them
-		if let Err(_) = self.context.draw_vertices(&self.world.map, &faces) {
-			unsafe {self.context.handle_surface_change().unwrap()};
+    /// Render a single frame of the world
+    pub fn render_frame(&mut self) -> Result<(), FrameError> {
+        // Get visible faces
+        let faces = get_visible_faces(self.context.camera_pos(), &self.world.map);
 
-			// If it fails twice, then error
-			self.context.draw_vertices(&self.world.map, &faces).map_err(|_| FrameError::PresentError)?;
-		}
+        // Then draw them
+        if self.context.draw_vertices(&self.world.map, &faces).is_err() {
+            unsafe { self.context.handle_surface_change().unwrap() };
 
-		Ok(())
-	}
+            // If it fails twice, then error
+            self.context
+                .draw_vertices(&self.world.map, &faces)
+                .map_err(|_| FrameError::PresentError)?;
+        }
+
+        Ok(())
+    }
 }

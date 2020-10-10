@@ -15,10 +15,10 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::ops::Range;
 use na::{Vector2, Vector3};
+use std::ops::Range;
 
-use super::{HasEffects, HasTextures, HasLightMaps, HasMeshVerts};
+use super::{HasEffects, HasLightMaps, HasMeshVerts, HasTextures};
 use crate::coords::CoordSystem;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,15 +43,17 @@ pub struct Face {
     pub map_size: Vector2<u32>,
     pub map_origin: Vector3<f32>,
     pub map_vecs: [Vector3<f32>; 2],
-    
+
     pub normal: Vector3<f32>,
     pub size: Vector2<u32>,
 }
 
-pub trait HasFaces<S: CoordSystem>: HasTextures + HasEffects<S> + HasLightMaps + HasMeshVerts<S> {
+pub trait HasFaces<S: CoordSystem>:
+    HasTextures + HasEffects<S> + HasLightMaps + HasMeshVerts<S>
+{
     type FacesIter<'a>: Iterator<Item = &'a Face>;
 
-    fn faces_iter<'a>(&'a self) -> Self::FacesIter<'a>;
+    fn faces_iter(&self) -> Self::FacesIter<'_>;
     fn faces_len(&self) -> u32;
-    fn get_face<'a>(&'a self, index: u32) -> &'a Face;
+    fn get_face(&self, index: u32) -> &Face;
 }

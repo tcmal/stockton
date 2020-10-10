@@ -39,6 +39,6 @@ pub struct BrushSide {
 pub trait HasBrushes<S: CoordSystem>: HasPlanes<S> {
     type BrushesIter<'a>: Iterator<Item = &'a Brush>;
 
-    fn brushes_iter<'a>(&'a self) -> Self::BrushesIter<'a>;
-    fn get_brush<'a>(&'a self, index: u32) -> &'a Brush;
+    fn brushes_iter(&self) -> Self::BrushesIter<'_>;
+    fn get_brush(&self, index: u32) -> &Brush;
 }

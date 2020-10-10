@@ -23,18 +23,18 @@ const BRUSH_SIZE: usize = 4 * 3;
 /// The size of one brushsize record
 const SIDE_SIZE: usize = 4 * 2;
 
-use crate::helpers::slice_to_i32;
-use crate::types::{ParseError, Result};
-use crate::traits::brushes::*;
-use crate::coords::CoordSystem;
 use super::Q3BSPFile;
+use crate::coords::CoordSystem;
+use crate::helpers::slice_to_i32;
+use crate::traits::brushes::*;
+use crate::types::{ParseError, Result};
 
 /// Parse the brushes & brushsides lump from a bsp file.
 pub fn from_data(
     brushes_data: &[u8],
     sides_data: &[u8],
     n_textures: u32,
-    n_planes: u32
+    n_planes: u32,
 ) -> Result<Box<[Brush]>> {
     if brushes_data.len() % BRUSH_SIZE != 0 || sides_data.len() % SIDE_SIZE != 0 {
         return Err(ParseError::Invalid);
@@ -57,9 +57,9 @@ pub fn from_data(
                 slice_to_i32(&brush[0..4]),
                 slice_to_i32(&brush[4..8]),
                 n_textures as usize,
-                n_planes as usize
+                n_planes as usize,
             )?,
-            texture_idx
+            texture_idx,
         });
     }
 
@@ -96,7 +96,7 @@ fn get_sides(
             sides.push(BrushSide {
                 plane_idx,
                 texture_idx,
-                is_opposing
+                is_opposing,
             });
         }
     }
@@ -104,15 +104,14 @@ fn get_sides(
     Ok(sides.into_boxed_slice())
 }
 
-
 impl<T: CoordSystem> HasBrushes<T> for Q3BSPFile<T> {
     type BrushesIter<'a> = std::slice::Iter<'a, Brush>;
 
-    fn brushes_iter<'a>(&'a self) -> Self::BrushesIter<'a> {
+    fn brushes_iter(&self) -> Self::BrushesIter<'_> {
         self.brushes.iter()
     }
 
-    fn get_brush<'a>(&'a self, index: u32) -> &'a Brush {
+    fn get_brush(&self, index: u32) -> &Brush {
         &self.brushes[index as usize]
     }
 }

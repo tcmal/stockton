@@ -25,14 +25,12 @@ pub struct Effect {
     pub name: String,
 
     /// The brush used for this effect
-    pub brush_idx: u32
-
-    // todo: unknown: i32
+    pub brush_idx: u32, // todo: unknown: i32
 }
 
 pub trait HasEffects<S: CoordSystem>: HasBrushes<S> {
     type EffectsIter<'a>: Iterator<Item = &'a Effect>;
 
-    fn effects_iter<'a>(&'a self) -> Self::EffectsIter<'a>;
-    fn get_effect<'a>(&'a self, index: u32) -> &'a Effect;
+    fn effects_iter(&self) -> Self::EffectsIter<'_>;
+    fn get_effect(&self, index: u32) -> &Effect;
 }

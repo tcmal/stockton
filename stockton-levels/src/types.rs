@@ -86,7 +86,7 @@ impl RGB {
 /// An error encountered while parsing.
 pub enum ParseError {
     Unsupported,
-    Invalid
+    Invalid,
 }
 
 /// Standard result type.

@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -19,15 +19,13 @@ use stockton_levels::prelude::*;
 
 /// A loaded world.
 pub struct World<T: MinBSPFeatures<VulkanSystem>> {
-	pub map: T,
+    pub map: T,
 }
 
 impl<T: MinBSPFeatures<VulkanSystem>> World<T> {
-	/// Create a new world from a level.
-	/// The level can be any format, as long as it has the required features of a bsp.
-	pub fn new(map: T) -> World<T> {
-		World {
-			map
-		}
-	}
+    /// Create a new world from a level.
+    /// The level can be any format, as long as it has the required features of a bsp.
+    pub fn new(map: T) -> World<T> {
+        World { map }
+    }
 }

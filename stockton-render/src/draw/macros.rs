@@ -19,10 +19,10 @@
 /// ```
 /// // 0 is the binding value
 /// let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
-///		size_of::<f32>() * 3; Rgb32Sfloat
-///		size_of::<f32>() * 2; Rg32Sfloat,
-///		size_of::<u32>(); R32Sint
-///	);
+/// size_of::<f32>() * 3; Rgb32Sfloat
+///     size_of::<f32>() * 2; Rg32Sfloat,
+///     size_of::<u32>(); R32Sint
+/// );
 /// ```
 /// See the hal::pso::Format enum for possible types
 macro_rules! pipeline_vb_attributes {

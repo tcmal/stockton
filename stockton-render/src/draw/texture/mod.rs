@@ -15,10 +15,10 @@
 
 //! Everything related to loading textures into GPU memory
 
-mod resolver;
-pub mod image;
 mod chunk;
+pub mod image;
 pub mod loader;
+mod resolver;
 
-pub use self::loader::TextureStore;
 pub use self::image::{LoadedImage, SampledImage};
+pub use self::loader::TextureStore;

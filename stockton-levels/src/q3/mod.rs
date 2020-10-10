@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -15,19 +15,19 @@
 
 //! Parsing data from Q3 and similar BSPs
 
-mod visdata;
-mod header;
-mod textures;
-mod entities;
-mod planes;
-mod vertices;
-mod light_maps;
-mod light_vols;
 mod brushes;
 mod effects;
+mod entities;
 mod faces;
-mod tree;
-mod models;
 pub mod file;
+mod header;
+mod light_maps;
+mod light_vols;
+mod models;
+mod planes;
+mod textures;
+mod tree;
+mod vertices;
+mod visdata;
 
 pub use self::file::Q3BSPFile;

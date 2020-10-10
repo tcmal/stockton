@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -14,6 +14,6 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Common traits, etc.
 
-pub use crate::traits::*;
-pub use crate::features::*;
 pub use crate::coords::*;
+pub use crate::features::*;
+pub use crate::traits::*;

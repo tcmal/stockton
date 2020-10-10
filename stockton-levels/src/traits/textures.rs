@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -23,21 +23,20 @@ pub struct Texture {
     pub contents: ContentsFlags,
 }
 
-
 bitflags!(
     /// Extracted from the Q3 arena engine code.
     /// https://github.com/id-Software/Quake-III-Arena/blob/master/code/game/surfaceflags.h
     pub struct SurfaceFlags: u32 {
         /// never give falling damage
         const NO_DAMAGE = 0x1;
-        
+
         /// affects game physics
         const SLICK = 0x2;
-        
+
         /// lighting from environment map
         const SKY = 0x4;
 
-        /// don't make missile explosions        
+        /// don't make missile explosions
         const NO_IMPACT = 0x10;
 
         /// function as a ladder
@@ -45,43 +44,43 @@ bitflags!(
 
         /// don't leave missile marks
         const NO_MARKS = 0x20;
-        
+
         /// make flesh sounds and effects
         const FLESH = 0x40;
-        
+
         /// don't generate a drawsurface at all
         const NODRAW = 0x80;
-        
+
         /// make a primary bsp splitter
         const HINT = 0x01_00;
-        
+
         /// completely ignore, allowing non-closed brushes
         const SKIP = 0x02_00;
-        
+
         /// surface doesn't need a lightmap
         const NO_LIGHT_MAP = 0x04_00;
-        
+
         /// generate lighting info at vertexes
         const POINT_LIGHT = 0x08_00;
-        
+
         /// clanking footsteps
         const METAL_STEPS = 0x10_00;
-        
+
         /// no footstep sounds
         const NO_STEPS = 0x20_00;
-        
+
         /// don't collide against curves with this set
         const NON_SOLID = 0x40_00;
-        
+
         /// act as a light filter during q3map -light
         const LIGHT_FILTER = 0x80_00;
-        
+
         /// do per-pixel light shadow casting in q3map
         const ALPHA_SHADOW = 0x01_00_00;
-        
+
         /// don't dlight even if solid (solid lava, skies)
         const NO_DLIGHT = 0x02_00_00;
-        
+
         /// leave a dust trail when walking on this surface
         const DUST = 0x04_00_00;
     }
@@ -116,7 +115,7 @@ bitflags!(
         const DO_NOT_ENTER = 0x20_00_00;
         const BOT_CLIP = 0x40_00_00;
         const MOVER = 0x80_00_00;
-        
+
         // removed before bsping an entity
         const ORIGIN = 0x01_00_00_00;
 
@@ -125,18 +124,18 @@ bitflags!(
 
         /// brush not used for the bsp
         const DETAIL = 0x08_00_00_00;
-        
+
         /// brush not used for the bsp
         const CORPSE = 0x04_00_00_00;
 
         /// brushes used for the bsp
         const STRUCTURAL = 0x10_00_00_00;
-        
+
         /// don't consume surface fragments inside
         const TRANSLUCENT = 0x20_00_00_00;
 
         const TRIGGER = 0x40_00_00_00;
-        
+
         /// don't leave bodies or items (death fog, lava)
         const NODROP = 0x80_00_00_00;
     }
@@ -145,6 +144,6 @@ bitflags!(
 pub trait HasTextures {
     type TexturesIter<'a>: Iterator<Item = &'a Texture>;
 
-	fn textures_iter<'a>(&'a self) -> Self::TexturesIter<'a>;
-    fn get_texture<'a>(&'a self, idx: u32) -> &'a Texture;
+    fn textures_iter(&self) -> Self::TexturesIter<'_>;
+    fn get_texture(&self, idx: u32) -> &Texture;
 }

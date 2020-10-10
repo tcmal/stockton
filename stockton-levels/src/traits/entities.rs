@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -13,8 +13,8 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::iter::Iterator;
 use std::collections::HashMap;
+use std::iter::Iterator;
 
 #[derive(Debug, Clone, PartialEq)]
 /// A game entity
@@ -23,7 +23,7 @@ pub struct Entity {
 }
 
 pub trait HasEntities {
-	type EntitiesIter<'a>: Iterator<Item = &'a Entity>;
+    type EntitiesIter<'a>: Iterator<Item = &'a Entity>;
 
-	fn entities_iter<'a>(&'a self) -> Self::EntitiesIter<'a>;
+    fn entities_iter(&self) -> Self::EntitiesIter<'_>;
 }

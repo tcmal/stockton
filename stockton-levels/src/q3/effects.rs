@@ -17,11 +17,11 @@
 
 use std::str;
 
-use crate::helpers::slice_to_u32;
-use crate::types::{Result, ParseError};
-use crate::traits::effects::*;
 use super::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::helpers::slice_to_u32;
+use crate::traits::effects::*;
+use crate::types::{ParseError, Result};
 
 /// The size of one effect definition
 const EFFECT_SIZE: usize = 64 + 4 + 4;
@@ -42,23 +42,24 @@ pub fn from_data(data: &[u8], n_brushes: u32) -> Result<Box<[Effect]>> {
         }
 
         effects.push(Effect {
-            name: str::from_utf8(&raw[..64]).map_err(|_| ParseError::Invalid)?.to_owned(),
-            brush_idx
+            name: str::from_utf8(&raw[..64])
+                .map_err(|_| ParseError::Invalid)?
+                .to_owned(),
+            brush_idx,
         });
     }
 
     Ok(effects.into_boxed_slice())
 }
 
-
 impl<T: CoordSystem> HasEffects<T> for Q3BSPFile<T> {
     type EffectsIter<'a> = std::slice::Iter<'a, Effect>;
 
-    fn effects_iter<'a>(&'a self) -> Self::EffectsIter<'a> {
+    fn effects_iter(&self) -> Self::EffectsIter<'_> {
         self.effects.iter()
     }
 
-    fn get_effect<'a>(&'a self, index: u32) -> &'a Effect {
+    fn get_effect(&self, index: u32) -> &Effect {
         &self.effects[index as usize]
     }
 }

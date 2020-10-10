@@ -18,35 +18,30 @@
 use super::draw::target::TargetChainCreationError;
 
 /// An error encountered creating a rendering context.
-/// Falls into 3 main types:
-/// 	- Hardware - No suitable card usually
-/// 	- Sanity - Things that probably aren't true, likely indicating a deeper issue.
-///				These aren't guaranteed sanity issues, but they are weird issues.
-/// 	- Runtime - Things caused by runtime conditions, usually resource constraints. Could also be caused by corrupt files
 #[derive(Debug)]
 pub enum CreationError {
-	TargetChainCreationError (TargetChainCreationError),
-	WindowError,
-	BadSurface,
-	
-	DeviceError (hal::device::CreationError),
+    TargetChainCreationError(TargetChainCreationError),
+    WindowError,
+    BadSurface,
 
-	OutOfMemoryError,
+    DeviceError(hal::device::CreationError),
 
-	SyncObjectError,
-	
-	NoShaderC,
-	ShaderCError (shaderc::Error),
-	ShaderModuleFailed (hal::device::ShaderError),
-	RenderPassError,
-	PipelineError (hal::pso::CreationError),
-	BufferError (hal::buffer::CreationError),
-	BufferNoMemory,
-	
-	SwapchainError (hal::window::CreationError),
-	ImageViewError (hal::image::ViewCreationError),
+    OutOfMemoryError,
 
-	BadDataError
+    SyncObjectError,
+
+    NoShaderC,
+    ShaderCError(shaderc::Error),
+    ShaderModuleFailed(hal::device::ShaderError),
+    RenderPassError,
+    PipelineError(hal::pso::CreationError),
+    BufferError(hal::buffer::CreationError),
+    BufferNoMemory,
+
+    SwapchainError(hal::window::CreationError),
+    ImageViewError(hal::image::ViewCreationError),
+
+    BadDataError,
 }
 
 /// An error encountered when rendering.
@@ -54,7 +49,7 @@ pub enum CreationError {
 /// You'll likely need to exit or create a new context.
 #[derive(Debug, Clone)]
 pub enum FrameError {
-	AcquireError (hal::window::AcquireError),
-	SyncObjectError,
-	PresentError
+    AcquireError(hal::window::AcquireError),
+    SyncObjectError,
+    PresentError,
 }

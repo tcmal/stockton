@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -18,12 +18,12 @@ use std::iter::Iterator;
 pub type ClusterId = u32;
 
 pub trait HasVisData {
-	/// The iterator returned from all_visible_from
-	type VisibleIterator: Iterator<Item = ClusterId>; 
+    /// The iterator returned from all_visible_from
+    type VisibleIterator: Iterator<Item = ClusterId>;
 
-	/// Returns an iterator of all clusters visible from the given Cluster ID
-	fn all_visible_from(&self, from: ClusterId) -> Self::VisibleIterator;
+    /// Returns an iterator of all clusters visible from the given Cluster ID
+    fn all_visible_from(&self, from: ClusterId) -> Self::VisibleIterator;
 
-	/// Returns true if `dest` is visible from `from`.
-	fn cluster_visible_from(&self, from: ClusterId, dest: ClusterId) -> bool;
+    /// Returns true if `dest` is visible from `from`.
+    fn cluster_visible_from(&self, from: ClusterId, dest: ClusterId) -> bool;
 }

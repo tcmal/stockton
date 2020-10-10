@@ -16,22 +16,17 @@
 //! A chunk of textures is an array of textures, the size of which is known at compile time.
 //! This reduces the number of times we need to re-bind our descriptor sets
 
-use image::{Rgba, RgbaImage};
 use hal::prelude::*;
+use image::{Rgba, RgbaImage};
 
-use core::{
-	mem::{replace}
-};
-use std::ops::{Range, Deref};
+use core::mem::replace;
+use std::ops::{Deref, Range};
 
-use crate::{
-	types::*,
-	error
-};
+use crate::{error, types::*};
 
-use log::debug;
-use super::resolver::TextureResolver;
 use super::image::SampledImage;
+use super::resolver::TextureResolver;
+use log::debug;
 use stockton_levels::prelude::*;
 
 /// The size of a chunk. Needs to match up with the fragment shader
@@ -39,125 +34,135 @@ pub const CHUNK_SIZE: usize = 8;
 
 /// An array of textures
 pub struct TextureChunk {
-	pub(crate) descriptor_set: DescriptorSet,
-	sampled_images: Vec<SampledImage>,
+    pub(crate) descriptor_set: DescriptorSet,
+    sampled_images: Vec<SampledImage>,
 }
 
 impl TextureChunk {
-	/// Create a new texture chunk and load in the textures specified by `range` from `file` using `resolver`
-	/// Can error if the descriptor pool is too small or if a texture isn't found
-	pub fn new<T: HasTextures, R: TextureResolver>(device: &mut Device,
-		adapter: &mut Adapter,
-		command_queue: &mut CommandQueue,
-		command_pool: &mut CommandPool, 
-		pool: &mut DescriptorPool,
-		layout: &DescriptorSetLayout,
-		file: &T, range: Range<u32>,
-		resolver: &mut R) -> Result<TextureChunk, error::CreationError> {
+    /// Create a new texture chunk and load in the textures specified by `range` from `file` using `resolver`
+    /// Can error if the descriptor pool is too small or if a texture isn't found
+    pub fn new<T: HasTextures, R: TextureResolver>(
+        device: &mut Device,
+        adapter: &mut Adapter,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+        pool: &mut DescriptorPool,
+        layout: &DescriptorSetLayout,
+        file: &T,
+        range: Range<u32>,
+        resolver: &mut R,
+    ) -> Result<TextureChunk, error::CreationError> {
+        //
+        let descriptor_set = unsafe {
+            pool.allocate_set(&layout).map_err(|e| {
+                println!("{:?}", e);
+                error::CreationError::OutOfMemoryError
+            })?
+        };
 
-		// 
-		let descriptor_set = unsafe {
-			pool.allocate_set(&layout).map_err(|e| {
-				println!("{:?}", e);
-				error::CreationError::OutOfMemoryError
-			})?
-		};
+        let mut store = TextureChunk {
+            descriptor_set,
+            sampled_images: Vec::with_capacity(CHUNK_SIZE),
+        };
 
-		let mut store = TextureChunk {
-			descriptor_set: descriptor_set,
-			sampled_images: Vec::with_capacity(CHUNK_SIZE),
-		};
+        let mut local_idx = 0;
 
-		let mut local_idx = 0;
+        debug!("Created descriptor set");
+        for tex_idx in range {
+            debug!("Loading tex {}", local_idx + 1);
+            let tex = file.get_texture(tex_idx);
+            if let Some(img) = resolver.resolve(tex) {
+                store
+                    .put_texture(img, local_idx, device, adapter, command_queue, command_pool)
+                    .unwrap();
+            } else {
+                // Texture not found. For now, tear everything down.
+                store.deactivate(device);
 
-		debug!("Created descriptor set");
-		for tex_idx in range {
-			debug!("Loading tex {}", local_idx + 1);
-			let tex = file.get_texture(tex_idx);
-			if let Some(img) = resolver.resolve(tex) {
-				store.put_texture(img, local_idx,
-					device, adapter,
-					command_queue, command_pool).unwrap();
-			} else {
-				// Texture not found. For now, tear everything down.
-				store.deactivate(device);
+                return Err(error::CreationError::BadDataError);
+            }
 
-				return Err(error::CreationError::BadDataError);
-			}
+            local_idx += 1;
+        }
 
-			local_idx += 1;
-		}
+        // Pad out the end if needed
+        while local_idx < CHUNK_SIZE {
+            debug!("Putting a placeholder in slot {}", local_idx);
+            store
+                .put_texture(
+                    RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 1])),
+                    local_idx,
+                    device,
+                    adapter,
+                    command_queue,
+                    command_pool,
+                )
+                .unwrap();
 
-		// Pad out the end if needed
-		while local_idx < CHUNK_SIZE {
-			debug!("Putting a placeholder in slot {}", local_idx);
-			store.put_texture(RgbaImage::from_pixel(1, 1, Rgba ([0, 0, 0, 1])), local_idx,
-				device, adapter,
-				command_queue, command_pool).unwrap();
+            local_idx += 1;
+        }
 
-			local_idx += 1;
-		}
+        Ok(store)
+    }
 
-		Ok(store)
-	}
+    pub fn put_texture(
+        &mut self,
+        image: RgbaImage,
+        idx: usize,
+        device: &mut Device,
+        adapter: &mut Adapter,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+    ) -> Result<(), &'static str> {
+        // Load the image
+        let texture = SampledImage::load_into_new(
+            image,
+            device,
+            adapter,
+            command_queue,
+            command_pool,
+            hal::format::Format::Rgba8Srgb, // TODO
+            hal::image::Usage::empty(),
+        )?;
 
+        // Write it to the descriptor set
+        unsafe {
+            use hal::image::Layout;
+            use hal::pso::{Descriptor, DescriptorSetWrite};
 
-	pub fn put_texture(&mut self, image: RgbaImage,
-		idx: usize,
-		device: &mut Device,
-		adapter: &mut Adapter,
-		command_queue: &mut CommandQueue,
-		command_pool: &mut CommandPool) -> Result<(), &'static str>{
+            device.write_descriptor_sets(vec![
+                DescriptorSetWrite {
+                    set: &self.descriptor_set,
+                    binding: 0,
+                    array_offset: idx,
+                    descriptors: Some(Descriptor::Image(
+                        texture.image.image_view.deref(),
+                        Layout::ShaderReadOnlyOptimal,
+                    )),
+                },
+                DescriptorSetWrite {
+                    set: &self.descriptor_set,
+                    binding: 1,
+                    array_offset: idx,
+                    descriptors: Some(Descriptor::Sampler(texture.sampler.deref())),
+                },
+            ]);
+        };
 
-		// Load the image
-		let texture = SampledImage::load_into_new(
-			image,
-			device,
-			adapter,
-			command_queue,
-			command_pool,
-			hal::format::Format::Rgba8Srgb, // TODO
-			hal::image::Usage::empty()
-		)?;
+        // Store it so we can safely deactivate it when we need to
+        // Deactivate the old image if we need to
+        if idx < self.sampled_images.len() {
+            replace(&mut self.sampled_images[idx], texture).deactivate(device);
+        } else {
+            self.sampled_images.push(texture);
+        }
 
-		// Write it to the descriptor set
-		unsafe {
-			use hal::pso::{DescriptorSetWrite, Descriptor};
-			use hal::image::Layout;
+        Ok(())
+    }
 
-			device.write_descriptor_sets(vec![
-				DescriptorSetWrite {
-					set: &self.descriptor_set,
-					binding: 0,
-					array_offset: idx,
-					descriptors: Some(Descriptor::Image(
-						texture.image.image_view.deref(),
-						Layout::ShaderReadOnlyOptimal
-					)),
-				},
-				DescriptorSetWrite {
-					set: &self.descriptor_set,
-					binding: 1,
-					array_offset: idx,
-					descriptors: Some(Descriptor::Sampler(texture.sampler.deref())),
-				},
-			]);
-		};
-
-		// Store it so we can safely deactivate it when we need to
-		// Deactivate the old image if we need to
-		if idx < self.sampled_images.len() {
-			replace(&mut self.sampled_images[idx], texture).deactivate(device);
-		} else {
-			self.sampled_images.push(texture);
-		}
-
-		Ok(())
-	}
-
-	pub fn deactivate(mut self, device: &mut Device) -> () {
-		for img in self.sampled_images.drain(..) {
-			img.deactivate(device);
-		}
-	}
+    pub fn deactivate(mut self, device: &mut Device) {
+        for img in self.sampled_images.drain(..) {
+            img.deactivate(device);
+        }
+    }
 }

@@ -19,10 +19,10 @@ pub mod target;
 
 #[macro_use]
 mod macros;
-mod context;
 mod buffer;
-mod texture;
 mod camera;
+mod context;
+mod texture;
 
 pub use self::context::RenderingContext;
 pub use self::context::UVPoint;

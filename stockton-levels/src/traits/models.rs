@@ -18,7 +18,7 @@
 use na::Vector3;
 use std::ops::Range;
 
-use super::{HasFaces, HasBrushes};
+use super::{HasBrushes, HasFaces};
 use crate::coords::CoordSystem;
 
 #[derive(Debug, Clone)]
@@ -32,6 +32,6 @@ pub struct Model {
 pub trait HasModels<S: CoordSystem>: HasFaces<S> + HasBrushes<S> {
     type ModelsIter<'a>: Iterator<Item = &'a Model>;
 
-    fn models_iter<'a>(&'a self) -> Self::ModelsIter<'a>;
-    fn get_model<'a>(&'a self, index: u32) -> &'a Model;
+    fn models_iter(&self) -> Self::ModelsIter<'_>;
+    fn get_model(&self, index: u32) -> &Model;
 }

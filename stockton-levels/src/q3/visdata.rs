@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -14,22 +14,21 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Parses visdata from Q3 BSPs.
 
-
-use std::vec::IntoIter;
 use bitvec::prelude::*;
+use std::vec::IntoIter;
 
-use crate::types::{Result, ParseError};
-use crate::traits::visdata::*;
-use crate::helpers::slice_to_i32;
 use super::file::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::helpers::slice_to_i32;
+use crate::traits::visdata::*;
+use crate::types::{ParseError, Result};
 
 /// Stores cluster-to-cluster visibility information.
 pub fn from_data(data: &[u8]) -> Result<Box<[BitBox<Local, u8>]>> {
     if data.len() < 8 {
         return Err(ParseError::Invalid);
     }
-    
+
     let n_vecs = slice_to_i32(&data[0..4]) as usize;
     let size_vecs = slice_to_i32(&data[4..8]) as usize;
 
@@ -53,7 +52,7 @@ impl<T: CoordSystem> HasVisData for Q3BSPFile<T> {
     fn all_visible_from(&self, from: ClusterId) -> Self::VisibleIterator {
         let mut visible = vec![];
 
-        for (idx,val) in self.visdata[from as usize].iter().enumerate() {
+        for (idx, val) in self.visdata[from as usize].iter().enumerate() {
             if *val {
                 visible.push(idx as u32);
             }
@@ -66,4 +65,3 @@ impl<T: CoordSystem> HasVisData for Q3BSPFile<T> {
         self.visdata[from as usize][dest as usize]
     }
 }
-

@@ -15,15 +15,14 @@
 // You should have received a copy of the GNU General Public License
 // along with stockton-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use crate::helpers::{slice_to_i32, slice_to_u32, slice_to_vec2ui, slice_to_vec3};
-use crate::types::{Result, ParseError};
-use na::Vector3;
-use crate::traits::faces::*;
 use super::Q3BSPFile;
 use crate::coords::CoordSystem;
+use crate::helpers::{slice_to_i32, slice_to_u32, slice_to_vec2ui, slice_to_vec3};
+use crate::traits::faces::*;
+use crate::types::{ParseError, Result};
+use na::Vector3;
 
 const FACE_SIZE: usize = (4 * 8) + (4 * 2) + (4 * 2) + (4 * 3) + ((4 * 2) * 3) + (4 * 3) + (4 * 2);
-
 
 pub fn from_data(
     data: &[u8],
@@ -52,7 +51,6 @@ pub fn from_data(
 
     Ok(faces.into_boxed_slice())
 }
-
 
 fn face_from_slice(
     data: &[u8],
@@ -125,9 +123,9 @@ fn face_from_slice(
 
     // map_vecs
     let mut map_vecs = [Vector3::new(0.0, 0.0, 0.0); 2];
-    for n in 0..2 {
+    for (n, map_vec) in map_vecs.iter_mut().enumerate() {
         let offset = 60 + (n * 3 * 4);
-        map_vecs[n] = slice_to_vec3(&data[offset..offset + 12]);
+        *map_vec = slice_to_vec3(&data[offset..offset + 12]);
     }
 
     // normal & size
@@ -150,11 +148,10 @@ fn face_from_slice(
     })
 }
 
-
 impl<T: CoordSystem> HasFaces<T> for Q3BSPFile<T> {
     type FacesIter<'a> = std::slice::Iter<'a, Face>;
-    
-    fn faces_iter<'a>(&'a self) -> Self::FacesIter<'a> {
+
+    fn faces_iter(&self) -> Self::FacesIter<'_> {
         self.faces.iter()
     }
 
@@ -162,8 +159,7 @@ impl<T: CoordSystem> HasFaces<T> for Q3BSPFile<T> {
         self.faces.len() as u32
     }
 
-    fn get_face<'a>(&'a self, index: u32) -> &'a Face {
+    fn get_face(&self, index: u32) -> &Face {
         &self.faces[index as usize]
     }
-
 }

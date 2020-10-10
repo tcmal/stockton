@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -14,8 +14,8 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Marker traits for different co-ordinate systems, and functions to swizzle between them
 
-use na::Vector3;
 use na::base::Scalar;
+use na::Vector3;
 use std::ops::Neg;
 
 pub trait CoordSystem {}
@@ -28,17 +28,16 @@ impl CoordSystem for Q3System {}
 pub struct VulkanSystem;
 impl CoordSystem for VulkanSystem {}
 
-
 pub struct Swizzler;
 
 pub trait SwizzleFromTo<F: CoordSystem, T: CoordSystem> {
-	fn swizzle<U: Scalar + Copy + Neg<Output = U>>(vec: &mut Vector3<U>) -> ();
+    fn swizzle<U: Scalar + Copy + Neg<Output = U>>(vec: &mut Vector3<U>);
 }
 
 impl SwizzleFromTo<Q3System, VulkanSystem> for Swizzler {
-	fn swizzle<U: Scalar + Copy + Neg<Output = U>>(vec: &mut Vector3<U>) -> () {
-		let temp = 	vec.y;
-		vec.y = vec.z;
-		vec.z = -temp;
-	}
+    fn swizzle<U: Scalar + Copy + Neg<Output = U>>(vec: &mut Vector3<U>) {
+        let temp = vec.y;
+        vec.y = vec.z;
+        vec.z = -temp;
+    }
 }

@@ -15,9 +15,9 @@
 // You should have received a copy of the GNU General Public License
 // along with rust-bsp.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::iter::Iterator;
-use na::Vector3;
 use crate::coords::CoordSystem;
+use na::Vector3;
+use std::iter::Iterator;
 
 /// The planes lump from a BSP file.
 /// Found at lump index 2 in a q3 bsp.
@@ -39,6 +39,6 @@ pub struct Plane {
 pub trait HasPlanes<S: CoordSystem> {
     type PlanesIter<'a>: Iterator<Item = &'a Plane>;
 
-    fn planes_iter<'a>(&'a self) -> Self::PlanesIter<'a>;
-    fn get_plane<'a>(&'a self, idx: u32) -> &'a Plane;
-} 
+    fn planes_iter(&self) -> Self::PlanesIter<'_>;
+    fn get_plane(&self, idx: u32) -> &Plane;
+}

@@ -1,4 +1,4 @@
-// Copyright (C) Oscar Shrimpton 2019  
+// Copyright (C) Oscar Shrimpton 2019
 
 // This program is free software: you can redistribute it and/or modify it
 // under the terms of the GNU General Public License as published by the Free
@@ -13,8 +13,8 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::convert::TryInto;
 use crate::types::{ParseError, Result};
+use std::convert::TryInto;
 
 const MAGIC_HEADER: &[u8] = &[0x49, 0x42, 0x53, 0x50];
 const HEADER_LEN: usize = 4 + 4 + (17 * 4 * 2);
