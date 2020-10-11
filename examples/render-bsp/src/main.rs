@@ -27,7 +27,10 @@ use stockton_types::Session;
 
 fn main() {
     // Initialise logger
-    simple_logger::init_with_level(log::Level::Debug).unwrap();
+    simple_logger::SimpleLogger::new()
+        .with_level(log::LevelFilter::Debug)
+        .init()
+        .unwrap();
 
     // Make a window
     let event_loop = EventLoop::new();
