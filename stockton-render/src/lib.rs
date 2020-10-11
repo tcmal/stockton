@@ -15,22 +15,10 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-extern crate core;
-
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 extern crate gfx_hal as hal;
-extern crate shaderc;
-extern crate winit;
-
-extern crate image;
-extern crate log;
 extern crate nalgebra_glm as na;
-
-extern crate stockton_levels;
-extern crate stockton_types;
-
-extern crate arrayvec;
 
 #[macro_use]
 extern crate legion;

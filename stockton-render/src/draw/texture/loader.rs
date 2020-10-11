@@ -18,9 +18,9 @@
 //! Deals with loading textures into GPU memory
 
 use super::chunk::TextureChunk;
+use crate::draw::texture::chunk::CHUNK_SIZE;
+use crate::draw::texture::resolver::BasicFSResolver;
 use core::mem::ManuallyDrop;
-use draw::texture::chunk::CHUNK_SIZE;
-use draw::texture::resolver::BasicFSResolver;
 use std::path::Path;
 
 use log::debug;

@@ -31,10 +31,9 @@
 #![allow(incomplete_features)]
 #![feature(generic_associated_types)]
 
+extern crate nalgebra as na;
 #[macro_use]
 extern crate bitflags;
-extern crate bitvec;
-extern crate nalgebra as na;
 
 pub mod coords;
 pub mod features;

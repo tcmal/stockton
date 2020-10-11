@@ -31,8 +31,8 @@ use hal::{
 use image::RgbaImage;
 use std::{convert::TryInto, iter::once};
 
+use crate::draw::buffer::create_buffer;
 use crate::types::*;
-use draw::buffer::create_buffer;
 
 /// The size of each pixel in an image
 const PIXEL_SIZE: usize = size_of::<image::Rgba<u8>>();

@@ -15,10 +15,11 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use crate::types::*;
-use draw::buffer::StagedBuffer;
-use draw::UVPoint;
-use error::CreationError;
+use crate::{
+    draw::{buffer::StagedBuffer, UVPoint},
+    error::CreationError,
+    types::*,
+};
 use hal::buffer::Usage;
 use std::mem::ManuallyDrop;
 

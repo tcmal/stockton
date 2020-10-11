@@ -2,6 +2,7 @@
 name = "stockton-render"
 version = "0.1.0"
 authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
+edition = "2018"
 
 [dependencies]
 stockton-levels = { path = "../stockton-levels" }

@@ -21,9 +21,9 @@ use crate::types::*;
 
 use core::{iter::once, mem::ManuallyDrop};
 
+use crate::draw::buffer::ModifiableBuffer;
+use crate::draw::draw_buffers::DrawBuffers;
 use arrayvec::ArrayVec;
-use draw::buffer::ModifiableBuffer;
-use draw::draw_buffers::DrawBuffers;
 use hal::{
     format::{ChannelType, Format, Swizzle},
     image::{Extent, Usage as ImgUsage, ViewKind},

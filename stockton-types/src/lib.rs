@@ -17,9 +17,7 @@
 
 //! Common types for all stockton crates.
 
-extern crate legion;
 extern crate nalgebra_glm as na;
-extern crate stockton_levels;
 
 pub mod components;
 pub mod session;

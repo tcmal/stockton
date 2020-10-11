@@ -15,7 +15,7 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use Renderer;
+use crate::Renderer;
 
 use winit::event::Event as WinitEvent;
 

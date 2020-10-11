@@ -200,7 +200,7 @@ impl WorkingCamera {
 
 #[cfg(test)]
 mod tests {
-    use draw::camera::WorkingCamera;
+    use crate::draw::camera::WorkingCamera;
     use stockton_types::Matrix4;
     use stockton_types::Vector3;
 
