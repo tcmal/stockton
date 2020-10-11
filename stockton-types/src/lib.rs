@@ -17,13 +17,14 @@
 
 //! Common types for all stockton crates.
 
+extern crate legion;
 extern crate nalgebra_glm as na;
 extern crate stockton_levels;
 
 pub mod components;
-pub mod world;
+pub mod session;
 
-pub use world::World;
+pub use session::Session;
 
 /// Alias for convenience
 pub type Vector2 = na::Vec2;

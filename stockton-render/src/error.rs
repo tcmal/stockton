@@ -50,8 +50,4 @@ pub enum CreationError {
 /// Usually this is out of memory or something happened to the device/surface.
 /// You'll likely need to exit or create a new context.
 #[derive(Debug, Clone)]
-pub enum FrameError {
-    AcquireError(hal::window::AcquireError),
-    SyncObjectError,
-    PresentError,
-}
+pub enum FrameError {}

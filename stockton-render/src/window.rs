@@ -15,19 +15,21 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! The thing you play on and all the associated state.
+use Renderer;
 
-use stockton_levels::prelude::*;
+use winit::event::Event as WinitEvent;
 
-/// A loaded world.
-pub struct World<T: MinBSPFeatures<VulkanSystem>> {
-    pub map: T,
+pub struct WindowEvent {}
+
+impl WindowEvent {
+    pub fn from(_winit_event: &WinitEvent<()>) -> WindowEvent {
+        // TODO
+        WindowEvent {}
+    }
 }
 
-impl<T: MinBSPFeatures<VulkanSystem>> World<T> {
-    /// Create a new world from a level.
-    /// The level can be any format, as long as it has the required features of a bsp.
-    pub fn new(map: T) -> World<T> {
-        World { map }
-    }
+#[system]
+/// A system to process the window events sent to renderer by the winit event loop.
+pub fn process_window_events(#[resource] _renderer: &mut Renderer<'static>) {
+    println!("processing window events...");
 }

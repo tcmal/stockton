@@ -14,3 +14,26 @@
  * You should have received a copy of the GNU General Public License along
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
+
+use crate::Vector3;
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Transform {
+    /// Position of the object
+    pub position: Vector3,
+
+    /// Rotation of the object (euler angles in radians)
+    pub rotation: Vector3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct CameraSettings {
+    /// FOV (radians)
+    pub fov: f32,
+
+    /// Near clipping plane (world units)
+    pub near: f32,
+
+    /// Far clipping plane (world units)
+    pub far: f32,
+}
