@@ -18,18 +18,40 @@
 use crate::Renderer;
 
 use winit::event::Event as WinitEvent;
+use winit::event::WindowEvent as WinitWindowEvent;
+use winit::event_loop::ControlFlow;
 
-pub struct WindowEvent {}
+#[derive(Debug, Clone, Copy)]
+pub enum WindowEvent {
+    SizeChanged,
+    CloseRequested,
+}
 
 impl WindowEvent {
-    pub fn from(_winit_event: &WinitEvent<()>) -> WindowEvent {
+    pub fn from(winit_event: &WinitEvent<()>) -> Option<WindowEvent> {
         // TODO
-        WindowEvent {}
+        match winit_event {
+            WinitEvent::WindowEvent { event, .. } => match event {
+                WinitWindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
+                WinitWindowEvent::Resized(_) => Some(WindowEvent::SizeChanged),
+                _ => None,
+            },
+            _ => None,
+        }
     }
 }
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn process_window_events(#[resource] _renderer: &mut Renderer<'static>) {
-    println!("processing window events...");
+pub fn process_window_events(#[resource] renderer: &mut Renderer<'static>) {
+    while let Ok(event) = renderer.window_events.try_recv() {
+        match event {
+            WindowEvent::SizeChanged => renderer.resize(),
+            WindowEvent::CloseRequested => {
+                let mut flow = renderer.update_control_flow.write().unwrap();
+                // TODO: Let everything know this is our last frame
+                *flow = ControlFlow::Exit;
+            }
+        };
+    }
 }

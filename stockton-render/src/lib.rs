@@ -87,6 +87,10 @@ impl<'a> Renderer<'a> {
             self.context.draw_vertices(map, &faces).unwrap();
         }
     }
+
+    fn resize(&mut self) {
+        unsafe { self.context.handle_surface_change().unwrap() };
+    }
 }
 
 /// A system that just renders the world.

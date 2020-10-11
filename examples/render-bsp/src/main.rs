@@ -76,7 +76,9 @@ fn main() {
             }
             Event::RedrawRequested(_) => session.do_update(),
             _ => {
-                tx.send(WindowEvent::from(&event)).unwrap();
+                if let Some(we) = WindowEvent::from(&event) {
+                    tx.send(we).unwrap();
+                }
             }
         }
 
