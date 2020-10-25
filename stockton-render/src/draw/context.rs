@@ -29,6 +29,7 @@ use std::{
 use arrayvec::ArrayVec;
 use hal::{pool::CommandPoolCreateFlags, prelude::*};
 use log::debug;
+use na::Mat4;
 use winit::window::Window;
 
 use stockton_levels::prelude::*;
@@ -37,7 +38,6 @@ use stockton_types::{Vector2, Vector3};
 
 use super::{
     buffer::ModifiableBuffer,
-    camera::WorkingCamera,
     draw_buffers::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
     target::{SwapchainProperties, TargetChain},
     texture::TextureStore,
@@ -76,7 +76,7 @@ pub struct RenderingContext<'a> {
     surface: ManuallyDrop<Surface>,
 
     /// Swapchain and stuff
-    target_chain: ManuallyDrop<TargetChain>,
+    pub(crate) target_chain: ManuallyDrop<TargetChain>,
 
     // Pipeline
     /// Our main render pass
@@ -101,8 +101,8 @@ pub struct RenderingContext<'a> {
     /// Buffers used for drawing
     draw_buffers: ManuallyDrop<DrawBuffers<'a>>,
 
-    /// Our camera settings
-    camera: WorkingCamera,
+    /// View projection matrix
+    pub(crate) vp_matrix: Mat4,
 
     /// The vertex shader module
     vs_module: ManuallyDrop<ShaderModule>,
@@ -246,12 +246,6 @@ impl<'a> RenderingContext<'a> {
             main_pass: &renderpass,
         };
 
-        // Camera
-        // TODO: Settings
-        let ratio =
-            swapchain_properties.extent.width as f32 / swapchain_properties.extent.height as f32;
-        let camera = WorkingCamera::defaults(ratio);
-
         // Vertex and index buffers
         let draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
 
@@ -309,7 +303,7 @@ impl<'a> RenderingContext<'a> {
             vs_module: ManuallyDrop::new(vs_module),
             fs_module: ManuallyDrop::new(fs_module),
 
-            camera,
+            vp_matrix: Mat4::identity(),
         })
     }
 
@@ -321,10 +315,6 @@ impl<'a> RenderingContext<'a> {
 
         let properties = SwapchainProperties::find_best(&self.adapter, &self.surface)
             .map_err(|_| error::CreationError::BadSurface)?;
-
-        // Camera settings (aspect ratio)
-        self.camera
-            .update_aspect_ratio(properties.extent.width as f32 / properties.extent.height as f32);
 
         use core::ptr::read;
 
@@ -572,7 +562,7 @@ impl<'a> RenderingContext<'a> {
             &self.renderpass,
             &self.pipeline,
             &self.pipeline_layout,
-            &mut self.camera,
+            &self.vp_matrix,
         )?;
 
         // Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
@@ -682,22 +672,6 @@ impl<'a> RenderingContext<'a> {
             .finish_and_submit_target(&mut self.queue_group.queues[0])?;
 
         Ok(())
-    }
-
-    /// Get current position of camera
-    pub fn camera_pos(&self) -> Vector3 {
-        self.camera.camera_pos()
-    }
-
-    /// Move the camera by `delta` relative to its rotation
-    pub fn move_camera_relative(&mut self, delta: Vector3) {
-        self.camera.move_camera_relative(delta)
-    }
-
-    /// Rotate the camera
-    /// `euler` should be euler angles in radians
-    pub fn rotate(&mut self, euler: Vector3) {
-        self.camera.rotate(euler)
     }
 }
 

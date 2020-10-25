@@ -22,7 +22,7 @@ use legion::*;
 
 /// A loaded world.
 pub struct Session {
-    world: World,
+    pub world: World,
     resources: Resources,
     schedule: Schedule,
 }

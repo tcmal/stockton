@@ -27,5 +27,6 @@ mod context;
 mod draw_buffers;
 mod texture;
 
+pub use self::camera::calc_vp_matrix_system;
 pub use self::context::RenderingContext;
 pub use self::context::UVPoint;

@@ -18,7 +18,7 @@
 use crate::Vector3;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct Transform {
+pub struct Transform {
     /// Position of the object
     pub position: Vector3,
 
@@ -27,7 +27,7 @@ struct Transform {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-struct CameraSettings {
+pub struct CameraSettings {
     /// FOV (radians)
     pub fov: f32,
 

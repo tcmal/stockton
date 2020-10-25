@@ -16,7 +16,7 @@
  */
 
 //! Resources needed for drawing on the screen, including sync objects
-use super::{camera::WorkingCamera, texture::image::LoadedImage};
+use super::texture::image::LoadedImage;
 use crate::types::*;
 
 use core::{iter::once, mem::ManuallyDrop};
@@ -32,6 +32,7 @@ use hal::{
     queue::Submission,
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
+use na::Mat4;
 
 /// Defines the colour range we use.
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
@@ -266,7 +267,7 @@ impl TargetChain {
         renderpass: &RenderPass,
         pipeline: &GraphicsPipeline,
         pipeline_layout: &PipelineLayout,
-        camera: &mut WorkingCamera,
+        vp: &Mat4,
     ) -> Result<&'a mut crate::types::CommandBuffer, &'static str> {
         self.last_drawn = (self.last_drawn + 1) % self.targets.len();
 
@@ -337,8 +338,7 @@ impl TargetChain {
             target.cmd_buffer.bind_graphics_pipeline(&pipeline);
 
             // VP Matrix
-            let vp = camera.get_matrix().as_slice();
-            let vp = &*(vp as *const [f32] as *const [u32]);
+            let vp = &*(vp.data.as_slice() as *const [f32] as *const [u32]);
 
             target.cmd_buffer.push_graphics_constants(
                 &pipeline_layout,

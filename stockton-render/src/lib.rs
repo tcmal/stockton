@@ -31,12 +31,16 @@ pub mod window;
 
 use culling::get_visible_faces;
 use draw::RenderingContext;
+use legion::world::SubWorld;
+use legion::IntoQuery;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::sync::RwLock;
 pub use window::WindowEvent;
 
 use stockton_levels::prelude::*;
+use stockton_types::components::{CameraSettings, Transform};
+use stockton_types::Vector3;
 use winit::event_loop::ControlFlow;
 use winit::window::Window;
 
@@ -75,9 +79,9 @@ impl<'a> Renderer<'a> {
     }
 
     /// Render a single frame of the given map.
-    fn render<T: MinBSPFeatures<VulkanSystem>>(&mut self, map: &T) {
+    fn render<T: MinBSPFeatures<VulkanSystem>>(&mut self, map: &T, pos: Vector3) {
         // Get visible faces
-        let faces = get_visible_faces(self.context.camera_pos(), map);
+        let faces = get_visible_faces(pos, map);
 
         // Then draw them
         if self.context.draw_vertices(map, &faces).is_err() {
@@ -95,9 +99,15 @@ impl<'a> Renderer<'a> {
 
 /// A system that just renders the world.
 #[system]
+#[read_component(Transform)]
+#[read_component(CameraSettings)]
 pub fn do_render<T: 'static + MinBSPFeatures<VulkanSystem>>(
     #[resource] renderer: &mut Renderer<'static>,
     #[resource] map: &T,
+    world: &SubWorld,
 ) {
-    renderer.render(map);
+    let mut query = <(&Transform, &CameraSettings)>::query();
+    for (transform, _) in query.iter(world) {
+        renderer.render(map, transform.position);
+    }
 }

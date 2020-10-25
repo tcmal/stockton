@@ -17,6 +17,7 @@
 
 //! Renders ./example.bsp
 
+use std::f32::consts::PI;
 use stockton_input::{Axis, InputManager};
 #[macro_use]
 extern crate stockton_input_codegen;
@@ -25,9 +26,11 @@ use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use stockton_levels::{prelude::*, q3::Q3BSPFile};
 use stockton_render::{
-    do_render_system, window::process_window_events_system, Renderer, WindowEvent,
+    do_render_system, draw::calc_vp_matrix_system, window::process_window_events_system, Renderer,
+    WindowEvent,
 };
-use stockton_types::Session;
+use stockton_types::components::{CameraSettings, Transform};
+use stockton_types::{Session, Vector3};
 
 #[derive(InputManager, Default, Clone, Debug)]
 struct MovementInputs {
@@ -88,9 +91,23 @@ fn main() {
         move |schedule| {
             schedule
                 .add_system(process_window_events_system::<MovementInputsManager>())
+                .add_system(calc_vp_matrix_system())
                 .add_thread_local(do_render_system::<Q3BSPFile<VulkanSystem>>());
         },
     );
+
+    // Add our player entity
+    let _player = session.world.push((
+        Transform {
+            position: Vector3::new(0.0, 0.0, 0.0),
+            rotation: Vector3::new(0.0, PI / 2.0, 0.0),
+        },
+        CameraSettings {
+            far: 1024.0,
+            fov: 90.0,
+            near: 0.1,
+        },
+    ));
 
     // Done loading - This is our main loop.
     // It just communicates events to the session and continuously ticks
