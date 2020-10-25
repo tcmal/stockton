@@ -24,14 +24,14 @@ pub enum InputMutation {
 }
 
 /// A key being pressed or released
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum Action {
-    KeyPress(u8),
-    KeyRelease(u8),
+    KeyPress(u32),
+    KeyRelease(u32),
 }
 
 impl Action {
-    pub fn keycode(&self) -> u8 {
+    pub fn keycode(&self) -> u32 {
         match self {
             Action::KeyPress(x) => *x,
             Action::KeyRelease(x) => *x,

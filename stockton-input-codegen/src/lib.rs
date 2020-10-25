@@ -26,7 +26,7 @@ use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident};
 /// Each button in the struct should be decorated with #[button] and each axis with #[axis].
 /// Given struct MovementInputs, this will output struct MovementInputsManager which implements InputManager.
 /// It also creates an enum MovementInputsFields, with values for all the buttons and axes in MovementInputs.
-/// You'll need to pass in an action schema to `MovementInputsManager::new()`, which is a BTreeMap<u8, (MovementInputsFields, InputMutation)>
+/// You'll need to pass in an action schema to `MovementInputsManager::new()`, which is a BTreeMap<u32, (MovementInputsFields, InputMutation)>
 /// You can then call `.handle_frame` on MovementInputsManager and then read the inputs from MovementInputsManager.inputs.
 #[proc_macro_derive(InputManager, attributes(button, axis))]
 pub fn derive_inputmanager(input: TokenStream) -> TokenStream {
@@ -174,12 +174,12 @@ fn gen_manager_struct(
     quote!(
         struct #ident {
             inputs: #struct_ident,
-            actions: ::std::collections::BTreeMap<u8, (#fields_enum_ident, ::stockton_input::InputMutation)>,
+            actions: ::std::collections::BTreeMap<u32, (#fields_enum_ident, ::stockton_input::InputMutation)>,
             just_hot: [bool; #buttons_len]
         }
 
         impl #ident {
-            pub fn new(actions: ::std::collections::BTreeMap<u8, (#fields_enum_ident, ::stockton_input::InputMutation)>) -> Self {
+            pub fn new(actions: ::std::collections::BTreeMap<u32, (#fields_enum_ident, ::stockton_input::InputMutation)>) -> Self {
                 #ident {
                     inputs: Default::default(),
                     actions,
@@ -253,6 +253,8 @@ fn gen_trait_impl(
                     let mutation = self.actions.get(&action.keycode());
 
                     if let Some((field, mutation)) = mutation {
+                        use ::stockton_input::InputMutation;
+
                         let mut val = match mutation {
                             InputMutation::MapToButton | InputMutation::PositiveAxis => 1,
                             InputMutation::NegativeAxis => -1

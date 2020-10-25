@@ -16,15 +16,18 @@
  */
 
 use crate::Renderer;
+use legion::systems::Runnable;
 
-use winit::event::Event as WinitEvent;
-use winit::event::WindowEvent as WinitWindowEvent;
+use stockton_input::{Action as KBAction, InputManager};
+
+use winit::event::{ElementState, Event as WinitEvent, WindowEvent as WinitWindowEvent};
 use winit::event_loop::ControlFlow;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WindowEvent {
     SizeChanged,
     CloseRequested,
+    KeyboardAction(KBAction),
 }
 
 impl WindowEvent {
@@ -34,6 +37,14 @@ impl WindowEvent {
             WinitEvent::WindowEvent { event, .. } => match event {
                 WinitWindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
                 WinitWindowEvent::Resized(_) => Some(WindowEvent::SizeChanged),
+                WinitWindowEvent::KeyboardInput { input, .. } => match input.state {
+                    ElementState::Pressed => Some(WindowEvent::KeyboardAction(KBAction::KeyPress(
+                        input.scancode,
+                    ))),
+                    ElementState::Released => Some(WindowEvent::KeyboardAction(
+                        KBAction::KeyRelease(input.scancode),
+                    )),
+                },
                 _ => None,
             },
             _ => None,
@@ -43,7 +54,13 @@ impl WindowEvent {
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn process_window_events(#[resource] renderer: &mut Renderer<'static>) {
+pub fn _process_window_events<T: 'static + InputManager>(
+    #[resource] renderer: &mut Renderer<'static>,
+    #[resource] manager: &mut T,
+    #[state] actions_buf: &mut Vec<KBAction>,
+) {
+    let mut actions_buf_cursor = 0;
+
     while let Ok(event) = renderer.window_events.try_recv() {
         match event {
             WindowEvent::SizeChanged => renderer.resize(),
@@ -52,6 +69,20 @@ pub fn process_window_events(#[resource] renderer: &mut Renderer<'static>) {
                 // TODO: Let everything know this is our last frame
                 *flow = ControlFlow::Exit;
             }
+            WindowEvent::KeyboardAction(action) => {
+                if actions_buf_cursor >= actions_buf.len() {
+                    actions_buf.push(action);
+                } else {
+                    actions_buf[actions_buf_cursor] = action;
+                }
+                actions_buf_cursor += 1;
+            }
         };
     }
+
+    manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
+}
+
+pub fn process_window_events_system<T: 'static + InputManager>() -> impl Runnable {
+    _process_window_events_system::<T>(Vec::with_capacity(4))
 }

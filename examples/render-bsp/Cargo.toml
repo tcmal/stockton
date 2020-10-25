@@ -6,6 +6,8 @@ edition = "2018"
 
 [dependencies]
 stockton-render = { path = "../../stockton-render", features = ["vulkan"] }
+stockton-input = { path = "../../stockton-input" }
+stockton-input-codegen = { path = "../../stockton-input-codegen" }
 stockton-types = { path = "../../stockton-types" }
 stockton-levels = { path = "../../stockton-levels" }
 winit = "^0.21"

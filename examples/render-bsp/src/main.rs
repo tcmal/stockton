@@ -17,6 +17,10 @@
 
 //! Renders ./example.bsp
 
+use stockton_input::{Axis, InputManager};
+#[macro_use]
+extern crate stockton_input_codegen;
+use std::collections::BTreeMap;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use stockton_levels::{prelude::*, q3::Q3BSPFile};
@@ -24,6 +28,18 @@ use stockton_render::{
     do_render_system, window::process_window_events_system, Renderer, WindowEvent,
 };
 use stockton_types::Session;
+
+#[derive(InputManager, Default, Clone, Debug)]
+struct MovementInputs {
+    #[axis]
+    x: Axis,
+
+    #[axis]
+    y: Axis,
+
+    #[axis]
+    z: Axis,
+}
 
 fn main() {
     // Initialise logger
@@ -54,15 +70,24 @@ fn main() {
     let (renderer, tx) = Renderer::new(&window, &bsp);
     let new_control_flow = renderer.update_control_flow.clone();
 
+    // Create the input manager
+    let manager = {
+        let actions = BTreeMap::new();
+        // TODO: An actual control schema
+
+        MovementInputsManager::new(actions)
+    };
+
     // Load everything into the session
     let mut session = Session::new(
         move |resources| {
             resources.insert(renderer);
             resources.insert(bsp);
+            resources.insert(manager);
         },
         move |schedule| {
             schedule
-                .add_system(process_window_events_system())
+                .add_system(process_window_events_system::<MovementInputsManager>())
                 .add_thread_local(do_render_system::<Q3BSPFile<VulkanSystem>>());
         },
     );
