@@ -1,0 +1,15 @@
+[package]
+name = "stockton-input-codegen"
+version = "0.1.0"
+authors = ["Oscar Shrimpton <oscar.shrimpton.personal@gmail.com>"]
+edition = "2018"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+stockton-input = { path = "../stockton-input" }
+syn = { version = "1.0.44", features = ["full"] }
+proc-macro2 = "1.0.24"
+quote = "1.0.7"
+convert_case = "0.4.0"

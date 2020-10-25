@@ -1,7 +1,10 @@
 [workspace]
 members = [
     "stockton-types",
+    "stockton-input",
+    "stockton-input-codegen",
     "stockton-render",
     "stockton-levels",
-    "examples/render-bsp"
+    "examples/render-bsp",
+    "examples/input-codegen"
 ]

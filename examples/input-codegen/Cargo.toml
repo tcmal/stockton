@@ -1,0 +1,9 @@
+[package]
+name = "input-codegen"
+version = "0.1.0"
+authors = ["Oscar Shrimpton <oscar.shrimpton.personal@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+stockton-input = { path = "../../stockton-input" }
+stockton-input-codegen = { path = "../../stockton-input-codegen" }
