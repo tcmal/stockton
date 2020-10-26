@@ -5,3 +5,4 @@ authors = ["Oscar Shrimpton <oscar.shrimpton.personal@gmail.com>"]
 edition = "2018"
 
 [dependencies]
+stockton-types = { path = "../stockton-types" }

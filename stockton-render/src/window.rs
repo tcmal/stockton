@@ -18,7 +18,7 @@
 use crate::Renderer;
 use legion::systems::Runnable;
 
-use stockton_input::{Action as KBAction, InputManager};
+use stockton_input::{Action as KBAction, InputManager, Mouse};
 
 use winit::event::{ElementState, Event as WinitEvent, WindowEvent as WinitWindowEvent};
 use winit::event_loop::ControlFlow;
@@ -28,6 +28,7 @@ pub enum WindowEvent {
     SizeChanged,
     CloseRequested,
     KeyboardAction(KBAction),
+    MouseMoved(f32, f32),
 }
 
 impl WindowEvent {
@@ -45,6 +46,10 @@ impl WindowEvent {
                         KBAction::KeyRelease(input.scancode),
                     )),
                 },
+                WinitWindowEvent::CursorMoved { position, .. } => Some(WindowEvent::MouseMoved(
+                    position.x as f32,
+                    position.y as f32,
+                )),
                 _ => None,
             },
             _ => None,
@@ -57,9 +62,11 @@ impl WindowEvent {
 pub fn _process_window_events<T: 'static + InputManager>(
     #[resource] renderer: &mut Renderer<'static>,
     #[resource] manager: &mut T,
+    #[resource] mouse: &mut Mouse,
     #[state] actions_buf: &mut Vec<KBAction>,
 ) {
     let mut actions_buf_cursor = 0;
+    let mut mouse_delta = mouse.abs;
 
     while let Ok(event) = renderer.window_events.try_recv() {
         match event {
@@ -77,8 +84,14 @@ pub fn _process_window_events<T: 'static + InputManager>(
                 }
                 actions_buf_cursor += 1;
             }
+            WindowEvent::MouseMoved(x, y) => {
+                mouse_delta.x = x;
+                mouse_delta.y = y;
+            }
         };
     }
+
+    mouse.handle_frame(mouse_delta);
 
     manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
 }

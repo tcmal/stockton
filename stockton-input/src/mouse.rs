@@ -15,12 +15,26 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-pub mod axis;
-pub mod button;
-pub mod manager;
-pub mod mouse;
+use stockton_types::Vector2;
 
-pub use axis::Axis;
-pub use button::Button;
-pub use manager::*;
-pub use mouse::Mouse;
+#[derive(Debug, Clone)]
+pub struct Mouse {
+    pub abs: Vector2,
+    pub delta: Vector2,
+}
+
+impl Default for Mouse {
+    fn default() -> Self {
+        Mouse {
+            abs: Vector2::zeros(),
+            delta: Vector2::zeros(),
+        }
+    }
+}
+
+impl Mouse {
+    pub fn handle_frame(&mut self, new: Vector2) {
+        self.delta = new - self.abs;
+        self.abs = new;
+    }
+}

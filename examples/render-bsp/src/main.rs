@@ -25,7 +25,7 @@ use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use stockton_contrib::delta_time::*;
 use stockton_contrib::flycam::*;
-use stockton_input::{Axis, InputManager};
+use stockton_input::{Axis, InputManager, Mouse};
 use stockton_levels::{prelude::*, q3::Q3BSPFile};
 use stockton_render::{
     do_render_system, draw::calc_vp_matrix_system, window::process_window_events_system, Renderer,
@@ -110,7 +110,8 @@ fn main() {
             resources.insert(renderer);
             resources.insert(bsp);
             resources.insert(manager);
-            resources.insert(Timing::default())
+            resources.insert(Timing::default());
+            resources.insert(Mouse::default());
         },
         move |schedule| {
             schedule
@@ -134,7 +135,7 @@ fn main() {
             fov: 90.0,
             near: 0.1,
         },
-        FlycamControlled { speed: 512.0 },
+        FlycamControlled::new(512.0, 400.0),
     ));
 
     // Done loading - This is our main loop.
