@@ -51,6 +51,7 @@ pub fn derive_inputmanager(input: TokenStream) -> TokenStream {
     );
     let trait_impl = gen_trait_impl(
         &manager_ident,
+        &struct_ident,
         &fields_enum_ident,
         &buttons,
         &axes,
@@ -234,6 +235,7 @@ fn gen_manager_struct(
 /// ```
 fn gen_trait_impl(
     manager: &Ident,
+    struct_ident: &Ident,
     fields_enum: &Ident,
     buttons: &[Ident],
     axes: &[Ident],
@@ -246,6 +248,8 @@ fn gen_trait_impl(
 
     quote!(
         impl InputManager for #manager {
+            type Inputs = #struct_ident;
+
             fn handle_frame<'a, X: IntoIterator<Item = &'a ::stockton_input::Action>>(&mut self, actions: X) -> () {
                 #(#just_hot_resets)*
 
@@ -266,6 +270,10 @@ fn gen_trait_impl(
                         #field_match_modify
                     }
                 }
+            }
+
+            fn get_inputs(&self) -> &Self::Inputs {
+                &self.inputs
             }
         }
     )

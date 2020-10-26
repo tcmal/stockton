@@ -46,5 +46,8 @@ impl Action {
 }
 
 pub trait InputManager {
+    type Inputs;
+
     fn handle_frame<'a, X: IntoIterator<Item = &'a Action>>(&mut self, actions: X);
+    fn get_inputs(&self) -> &Self::Inputs;
 }
