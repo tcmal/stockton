@@ -17,13 +17,15 @@
 
 //! Renders ./example.bsp
 
-use std::f32::consts::PI;
-use stockton_input::{Axis, InputManager};
 #[macro_use]
 extern crate stockton_input_codegen;
+
 use std::collections::BTreeMap;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
+use stockton_contrib::delta_time::*;
+use stockton_contrib::flycam::*;
+use stockton_input::{Axis, InputManager};
 use stockton_levels::{prelude::*, q3::Q3BSPFile};
 use stockton_render::{
     do_render_system, draw::calc_vp_matrix_system, window::process_window_events_system, Renderer,
@@ -42,6 +44,18 @@ struct MovementInputs {
 
     #[axis]
     z: Axis,
+}
+
+impl FlycamInput for MovementInputs {
+    fn get_x_axis(&self) -> &Axis {
+        &self.x
+    }
+    fn get_y_axis(&self) -> &Axis {
+        &self.y
+    }
+    fn get_z_axis(&self) -> &Axis {
+        &self.z
+    }
 }
 
 fn main() {
@@ -75,8 +89,17 @@ fn main() {
 
     // Create the input manager
     let manager = {
-        let actions = BTreeMap::new();
-        // TODO: An actual control schema
+        use stockton_input::InputMutation::*;
+        use MovementInputsFields::*;
+
+        let mut actions = BTreeMap::new();
+
+        actions.insert(17, (Z, PositiveAxis)); // W
+        actions.insert(30, (X, NegativeAxis)); // A
+        actions.insert(31, (Z, NegativeAxis)); // S
+        actions.insert(32, (X, PositiveAxis)); // D
+        actions.insert(29, (Y, NegativeAxis)); // Ctrl
+        actions.insert(57, (Y, PositiveAxis)); // Space
 
         MovementInputsManager::new(actions)
     };
@@ -87,10 +110,14 @@ fn main() {
             resources.insert(renderer);
             resources.insert(bsp);
             resources.insert(manager);
+            resources.insert(Timing::default())
         },
         move |schedule| {
             schedule
+                .add_system(update_deltatime_system())
                 .add_system(process_window_events_system::<MovementInputsManager>())
+                .add_system(flycam_move_system::<MovementInputsManager>())
+                .flush()
                 .add_system(calc_vp_matrix_system())
                 .add_thread_local(do_render_system::<Q3BSPFile<VulkanSystem>>());
         },
@@ -100,13 +127,14 @@ fn main() {
     let _player = session.world.push((
         Transform {
             position: Vector3::new(0.0, 0.0, 0.0),
-            rotation: Vector3::new(0.0, PI / 2.0, 0.0),
+            rotation: Vector3::new(0.0, 0.0, 0.0),
         },
         CameraSettings {
             far: 1024.0,
             fov: 90.0,
             near: 0.1,
         },
+        FlycamControlled { speed: 512.0 },
     ));
 
     // Done loading - This is our main loop.

@@ -5,6 +5,7 @@ members = [
     "stockton-input-codegen",
     "stockton-render",
     "stockton-levels",
+    "stockton-contrib",
     "examples/render-bsp",
     "examples/input-codegen"
 ]

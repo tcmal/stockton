@@ -10,6 +10,7 @@ stockton-input = { path = "../../stockton-input" }
 stockton-input-codegen = { path = "../../stockton-input-codegen" }
 stockton-types = { path = "../../stockton-types" }
 stockton-levels = { path = "../../stockton-levels" }
+stockton-contrib = { path = "../../stockton-contrib", features = ["delta_time", "flycam"] }
 winit = "^0.21"
 log = "0.4.0"
 simple_logger = "^1.11"
