@@ -176,14 +176,21 @@ fn gen_manager_struct(
         struct #ident {
             inputs: #struct_ident,
             actions: ::std::collections::BTreeMap<u32, (#fields_enum_ident, ::stockton_input::InputMutation)>,
+            is_down: ::std::collections::BTreeMap<u32, bool>,
             just_hot: [bool; #buttons_len]
         }
 
         impl #ident {
             pub fn new(actions: ::std::collections::BTreeMap<u32, (#fields_enum_ident, ::stockton_input::InputMutation)>) -> Self {
+                let mut is_down = ::std::collections::BTreeMap::new();
+                for (k,_) in actions.iter() {
+                    is_down.insert(*k, false);
+                }
+
                 #ident {
                     inputs: Default::default(),
                     actions,
+                    is_down,
                     just_hot: [#(#jh_falses),*]
                 }
             }
@@ -257,6 +264,13 @@ fn gen_trait_impl(
                     let mutation = self.actions.get(&action.keycode());
 
                     if let Some((field, mutation)) = mutation {
+                        if *self.is_down.get(&action.keycode()).unwrap() == action.is_down() {
+                            // Duplicate event
+                            continue;
+                        }
+
+                        self.is_down.insert(action.keycode(), action.is_down());
+
                         use ::stockton_input::InputMutation;
 
                         let mut val = match mutation {
