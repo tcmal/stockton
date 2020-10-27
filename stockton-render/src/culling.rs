@@ -27,12 +27,17 @@ use stockton_types::Vector3;
 pub fn get_visible_faces<X: CoordSystem, T: MinBSPFeatures<X>>(pos: Vector3, file: &T) -> Vec<u32> {
     let vis_cluster = get_cluster_id(pos, file);
 
+    let mut visible = Vec::with_capacity(file.faces_len() as usize);
     if (vis_cluster & 0x80000000) != 0 {
         // Negative = Invalid camera position
-        return vec![];
+        // For now just render everything
+        for face_idx in 0..file.faces_len() {
+            visible.push(face_idx);
+        }
+
+        return visible;
     }
 
-    let mut visible = Vec::with_capacity(file.faces_len() as usize);
     walk_bsp_tree(file.get_bsp_root(), vis_cluster, &mut visible, file);
 
     visible
