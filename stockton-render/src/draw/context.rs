@@ -19,12 +19,7 @@
 //! In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 //! You'll need something else to actually find/sort the faces though.
 
-use std::{
-    borrow::Borrow,
-    convert::TryInto,
-    mem::{size_of, ManuallyDrop},
-    ops::Deref,
-};
+use std::{convert::TryInto, mem::ManuallyDrop, ops::Deref};
 
 use arrayvec::ArrayVec;
 use hal::{pool::CommandPoolCreateFlags, prelude::*};
@@ -39,19 +34,11 @@ use stockton_types::{Vector2, Vector3};
 use super::{
     buffer::ModifiableBuffer,
     draw_buffers::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
+    pipeline::CompletePipeline,
     target::{SwapchainProperties, TargetChain},
     texture::TextureStore,
 };
 use crate::{error, types::*};
-
-/// Entry point name for shaders
-const ENTRY_NAME: &str = "main";
-
-/// Source for vertex shader. TODO
-const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
-
-/// Source for fragment shader. TODO
-const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
 /// Represents a point of a triangle, including UV and texture information.
 #[derive(Debug, Clone, Copy)]
@@ -78,15 +65,8 @@ pub struct RenderingContext<'a> {
     /// Swapchain and stuff
     pub(crate) target_chain: ManuallyDrop<TargetChain>,
 
-    // Pipeline
-    /// Our main render pass
-    renderpass: ManuallyDrop<RenderPass>,
-
-    /// The layout of our main graphics pipeline
-    pipeline_layout: ManuallyDrop<PipelineLayout>,
-
-    /// Our main graphics pipeline
-    pipeline: ManuallyDrop<GraphicsPipeline>,
+    /// Graphics pipeline and associated objects
+    pipeline: ManuallyDrop<CompletePipeline>,
 
     // Command pool and buffers
     /// The command pool used for our buffers
@@ -103,12 +83,6 @@ pub struct RenderingContext<'a> {
 
     /// View projection matrix
     pub(crate) vp_matrix: Mat4,
-
-    /// The vertex shader module
-    vs_module: ManuallyDrop<ShaderModule>,
-
-    /// The fragment shader module
-    fs_module: ManuallyDrop<ShaderModule>,
 }
 
 impl<'a> RenderingContext<'a> {
@@ -166,86 +140,6 @@ impl<'a> RenderingContext<'a> {
         }
         .map_err(|_| error::CreationError::OutOfMemoryError)?;
 
-        // Renderpass
-        let renderpass = {
-            use hal::{
-                image::{Access, Layout},
-                memory::Dependencies,
-                pass::*,
-                pso::PipelineStage,
-            };
-
-            let img_attachment = Attachment {
-                format: Some(swapchain_properties.format),
-                samples: 1,
-                ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
-                stencil_ops: AttachmentOps::new(
-                    AttachmentLoadOp::Clear,
-                    AttachmentStoreOp::DontCare,
-                ),
-                layouts: Layout::Undefined..Layout::Present,
-            };
-
-            let depth_attachment = Attachment {
-                format: Some(swapchain_properties.depth_format),
-                samples: 1,
-                ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
-                stencil_ops: AttachmentOps::new(
-                    AttachmentLoadOp::DontCare,
-                    AttachmentStoreOp::DontCare,
-                ),
-                layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
-            };
-
-            let subpass = SubpassDesc {
-                colors: &[(0, Layout::ColorAttachmentOptimal)],
-                depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
-                inputs: &[],
-                resolves: &[],
-                preserves: &[],
-            };
-
-            let in_dependency = SubpassDependency {
-                flags: Dependencies::empty(),
-                passes: None..Some(0),
-                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
-                    ..(PipelineStage::COLOR_ATTACHMENT_OUTPUT
-                        | PipelineStage::EARLY_FRAGMENT_TESTS),
-                accesses: Access::empty()
-                    ..(Access::COLOR_ATTACHMENT_READ
-                        | Access::COLOR_ATTACHMENT_WRITE
-                        | Access::DEPTH_STENCIL_ATTACHMENT_READ
-                        | Access::DEPTH_STENCIL_ATTACHMENT_WRITE),
-            };
-
-            let out_dependency = SubpassDependency {
-                flags: Dependencies::empty(),
-                passes: Some(0)..None,
-                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT | PipelineStage::EARLY_FRAGMENT_TESTS
-                    ..PipelineStage::COLOR_ATTACHMENT_OUTPUT,
-                accesses: (Access::COLOR_ATTACHMENT_READ
-                    | Access::COLOR_ATTACHMENT_WRITE
-                    | Access::DEPTH_STENCIL_ATTACHMENT_READ
-                    | Access::DEPTH_STENCIL_ATTACHMENT_WRITE)
-                    ..Access::empty(),
-            };
-
-            unsafe {
-                device.create_render_pass(
-                    &[img_attachment, depth_attachment],
-                    &[subpass],
-                    &[in_dependency, out_dependency],
-                )
-            }
-            .map_err(|_| error::CreationError::OutOfMemoryError)?
-        };
-
-        // Subpass
-        let subpass = hal::pass::Subpass {
-            index: 0,
-            main_pass: &renderpass,
-        };
-
         // Vertex and index buffers
         let draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
 
@@ -262,10 +156,10 @@ impl<'a> RenderingContext<'a> {
         descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
 
         // Graphics pipeline
-        let (pipeline_layout, pipeline, vs_module, fs_module) = Self::create_pipeline(
+        let pipeline = CompletePipeline::new(
             &mut device,
             swapchain_properties.extent,
-            &subpass,
+            &swapchain_properties,
             descriptor_set_layouts,
         )?;
 
@@ -274,7 +168,7 @@ impl<'a> RenderingContext<'a> {
             &mut device,
             &adapter,
             &mut surface,
-            &renderpass,
+            &pipeline,
             &mut cmd_pool,
             swapchain_properties,
             None,
@@ -289,19 +183,14 @@ impl<'a> RenderingContext<'a> {
             adapter,
             queue_group,
 
-            renderpass: ManuallyDrop::new(renderpass),
             target_chain: ManuallyDrop::new(target_chain),
             cmd_pool: ManuallyDrop::new(cmd_pool),
 
-            pipeline_layout: ManuallyDrop::new(pipeline_layout),
             pipeline: ManuallyDrop::new(pipeline),
 
             texture_store: ManuallyDrop::new(texture_store),
 
             draw_buffers: ManuallyDrop::new(draw_buffers),
-
-            vs_module: ManuallyDrop::new(vs_module),
-            fs_module: ManuallyDrop::new(fs_module),
 
             vp_matrix: Mat4::identity(),
         })
@@ -319,39 +208,19 @@ impl<'a> RenderingContext<'a> {
         use core::ptr::read;
 
         // Graphics pipeline
-        self.device
-            .destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
-
-        self.device
-            .destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
-
-        self.device
-            .destroy_shader_module(ManuallyDrop::into_inner(read(&self.vs_module)));
-        self.device
-            .destroy_shader_module(ManuallyDrop::into_inner(read(&self.fs_module)));
-
-        let (pipeline_layout, pipeline, vs_module, fs_module) = {
+        // TODO: Recycle
+        ManuallyDrop::into_inner(read(&self.pipeline)).deactivate(&mut self.device);
+        self.pipeline = ManuallyDrop::new({
             let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
             descriptor_set_layouts.push(self.texture_store.descriptor_set_layout.deref());
 
-            let subpass = hal::pass::Subpass {
-                index: 0,
-                main_pass: &(*self.renderpass),
-            };
-
-            Self::create_pipeline(
+            CompletePipeline::new(
                 &mut self.device,
                 properties.extent,
-                &subpass,
+                &properties,
                 descriptor_set_layouts,
             )?
-        };
-
-        self.pipeline_layout = ManuallyDrop::new(pipeline_layout);
-        self.pipeline = ManuallyDrop::new(pipeline);
-
-        self.vs_module = ManuallyDrop::new(vs_module);
-        self.fs_module = ManuallyDrop::new(fs_module);
+        });
 
         let old_swapchain = ManuallyDrop::into_inner(read(&self.target_chain))
             .deactivate_with_recyling(&mut self.device, &mut self.cmd_pool);
@@ -360,7 +229,7 @@ impl<'a> RenderingContext<'a> {
                 &mut self.device,
                 &self.adapter,
                 &mut self.surface,
-                &self.renderpass,
+                &self.pipeline,
                 &mut self.cmd_pool,
                 properties,
                 Some(old_swapchain),
@@ -369,184 +238,6 @@ impl<'a> RenderingContext<'a> {
         );
 
         Ok(())
-    }
-
-    #[allow(clippy::type_complexity)]
-    fn create_pipeline<T>(
-        device: &mut Device,
-        extent: hal::image::Extent,
-        subpass: &hal::pass::Subpass<back::Backend>,
-        set_layouts: T,
-    ) -> Result<(PipelineLayout, GraphicsPipeline, ShaderModule, ShaderModule), error::CreationError>
-    where
-        T: IntoIterator,
-        T::Item: Borrow<DescriptorSetLayout>,
-    {
-        use hal::format::Format;
-        use hal::pso::*;
-
-        // Shader modules
-        let (vs_module, fs_module) = {
-            let mut compiler = shaderc::Compiler::new().ok_or(error::CreationError::NoShaderC)?;
-
-            let vertex_compile_artifact = compiler
-                .compile_into_spirv(
-                    VERTEX_SOURCE,
-                    shaderc::ShaderKind::Vertex,
-                    "vertex.vert",
-                    ENTRY_NAME,
-                    None,
-                )
-                .map_err(error::CreationError::ShaderCError)?;
-
-            let fragment_compile_artifact = compiler
-                .compile_into_spirv(
-                    FRAGMENT_SOURCE,
-                    shaderc::ShaderKind::Fragment,
-                    "fragment.frag",
-                    ENTRY_NAME,
-                    None,
-                )
-                .map_err(error::CreationError::ShaderCError)?;
-
-            // Make into shader module
-            unsafe {
-                (
-                    device
-                        .create_shader_module(vertex_compile_artifact.as_binary())
-                        .map_err(error::CreationError::ShaderModuleFailed)?,
-                    device
-                        .create_shader_module(fragment_compile_artifact.as_binary())
-                        .map_err(error::CreationError::ShaderModuleFailed)?,
-                )
-            }
-        };
-
-        // Shader entry points (ShaderStage)
-        let (vs_entry, fs_entry) = (
-            EntryPoint::<back::Backend> {
-                entry: ENTRY_NAME,
-                module: &vs_module,
-                specialization: Specialization::default(),
-            },
-            EntryPoint::<back::Backend> {
-                entry: ENTRY_NAME,
-                module: &fs_module,
-                specialization: Specialization::default(),
-            },
-        );
-
-        // Shader set
-        let shaders = GraphicsShaderSet {
-            vertex: vs_entry,
-            fragment: Some(fs_entry),
-            hull: None,
-            domain: None,
-            geometry: None,
-        };
-
-        // Vertex buffers
-        let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
-            binding: 0,
-            stride: (size_of::<f32>() * 6) as u32,
-            rate: VertexInputRate::Vertex,
-        }];
-
-        let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
-            size_of::<f32>() * 3; Rgb32Sfloat,
-            size_of::<u32>(); R32Sint,
-            size_of::<f32>() * 2; Rg32Sfloat
-        );
-
-        // Rasterizer
-        let rasterizer = Rasterizer {
-            polygon_mode: PolygonMode::Fill,
-            cull_face: Face::BACK,
-            front_face: FrontFace::CounterClockwise,
-            depth_clamping: false,
-            depth_bias: None,
-            conservative: true,
-            line_width: hal::pso::State::Static(1.0),
-        };
-
-        // Depth stencil
-        let depth_stencil = DepthStencilDesc {
-            depth: Some(DepthTest {
-                fun: Comparison::Less,
-                write: true,
-            }),
-            depth_bounds: false,
-            stencil: None,
-        };
-
-        // Pipeline layout
-        let layout = unsafe {
-            device.create_pipeline_layout(
-                set_layouts,
-                // vp matrix, 4x4 f32
-                &[(ShaderStageFlags::VERTEX, 0..64)],
-            )
-        }
-        .map_err(|_| error::CreationError::OutOfMemoryError)?;
-
-        // Colour blending
-        let blender = {
-            let blend_state = BlendState {
-                color: BlendOp::Add {
-                    src: Factor::One,
-                    dst: Factor::Zero,
-                },
-                alpha: BlendOp::Add {
-                    src: Factor::One,
-                    dst: Factor::Zero,
-                },
-            };
-
-            BlendDesc {
-                logic_op: Some(LogicOp::Copy),
-                targets: vec![ColorBlendDesc {
-                    mask: ColorMask::ALL,
-                    blend: Some(blend_state),
-                }],
-            }
-        };
-
-        // Baked states
-        let baked_states = BakedStates {
-            viewport: Some(Viewport {
-                rect: extent.rect(),
-                depth: (0.0..1.0),
-            }),
-            scissor: Some(extent.rect()),
-            blend_color: None,
-            depth_bounds: None,
-        };
-
-        // Input assembler
-        let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
-
-        // Pipeline description
-        let pipeline_desc = GraphicsPipelineDesc {
-            shaders,
-            rasterizer,
-            vertex_buffers,
-            blender,
-            depth_stencil,
-            multisampling: None,
-            baked_states,
-            layout: &layout,
-            subpass: *subpass,
-            flags: PipelineCreationFlags::empty(),
-            parent: BasePipeline::None,
-            input_assembler,
-            attributes,
-        };
-
-        // Pipeline
-        let pipeline = unsafe { device.create_graphics_pipeline(&pipeline_desc, None) }
-            .map_err(error::CreationError::PipelineError)?;
-
-        Ok((layout, pipeline, vs_module, fs_module))
     }
 
     /// Draw all vertices in the buffer
@@ -559,9 +250,7 @@ impl<'a> RenderingContext<'a> {
         let cmd_buffer = self.target_chain.prep_next_target(
             &mut self.device,
             &mut self.draw_buffers,
-            &self.renderpass,
             &self.pipeline,
-            &self.pipeline_layout,
             &self.vp_matrix,
         )?;
 
@@ -579,7 +268,7 @@ impl<'a> RenderingContext<'a> {
                 descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
                 unsafe {
                     cmd_buffer.bind_graphics_descriptor_sets(
-                        &self.pipeline_layout,
+                        &self.pipeline.pipeline_layout,
                         0,
                         descriptor_sets,
                         &[],
@@ -642,7 +331,7 @@ impl<'a> RenderingContext<'a> {
         descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
         unsafe {
             cmd_buffer.bind_graphics_descriptor_sets(
-                &self.pipeline_layout,
+                &self.pipeline.pipeline_layout,
                 0,
                 descriptor_sets,
                 &[],
@@ -690,19 +379,8 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 
             self.device
                 .destroy_command_pool(ManuallyDrop::into_inner(read(&self.cmd_pool)));
-            self.device
-                .destroy_render_pass(ManuallyDrop::into_inner(read(&self.renderpass)));
 
-            self.device
-                .destroy_shader_module(ManuallyDrop::into_inner(read(&self.vs_module)));
-            self.device
-                .destroy_shader_module(ManuallyDrop::into_inner(read(&self.fs_module)));
-
-            self.device
-                .destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
-
-            self.device
-                .destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
+            ManuallyDrop::into_inner(read(&self.pipeline)).deactivate(&mut self.device);
 
             self.instance
                 .destroy_surface(ManuallyDrop::into_inner(read(&self.surface)));

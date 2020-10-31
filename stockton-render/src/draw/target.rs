@@ -16,13 +16,9 @@
  */
 
 //! Resources needed for drawing on the screen, including sync objects
-use super::texture::image::LoadedImage;
-use crate::types::*;
 
 use core::{iter::once, mem::ManuallyDrop};
 
-use crate::draw::buffer::ModifiableBuffer;
-use crate::draw::draw_buffers::DrawBuffers;
 use arrayvec::ArrayVec;
 use hal::{
     format::{ChannelType, Format, Swizzle},
@@ -33,6 +29,12 @@ use hal::{
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
 use na::Mat4;
+
+use super::{
+    buffer::ModifiableBuffer, draw_buffers::DrawBuffers, pipeline::CompletePipeline,
+    texture::image::LoadedImage,
+};
+use crate::types::*;
 
 /// Defines the colour range we use.
 const COLOR_RANGE: hal::image::SubresourceRange = hal::image::SubresourceRange {
@@ -149,7 +151,7 @@ impl TargetChain {
         device: &mut Device,
         adapter: &Adapter,
         surface: &mut Surface,
-        renderpass: &RenderPass,
+        pipeline: &CompletePipeline,
         cmd_pool: &mut CommandPool,
         properties: SwapchainProperties,
         old_swapchain: Option<Swapchain>,
@@ -210,7 +212,7 @@ impl TargetChain {
                 TargetResources::new(
                     device,
                     cmd_pool,
-                    renderpass,
+                    &pipeline.renderpass,
                     image,
                     &(*depth_buffer.image_view),
                     properties.extent,
@@ -264,9 +266,7 @@ impl TargetChain {
         &'a mut self,
         device: &mut Device,
         draw_buffers: &mut DrawBuffers,
-        renderpass: &RenderPass,
-        pipeline: &GraphicsPipeline,
-        pipeline_layout: &PipelineLayout,
+        pipeline: &CompletePipeline,
         vp: &Mat4,
     ) -> Result<&'a mut crate::types::CommandBuffer, &'static str> {
         self.last_drawn = (self.last_drawn + 1) % self.targets.len();
@@ -329,19 +329,19 @@ impl TargetChain {
             target.cmd_buffer.begin_primary(CommandBufferFlags::EMPTY);
             // Main render pass / pipeline
             target.cmd_buffer.begin_render_pass(
-                renderpass,
+                &pipeline.renderpass,
                 &target.framebuffer,
                 self.properties.viewport.rect,
                 clear_values.iter(),
                 SubpassContents::Inline,
             );
-            target.cmd_buffer.bind_graphics_pipeline(&pipeline);
+            target.cmd_buffer.bind_graphics_pipeline(&pipeline.pipeline);
 
             // VP Matrix
             let vp = &*(vp.data.as_slice() as *const [f32] as *const [u32]);
 
             target.cmd_buffer.push_graphics_constants(
-                &pipeline_layout,
+                &pipeline.pipeline_layout,
                 ShaderStageFlags::VERTEX,
                 0,
                 vp,
