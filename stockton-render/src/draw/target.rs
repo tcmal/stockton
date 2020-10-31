@@ -139,11 +139,15 @@ pub struct TargetChain {
     /// Resources tied to each target frame in the swapchain
     pub targets: Box<[TargetResources]>,
 
-    /// The last target drawn to
-    last_drawn: usize,
+    /// Sync objects used in drawing
+    /// These are seperated from the targets because we don't necessarily always match up indexes
+    pub sync_objects: Box<[SyncObjects]>,
+
+    /// The last set of sync objects used
+    last_syncs: usize,
 
     /// Last image index of the swapchain drawn to
-    last_image_index: u32,
+    last_image: u32,
 }
 
 impl TargetChain {
@@ -207,6 +211,7 @@ impl TargetChain {
         }?;
 
         let mut targets: Vec<TargetResources> = Vec::with_capacity(backbuffer.len());
+        let mut sync_objects: Vec<SyncObjects> = Vec::with_capacity(backbuffer.len());
         for image in backbuffer.drain(..) {
             targets.push(
                 TargetResources::new(
@@ -220,28 +225,27 @@ impl TargetChain {
                 )
                 .map_err(|_| TargetChainCreationError::Todo)?,
             );
+
+            sync_objects
+                .push(SyncObjects::new(device).map_err(|_| TargetChainCreationError::Todo)?);
         }
 
         Ok(TargetChain {
             swapchain: ManuallyDrop::new(swapchain),
             targets: targets.into_boxed_slice(),
+            sync_objects: sync_objects.into_boxed_slice(),
             depth_buffer: ManuallyDrop::new(depth_buffer),
             properties,
-            last_drawn: (image_count - 1) as usize, // This means the next one to be used is index 0
-            last_image_index: 0,
+            last_syncs: (image_count - 1) as usize, // This means the next one to be used is index 0
+            last_image: 0,
         })
     }
 
     pub fn deactivate(self, device: &mut Device, cmd_pool: &mut CommandPool) {
-        use core::ptr::read;
+        let swapchain = self.deactivate_with_recyling(device, cmd_pool);
+
         unsafe {
-            ManuallyDrop::into_inner(read(&self.depth_buffer)).deactivate(device);
-
-            for i in 0..self.targets.len() {
-                read(&self.targets[i]).deactivate(device, cmd_pool);
-            }
-
-            device.destroy_swapchain(ManuallyDrop::into_inner(read(&self.swapchain)));
+            device.destroy_swapchain(swapchain);
         }
     }
 
@@ -257,6 +261,10 @@ impl TargetChain {
             for i in 0..self.targets.len() {
                 read(&self.targets[i]).deactivate(device, cmd_pool);
             }
+
+            for i in 0..self.sync_objects.len() {
+                read(&self.sync_objects[i]).deactivate(device);
+            }
         }
 
         unsafe { ManuallyDrop::into_inner(read(&self.swapchain)) }
@@ -269,26 +277,28 @@ impl TargetChain {
         pipeline: &CompletePipeline,
         vp: &Mat4,
     ) -> Result<&'a mut crate::types::CommandBuffer, &'static str> {
-        self.last_drawn = (self.last_drawn + 1) % self.targets.len();
+        self.last_syncs = (self.last_syncs + 1) % self.sync_objects.len();
 
-        let target = &mut self.targets[self.last_drawn];
+        let syncs = &mut self.sync_objects[self.last_syncs];
 
         // Get the image
         let (image_index, _) = unsafe {
             self.swapchain
-                .acquire_image(core::u64::MAX, Some(&target.get_image), None)
+                .acquire_image(core::u64::MAX, Some(&syncs.get_image), None)
                 .map_err(|_| "FrameError::AcquireError")?
         };
 
-        self.last_image_index = image_index;
+        self.last_image = image_index;
+
+        let target = &mut self.targets[image_index as usize];
 
         // Make sure whatever was last using this has finished
         unsafe {
             device
-                .wait_for_fence(&target.present_complete, core::u64::MAX)
+                .wait_for_fence(&syncs.present_complete, core::u64::MAX)
                 .map_err(|_| "FrameError::SyncObjectError")?;
             device
-                .reset_fence(&target.present_complete)
+                .reset_fence(&syncs.present_complete)
                 .map_err(|_| "FrameError::SyncObjectError")?;
         };
 
@@ -363,7 +373,8 @@ impl TargetChain {
         &mut self,
         command_queue: &mut CommandQueue,
     ) -> Result<(), &'static str> {
-        let target = &mut self.targets[self.last_drawn];
+        let syncs = &mut self.sync_objects[self.last_syncs];
+        let target = &mut self.targets[self.last_image as usize];
 
         unsafe {
             target.cmd_buffer.end_render_pass();
@@ -373,12 +384,12 @@ impl TargetChain {
         // Make submission object
         let command_buffers: std::iter::Once<&CommandBuffer> = once(&target.cmd_buffer);
         let wait_semaphores: std::iter::Once<(&Semaphore, hal::pso::PipelineStage)> = once((
-            &target.get_image,
+            &syncs.get_image,
             hal::pso::PipelineStage::COLOR_ATTACHMENT_OUTPUT,
         ));
-        let signal_semaphores: std::iter::Once<&Semaphore> = once(&target.render_complete);
+        let signal_semaphores: std::iter::Once<&Semaphore> = once(&syncs.render_complete);
 
-        let present_wait_semaphores: std::iter::Once<&Semaphore> = once(&target.render_complete);
+        let present_wait_semaphores: std::iter::Once<&Semaphore> = once(&syncs.render_complete);
 
         let submission = Submission {
             command_buffers,
@@ -388,11 +399,11 @@ impl TargetChain {
 
         // Submit it
         unsafe {
-            command_queue.submit(submission, Some(&target.present_complete));
+            command_queue.submit(submission, Some(&syncs.present_complete));
             self.swapchain
                 .present(
                     command_queue,
-                    self.last_image_index as u32,
+                    self.last_image as u32,
                     present_wait_semaphores,
                 )
                 .map_err(|_| "FrameError::PresentError")?;
@@ -416,16 +427,6 @@ pub struct TargetResources {
 
     /// Framebuffer for this frame
     pub framebuffer: ManuallyDrop<Framebuffer>,
-
-    // Sync objects
-    /// Triggered when the image is ready to draw to
-    pub get_image: ManuallyDrop<Semaphore>,
-
-    /// Triggered when rendering is done
-    pub render_complete: ManuallyDrop<Semaphore>,
-
-    /// Triggered when the image is on screen
-    pub present_complete: ManuallyDrop<Fence>,
 }
 
 impl TargetResources {
@@ -465,6 +466,38 @@ impl TargetResources {
                 .map_err(|_| TargetResourcesCreationError::FrameBufferNoMemory)?
         };
 
+        Ok(TargetResources {
+            cmd_buffer: ManuallyDrop::new(cmd_buffer),
+            image: ManuallyDrop::new(image),
+            imageview: ManuallyDrop::new(imageview),
+            framebuffer: ManuallyDrop::new(framebuffer),
+        })
+    }
+
+    pub fn deactivate(self, device: &mut Device, cmd_pool: &mut CommandPool) {
+        use core::ptr::read;
+        unsafe {
+            cmd_pool.free(once(ManuallyDrop::into_inner(read(&self.cmd_buffer))));
+
+            device.destroy_framebuffer(ManuallyDrop::into_inner(read(&self.framebuffer)));
+            device.destroy_image_view(ManuallyDrop::into_inner(read(&self.imageview)));
+        }
+    }
+}
+
+pub struct SyncObjects {
+    /// Triggered when the image is ready to draw to
+    pub get_image: ManuallyDrop<Semaphore>,
+
+    /// Triggered when rendering is done
+    pub render_complete: ManuallyDrop<Semaphore>,
+
+    /// Triggered when the image is on screen
+    pub present_complete: ManuallyDrop<Fence>,
+}
+
+impl SyncObjects {
+    pub fn new(device: &mut Device) -> Result<Self, TargetResourcesCreationError> {
         // Sync objects
         let get_image = device
             .create_semaphore()
@@ -476,25 +509,17 @@ impl TargetResources {
             .create_fence(true)
             .map_err(|_| TargetResourcesCreationError::SyncObjectsNoMemory)?;
 
-        Ok(TargetResources {
-            cmd_buffer: ManuallyDrop::new(cmd_buffer),
-            image: ManuallyDrop::new(image),
-            imageview: ManuallyDrop::new(imageview),
-            framebuffer: ManuallyDrop::new(framebuffer),
+        Ok(SyncObjects {
             get_image: ManuallyDrop::new(get_image),
             render_complete: ManuallyDrop::new(render_complete),
             present_complete: ManuallyDrop::new(present_complete),
         })
     }
 
-    pub fn deactivate(self, device: &mut Device, cmd_pool: &mut CommandPool) {
+    pub fn deactivate(self, device: &mut Device) {
         use core::ptr::read;
+
         unsafe {
-            cmd_pool.free(once(ManuallyDrop::into_inner(read(&self.cmd_buffer))));
-
-            device.destroy_framebuffer(ManuallyDrop::into_inner(read(&self.framebuffer)));
-            device.destroy_image_view(ManuallyDrop::into_inner(read(&self.imageview)));
-
             device.destroy_semaphore(ManuallyDrop::into_inner(read(&self.get_image)));
             device.destroy_semaphore(ManuallyDrop::into_inner(read(&self.render_complete)));
             device.destroy_fence(ManuallyDrop::into_inner(read(&self.present_complete)));
