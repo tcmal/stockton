@@ -32,7 +32,7 @@ use na::Mat4;
 
 use super::{
     buffer::ModifiableBuffer, draw_buffers::DrawBuffers, pipeline::CompletePipeline,
-    texture::image::LoadedImage,
+    texture::image::LoadedImage, ui::UIPipeline,
 };
 use crate::types::*;
 
@@ -151,11 +151,13 @@ pub struct TargetChain {
 }
 
 impl TargetChain {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &mut Device,
         adapter: &Adapter,
         surface: &mut Surface,
         pipeline: &CompletePipeline,
+        ui_pipeline: &UIPipeline,
         cmd_pool: &mut CommandPool,
         properties: SwapchainProperties,
         old_swapchain: Option<Swapchain>,
@@ -218,10 +220,10 @@ impl TargetChain {
                     device,
                     cmd_pool,
                     &pipeline.renderpass,
+                    &ui_pipeline.renderpass,
                     image,
                     &(*depth_buffer.image_view),
-                    properties.extent,
-                    properties.format,
+                    &properties,
                 )
                 .map_err(|_| TargetChainCreationError::Todo)?,
             );
@@ -369,6 +371,69 @@ impl TargetChain {
         Ok(&mut target.cmd_buffer)
     }
 
+    pub fn target_2d_pass<'a>(
+        &'a mut self,
+        draw_buffers: &mut DrawBuffers,
+        pipeline: &UIPipeline,
+    ) -> Result<&'a mut CommandBuffer, &'static str> {
+        let target = &mut self.targets[self.last_image as usize];
+
+        unsafe {
+            use hal::pso::PipelineStage;
+            target.cmd_buffer.end_render_pass();
+
+            target.cmd_buffer.pipeline_barrier(
+                PipelineStage::BOTTOM_OF_PIPE..PipelineStage::TOP_OF_PIPE,
+                hal::memory::Dependencies::empty(),
+                &[],
+            );
+        }
+
+        // Record commands
+        unsafe {
+            use hal::buffer::{IndexBufferView, SubRange};
+            use hal::command::{ClearColor, ClearValue, SubpassContents};
+
+            // Colour to clear window to
+            let clear_values = [ClearValue {
+                color: ClearColor {
+                    float32: [1.0, 0.0, 0.0, 1.5],
+                },
+            }];
+
+            // Get references to our buffers
+            let (vbufs, ibuf) = {
+                let vbufref: &<back::Backend as hal::Backend>::Buffer =
+                    draw_buffers.vertex_buffer.get_buffer();
+
+                let vbufs: ArrayVec<[_; 1]> = [(vbufref, SubRange::WHOLE)].into();
+                let ibuf = draw_buffers.index_buffer.get_buffer();
+
+                (vbufs, ibuf)
+            };
+
+            // Main render pass / pipeline
+            target.cmd_buffer.begin_render_pass(
+                &pipeline.renderpass,
+                &target.framebuffer_2d,
+                self.properties.viewport.rect,
+                clear_values.iter(),
+                SubpassContents::Inline,
+            );
+            target.cmd_buffer.bind_graphics_pipeline(&pipeline.pipeline);
+
+            // Bind buffers
+            target.cmd_buffer.bind_vertex_buffers(0, vbufs);
+            target.cmd_buffer.bind_index_buffer(IndexBufferView {
+                buffer: ibuf,
+                range: SubRange::WHOLE,
+                index_type: hal::IndexType::U16,
+            });
+        };
+
+        Ok(&mut target.cmd_buffer)
+    }
+
     pub fn finish_and_submit_target(
         &mut self,
         command_queue: &mut CommandQueue,
@@ -427,6 +492,9 @@ pub struct TargetResources {
 
     /// Framebuffer for this frame
     pub framebuffer: ManuallyDrop<Framebuffer>,
+
+    /// Framebuffer for this frame when drawing in 2D
+    pub framebuffer_2d: ManuallyDrop<Framebuffer>,
 }
 
 impl TargetResources {
@@ -434,10 +502,10 @@ impl TargetResources {
         device: &mut Device,
         cmd_pool: &mut CommandPool,
         renderpass: &RenderPass,
+        renderpass_2d: &RenderPass,
         image: Image,
         depth_pass: &ImageView,
-        extent: Extent,
-        format: Format,
+        properties: &SwapchainProperties,
     ) -> Result<TargetResources, TargetResourcesCreationError> {
         // Command Buffer
         let cmd_buffer = unsafe { cmd_pool.allocate_one(hal::command::Level::Primary) };
@@ -448,7 +516,7 @@ impl TargetResources {
                 .create_image_view(
                     &image,
                     ViewKind::D2,
-                    format,
+                    properties.format,
                     Swizzle::NO,
                     COLOR_RANGE.clone(),
                 )
@@ -461,8 +529,15 @@ impl TargetResources {
                 .create_framebuffer(
                     &renderpass,
                     once(&imageview).chain(once(depth_pass)),
-                    extent,
+                    properties.extent,
                 )
+                .map_err(|_| TargetResourcesCreationError::FrameBufferNoMemory)?
+        };
+
+        // 2D framebuffer just needs the imageview, not the depth pass
+        let framebuffer_2d = unsafe {
+            device
+                .create_framebuffer(&renderpass_2d, once(&imageview), properties.extent)
                 .map_err(|_| TargetResourcesCreationError::FrameBufferNoMemory)?
         };
 
@@ -471,6 +546,7 @@ impl TargetResources {
             image: ManuallyDrop::new(image),
             imageview: ManuallyDrop::new(imageview),
             framebuffer: ManuallyDrop::new(framebuffer),
+            framebuffer_2d: ManuallyDrop::new(framebuffer_2d),
         })
     }
 
@@ -480,6 +556,7 @@ impl TargetResources {
             cmd_pool.free(once(ManuallyDrop::into_inner(read(&self.cmd_buffer))));
 
             device.destroy_framebuffer(ManuallyDrop::into_inner(read(&self.framebuffer)));
+            device.destroy_framebuffer(ManuallyDrop::into_inner(read(&self.framebuffer_2d)));
             device.destroy_image_view(ManuallyDrop::into_inner(read(&self.imageview)));
         }
     }

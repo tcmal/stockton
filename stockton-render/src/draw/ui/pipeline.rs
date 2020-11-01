@@ -32,13 +32,12 @@ use std::{
 
 use hal::prelude::*;
 
-use super::target::SwapchainProperties;
+use crate::draw::target::SwapchainProperties;
 use crate::error;
 use crate::types::*;
 
-// TODO: Generalise so we can use for UI also
-/// A complete graphics pipeline and associated resources
-pub struct CompletePipeline {
+/// A complete 2D graphics pipeline and associated resources
+pub struct UIPipeline {
     /// Our main render pass
     pub(crate) renderpass: ManuallyDrop<RenderPass>,
 
@@ -55,7 +54,7 @@ pub struct CompletePipeline {
     pub(crate) fs_module: ManuallyDrop<ShaderModule>,
 }
 
-impl CompletePipeline {
+impl UIPipeline {
     pub fn new<T>(
         device: &mut Device,
         extent: hal::image::Extent,
@@ -71,40 +70,43 @@ impl CompletePipeline {
 
         // Renderpass
         let renderpass = {
-            use hal::{image::Layout, pass::*};
+            use hal::{
+                image::{Access, Layout},
+                memory::Dependencies,
+                pass::*,
+            };
 
             let img_attachment = Attachment {
                 format: Some(swapchain_properties.format),
                 samples: 1,
-                ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
-                stencil_ops: AttachmentOps::new(
-                    AttachmentLoadOp::Clear,
-                    AttachmentStoreOp::DontCare,
-                ),
-                layouts: Layout::Undefined..Layout::ColorAttachmentOptimal,
-            };
-
-            let depth_attachment = Attachment {
-                format: Some(swapchain_properties.depth_format),
-                samples: 1,
-                ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
+                ops: AttachmentOps::new(AttachmentLoadOp::Load, AttachmentStoreOp::Store),
                 stencil_ops: AttachmentOps::new(
                     AttachmentLoadOp::DontCare,
                     AttachmentStoreOp::DontCare,
                 ),
-                layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
+                layouts: Layout::ColorAttachmentOptimal..Layout::Present,
             };
 
             let subpass = SubpassDesc {
                 colors: &[(0, Layout::ColorAttachmentOptimal)],
-                depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
+                depth_stencil: None,
                 inputs: &[],
                 resolves: &[],
                 preserves: &[],
             };
 
+            let external_dependency = SubpassDependency {
+                flags: Dependencies::empty(),
+                passes: None..Some(0),
+                stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                    ..(PipelineStage::COLOR_ATTACHMENT_OUTPUT
+                        | PipelineStage::EARLY_FRAGMENT_TESTS),
+                accesses: Access::empty()
+                    ..(Access::COLOR_ATTACHMENT_READ | Access::COLOR_ATTACHMENT_WRITE),
+            };
+
             unsafe {
-                device.create_render_pass(&[img_attachment, depth_attachment], &[subpass], &[])
+                device.create_render_pass(&[img_attachment], &[subpass], &[external_dependency])
             }
             .map_err(|_| error::CreationError::OutOfMemoryError)?
         };
@@ -178,20 +180,19 @@ impl CompletePipeline {
         // Vertex buffers
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: (size_of::<f32>() * 6) as u32,
+            stride: (size_of::<f32>() * 5) as u32,
             rate: VertexInputRate::Vertex,
         }];
 
         let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
-            size_of::<f32>() * 3; Rgb32Sfloat,
-            size_of::<u32>(); R32Sint,
-            size_of::<f32>() * 2; Rg32Sfloat
+            size_of::<f32>() * 2; Rg32Sfloat,
+            size_of::<f32>() * 3; Rgb32Sfloat
         );
 
         // Rasterizer
         let rasterizer = Rasterizer {
             polygon_mode: PolygonMode::Fill,
-            cull_face: Face::BACK,
+            cull_face: Face::NONE,
             front_face: FrontFace::CounterClockwise,
             depth_clamping: false,
             depth_bias: None,
@@ -201,39 +202,30 @@ impl CompletePipeline {
 
         // Depth stencil
         let depth_stencil = DepthStencilDesc {
-            depth: Some(DepthTest {
-                fun: Comparison::Less,
-                write: true,
-            }),
+            depth: None,
             depth_bounds: false,
             stencil: None,
         };
 
         // Pipeline layout
-        let layout = unsafe {
-            device.create_pipeline_layout(
-                set_layouts,
-                // vp matrix, 4x4 f32
-                &[(ShaderStageFlags::VERTEX, 0..64)],
-            )
-        }
-        .map_err(|_| error::CreationError::OutOfMemoryError)?;
+        let layout = unsafe { device.create_pipeline_layout(set_layouts, &[]) }
+            .map_err(|_| error::CreationError::OutOfMemoryError)?;
 
         // Colour blending
         let blender = {
             let blend_state = BlendState {
                 color: BlendOp::Add {
-                    src: Factor::One,
-                    dst: Factor::Zero,
+                    src: Factor::SrcAlpha,
+                    dst: Factor::OneMinusSrcAlpha,
                 },
                 alpha: BlendOp::Add {
-                    src: Factor::One,
+                    src: Factor::OneMinusSrcAlpha,
                     dst: Factor::Zero,
                 },
             };
 
             BlendDesc {
-                logic_op: Some(LogicOp::Copy),
+                logic_op: None,
                 targets: vec![ColorBlendDesc {
                     mask: ColorMask::ALL,
                     blend: Some(blend_state),
@@ -276,7 +268,7 @@ impl CompletePipeline {
         let pipeline = unsafe { device.create_graphics_pipeline(&pipeline_desc, None) }
             .map_err(error::CreationError::PipelineError)?;
 
-        Ok(CompletePipeline {
+        Ok(UIPipeline {
             renderpass: ManuallyDrop::new(renderpass),
             pipeline_layout: ManuallyDrop::new(layout),
             pipeline: ManuallyDrop::new(pipeline),

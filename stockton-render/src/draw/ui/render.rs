@@ -15,21 +15,14 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Given 3D points and some camera information, renders to the screen.
+use hal::prelude::*;
 
-pub mod target;
+use crate::draw::draw_buffers::DrawBuffers;
+use crate::types::*;
 
-#[macro_use]
-mod macros;
-mod buffer;
-mod camera;
-mod context;
-mod draw_buffers;
-mod pipeline;
-mod render;
-mod texture;
-mod ui;
-
-pub use self::camera::calc_vp_matrix_system;
-pub use self::context::RenderingContext;
-pub use self::draw_buffers::UVPoint;
+pub fn do_render(cmd_buffer: &mut CommandBuffer, _draw_buffers: &mut DrawBuffers) {
+    // TODO: Actual UI Rendering
+    unsafe {
+        cmd_buffer.draw(0..3, 0..1);
+    }
+}

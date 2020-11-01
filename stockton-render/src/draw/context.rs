@@ -19,7 +19,7 @@
 //! In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 //! You'll need something else to actually find/sort the faces though.
 
-use std::{convert::TryInto, mem::ManuallyDrop, ops::Deref};
+use std::{mem::ManuallyDrop, ops::Deref};
 
 use arrayvec::ArrayVec;
 use hal::{pool::CommandPoolCreateFlags, prelude::*};
@@ -27,22 +27,17 @@ use log::debug;
 use na::Mat4;
 use winit::window::Window;
 
-use stockton_levels::prelude::*;
-use stockton_levels::traits::faces::FaceType;
-use stockton_types::{Vector2, Vector3};
-
 use super::{
     buffer::ModifiableBuffer,
-    draw_buffers::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
+    draw_buffers::DrawBuffers,
     pipeline::CompletePipeline,
+    render::do_render,
     target::{SwapchainProperties, TargetChain},
     texture::TextureStore,
+    ui::{do_render as do_render_ui, UIPipeline},
 };
 use crate::{error, types::*};
-
-/// Represents a point of a triangle, including UV and texture information.
-#[derive(Debug, Clone, Copy)]
-pub struct UVPoint(pub Vector3, pub i32, pub Vector2);
+use stockton_levels::prelude::*;
 
 /// Contains all the hal related stuff.
 /// In the end, this takes in a depth-sorted list of faces and a map file and renders them.
@@ -68,6 +63,9 @@ pub struct RenderingContext<'a> {
     /// Graphics pipeline and associated objects
     pipeline: ManuallyDrop<CompletePipeline>,
 
+    /// 2D Graphics pipeline and associated objects
+    ui_pipeline: ManuallyDrop<UIPipeline>,
+
     // Command pool and buffers
     /// The command pool used for our buffers
     cmd_pool: ManuallyDrop<CommandPool>,
@@ -80,6 +78,9 @@ pub struct RenderingContext<'a> {
 
     /// Buffers used for drawing
     draw_buffers: ManuallyDrop<DrawBuffers<'a>>,
+
+    /// Buffers used for drawing the UI
+    ui_draw_buffers: ManuallyDrop<DrawBuffers<'a>>,
 
     /// View projection matrix
     pub(crate) vp_matrix: Mat4,
@@ -143,6 +144,9 @@ impl<'a> RenderingContext<'a> {
         // Vertex and index buffers
         let draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
 
+        // UI Vertex and index buffers
+        let ui_draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
+
         // Texture store
         let texture_store = TextureStore::new(
             &mut device,
@@ -163,12 +167,21 @@ impl<'a> RenderingContext<'a> {
             descriptor_set_layouts,
         )?;
 
+        // UI pipeline
+        let ui_pipeline = UIPipeline::new(
+            &mut device,
+            swapchain_properties.extent,
+            &swapchain_properties,
+            &[],
+        )?;
+
         // Swapchain and associated resources
         let target_chain = TargetChain::new(
             &mut device,
             &adapter,
             &mut surface,
             &pipeline,
+            &ui_pipeline,
             &mut cmd_pool,
             swapchain_properties,
             None,
@@ -187,10 +200,12 @@ impl<'a> RenderingContext<'a> {
             cmd_pool: ManuallyDrop::new(cmd_pool),
 
             pipeline: ManuallyDrop::new(pipeline),
+            ui_pipeline: ManuallyDrop::new(ui_pipeline),
 
             texture_store: ManuallyDrop::new(texture_store),
 
             draw_buffers: ManuallyDrop::new(draw_buffers),
+            ui_draw_buffers: ManuallyDrop::new(ui_draw_buffers),
 
             vp_matrix: Mat4::identity(),
         })
@@ -222,6 +237,13 @@ impl<'a> RenderingContext<'a> {
             )?
         });
 
+        // 2D Graphics pipeline
+        // TODO: Recycle
+        ManuallyDrop::into_inner(read(&self.ui_pipeline)).deactivate(&mut self.device);
+        self.ui_pipeline = ManuallyDrop::new({
+            UIPipeline::new(&mut self.device, properties.extent, &properties, &[])?
+        });
+
         let old_swapchain = ManuallyDrop::into_inner(read(&self.target_chain))
             .deactivate_with_recyling(&mut self.device, &mut self.cmd_pool);
         self.target_chain = ManuallyDrop::new(
@@ -230,6 +252,7 @@ impl<'a> RenderingContext<'a> {
                 &self.adapter,
                 &mut self.surface,
                 &self.pipeline,
+                &self.ui_pipeline,
                 &mut self.cmd_pool,
                 properties,
                 Some(old_swapchain),
@@ -246,102 +269,27 @@ impl<'a> RenderingContext<'a> {
         file: &M,
         faces: &[u32],
     ) -> Result<(), &'static str> {
-        // Prepare command buffer
+        // 3D Pass
         let cmd_buffer = self.target_chain.prep_next_target(
             &mut self.device,
             &mut self.draw_buffers,
             &self.pipeline,
             &self.vp_matrix,
         )?;
+        do_render(
+            cmd_buffer,
+            &mut self.draw_buffers,
+            &self.texture_store,
+            &self.pipeline.pipeline_layout,
+            file,
+            faces,
+        );
 
-        // Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
-        let mut current_chunk = file.get_face(0).texture_idx as usize / 8;
-        let mut chunk_start = 0;
-
-        let mut curr_vert_idx: usize = 0;
-        let mut curr_idx_idx: usize = 0;
-
-        for face in faces.iter().map(|idx| file.get_face(*idx)) {
-            if current_chunk != face.texture_idx as usize / 8 {
-                // Last index was last of group, so draw it all.
-                let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-                descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
-                unsafe {
-                    cmd_buffer.bind_graphics_descriptor_sets(
-                        &self.pipeline.pipeline_layout,
-                        0,
-                        descriptor_sets,
-                        &[],
-                    );
-                    cmd_buffer.draw_indexed(
-                        chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1,
-                        0,
-                        0..1,
-                    );
-                }
-
-                // Next group of same-chunked faces starts here.
-                chunk_start = curr_idx_idx;
-                current_chunk = face.texture_idx as usize / 8;
-            }
-
-            if face.face_type == FaceType::Polygon || face.face_type == FaceType::Mesh {
-                // 2 layers of indirection
-                let base = face.vertices_idx.start;
-
-                for idx in face.meshverts_idx.clone().step_by(3) {
-                    let start_idx: u16 = curr_vert_idx.try_into().unwrap();
-
-                    for idx2 in idx..idx + 3 {
-                        let vert = &file.resolve_meshvert(idx2 as u32, base);
-                        let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
-
-                        let uvp = UVPoint(vert.position, face.texture_idx.try_into().unwrap(), uv);
-                        self.draw_buffers.vertex_buffer[curr_vert_idx] = uvp;
-
-                        curr_vert_idx += 1;
-                    }
-
-                    self.draw_buffers.index_buffer[curr_idx_idx] =
-                        (start_idx, start_idx + 1, start_idx + 2);
-
-                    curr_idx_idx += 1;
-
-                    if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap()
-                        || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap()
-                    {
-                        println!("out of vertex buffer space!");
-                        break;
-                    }
-                }
-            } else {
-                // TODO: Other types of faces
-            }
-
-            if curr_vert_idx >= INITIAL_VERT_SIZE.try_into().unwrap()
-                || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into().unwrap()
-            {
-                println!("out of vertex buffer space!");
-                break;
-            }
-        }
-
-        // Draw the final group of chunks
-        let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-        descriptor_sets.push(self.texture_store.get_chunk_descriptor_set(current_chunk));
-        unsafe {
-            cmd_buffer.bind_graphics_descriptor_sets(
-                &self.pipeline.pipeline_layout,
-                0,
-                descriptor_sets,
-                &[],
-            );
-            cmd_buffer.draw_indexed(
-                chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1,
-                0,
-                0..1,
-            );
-        }
+        // 2D Pass
+        let cmd_buffer = self
+            .target_chain
+            .target_2d_pass(&mut self.ui_draw_buffers, &self.ui_pipeline)?;
+        do_render_ui(cmd_buffer, &mut self.ui_draw_buffers);
 
         // Update our buffers before we actually start drawing
         self.draw_buffers.vertex_buffer.commit(
@@ -351,6 +299,18 @@ impl<'a> RenderingContext<'a> {
         );
 
         self.draw_buffers.index_buffer.commit(
+            &self.device,
+            &mut self.queue_group.queues[0],
+            &mut self.cmd_pool,
+        );
+
+        self.ui_draw_buffers.vertex_buffer.commit(
+            &self.device,
+            &mut self.queue_group.queues[0],
+            &mut self.cmd_pool,
+        );
+
+        self.ui_draw_buffers.index_buffer.commit(
             &self.device,
             &mut self.queue_group.queues[0],
             &mut self.cmd_pool,
@@ -372,6 +332,7 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
             use core::ptr::read;
 
             ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut self.device);
+            ManuallyDrop::into_inner(read(&self.ui_draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
 
             ManuallyDrop::into_inner(read(&self.target_chain))
@@ -381,6 +342,7 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
                 .destroy_command_pool(ManuallyDrop::into_inner(read(&self.cmd_pool)));
 
             ManuallyDrop::into_inner(read(&self.pipeline)).deactivate(&mut self.device);
+            ManuallyDrop::into_inner(read(&self.ui_pipeline)).deactivate(&mut self.device);
 
             self.instance
                 .destroy_surface(ManuallyDrop::into_inner(read(&self.surface)));

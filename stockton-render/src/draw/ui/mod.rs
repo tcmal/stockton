@@ -15,21 +15,8 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Given 3D points and some camera information, renders to the screen.
+pub mod pipeline;
+pub mod render;
 
-pub mod target;
-
-#[macro_use]
-mod macros;
-mod buffer;
-mod camera;
-mod context;
-mod draw_buffers;
-mod pipeline;
-mod render;
-mod texture;
-mod ui;
-
-pub use self::camera::calc_vp_matrix_system;
-pub use self::context::RenderingContext;
-pub use self::draw_buffers::UVPoint;
+pub use pipeline::UIPipeline;
+pub use render::do_render;
