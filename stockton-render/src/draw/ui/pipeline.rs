@@ -187,7 +187,7 @@ impl UIPipeline {
         let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
             size_of::<f32>() * 2; Rg32Sfloat,
             size_of::<f32>() * 2; Rg32Sfloat,
-            size_of::<u8>() * 4; Rgba8Uint
+            size_of::<u8>() * 4; R32Uint
         );
 
         // Rasterizer

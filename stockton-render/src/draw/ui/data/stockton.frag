@@ -6,7 +6,7 @@ layout(set = 0, binding = 0) uniform texture2D tex[8];
 layout(set = 0, binding = 1) uniform sampler samp[8];
 
 layout (location = 1) in vec2 frag_uv;
-layout (location = 2) in flat int frag_col;
+layout (location = 2) in flat uint frag_col;
 
 layout (location = 0) out vec4 color;
 
