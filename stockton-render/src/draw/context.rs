@@ -29,14 +29,14 @@ use winit::window::Window;
 
 use super::{
     buffer::ModifiableBuffer,
-    draw_buffers::DrawBuffers,
+    draw_buffers::{DrawBuffers, UVPoint},
     pipeline::CompletePipeline,
     render::do_render,
     target::{SwapchainProperties, TargetChain},
     texture::TextureStore,
-    ui::{do_render as do_render_ui, UIPipeline},
+    ui::{do_render as do_render_ui, ensure_textures as ensure_textures_ui, UIPipeline, UIPoint},
 };
-use crate::{error, types::*};
+use crate::{error, types::*, window::UIState};
 use stockton_levels::prelude::*;
 
 /// Contains all the hal related stuff.
@@ -76,14 +76,19 @@ pub struct RenderingContext<'a> {
     /// Texture store
     texture_store: ManuallyDrop<TextureStore>,
 
+    /// Texture store for UI
+    ui_texture_store: ManuallyDrop<TextureStore>,
+
     /// Buffers used for drawing
-    draw_buffers: ManuallyDrop<DrawBuffers<'a>>,
+    draw_buffers: ManuallyDrop<DrawBuffers<'a, UVPoint>>,
 
     /// Buffers used for drawing the UI
-    ui_draw_buffers: ManuallyDrop<DrawBuffers<'a>>,
+    ui_draw_buffers: ManuallyDrop<DrawBuffers<'a, UIPoint>>,
 
     /// View projection matrix
     pub(crate) vp_matrix: Mat4,
+
+    pub(crate) pixels_per_point: f32,
 }
 
 impl<'a> RenderingContext<'a> {
@@ -156,8 +161,20 @@ impl<'a> RenderingContext<'a> {
             file,
         )?;
 
+        // Texture store for UI elements
+        let ui_texture_store = TextureStore::new_empty(
+            &mut device,
+            &mut adapter,
+            &mut queue_group.queues[0],
+            &mut cmd_pool,
+            1, // TODO
+        )?;
+
         let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
         descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
+
+        let mut ui_descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
+        ui_descriptor_set_layouts.push(ui_texture_store.descriptor_set_layout.deref());
 
         // Graphics pipeline
         let pipeline = CompletePipeline::new(
@@ -172,7 +189,7 @@ impl<'a> RenderingContext<'a> {
             &mut device,
             swapchain_properties.extent,
             &swapchain_properties,
-            &[],
+            ui_descriptor_set_layouts,
         )?;
 
         // Swapchain and associated resources
@@ -207,7 +224,11 @@ impl<'a> RenderingContext<'a> {
             draw_buffers: ManuallyDrop::new(draw_buffers),
             ui_draw_buffers: ManuallyDrop::new(ui_draw_buffers),
 
+            ui_texture_store: ManuallyDrop::new(ui_texture_store),
+
             vp_matrix: Mat4::identity(),
+
+            pixels_per_point: window.scale_factor() as f32,
         })
     }
 
@@ -241,7 +262,15 @@ impl<'a> RenderingContext<'a> {
         // TODO: Recycle
         ManuallyDrop::into_inner(read(&self.ui_pipeline)).deactivate(&mut self.device);
         self.ui_pipeline = ManuallyDrop::new({
-            UIPipeline::new(&mut self.device, properties.extent, &properties, &[])?
+            let mut descriptor_set_layouts: ArrayVec<[_; 1]> = ArrayVec::new();
+            descriptor_set_layouts.push(self.ui_texture_store.descriptor_set_layout.deref());
+
+            UIPipeline::new(
+                &mut self.device,
+                properties.extent,
+                &properties,
+                descriptor_set_layouts,
+            )?
         });
 
         let old_swapchain = ManuallyDrop::into_inner(read(&self.target_chain))
@@ -267,8 +296,19 @@ impl<'a> RenderingContext<'a> {
     pub fn draw_vertices<M: MinBSPFeatures<VulkanSystem>>(
         &mut self,
         file: &M,
+        ui: &mut UIState,
         faces: &[u32],
     ) -> Result<(), &'static str> {
+        // Ensure UI texture(s) are loaded
+        ensure_textures_ui(
+            &mut self.ui_texture_store,
+            ui,
+            &mut self.device,
+            &mut self.adapter,
+            &mut self.queue_group.queues[0],
+            &mut self.cmd_pool,
+        );
+
         // 3D Pass
         let cmd_buffer = self.target_chain.prep_next_target(
             &mut self.device,
@@ -289,7 +329,13 @@ impl<'a> RenderingContext<'a> {
         let cmd_buffer = self
             .target_chain
             .target_2d_pass(&mut self.ui_draw_buffers, &self.ui_pipeline)?;
-        do_render_ui(cmd_buffer, &mut self.ui_draw_buffers);
+        do_render_ui(
+            cmd_buffer,
+            &self.ui_pipeline.pipeline_layout,
+            &mut self.ui_draw_buffers,
+            &mut self.ui_texture_store,
+            ui,
+        );
 
         // Update our buffers before we actually start drawing
         self.draw_buffers.vertex_buffer.commit(
@@ -334,6 +380,7 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
             ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.ui_draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
+            ManuallyDrop::into_inner(read(&self.ui_texture_store)).deactivate(&mut self.device);
 
             ManuallyDrop::into_inner(read(&self.target_chain))
                 .deactivate(&mut self.device, &mut self.cmd_pool);

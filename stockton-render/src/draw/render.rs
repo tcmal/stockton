@@ -31,7 +31,7 @@ use crate::types::*;
 
 pub fn do_render<M: MinBSPFeatures<VulkanSystem>>(
     cmd_buffer: &mut CommandBuffer,
-    draw_buffers: &mut DrawBuffers,
+    draw_buffers: &mut DrawBuffers<UVPoint>,
     texture_store: &TextureStore,
     pipeline_layout: &PipelineLayout,
     file: &M,

@@ -1,8 +1,15 @@
 #version 450
 #extension GL_ARB_separate_shader_objects : enable
 
-layout(location = 0) out vec4 outColor;
+// DescriptorSet 0 = Textures
+layout(set = 0, binding = 0) uniform texture2D tex[8];
+layout(set = 0, binding = 1) uniform sampler samp[8];
+
+layout (location = 1) in vec2 frag_uv;
+layout (location = 2) in flat int frag_col;
+
+layout (location = 0) out vec4 color;
 
 void main() {
-    outColor = vec4(1.0, 0.0, 0.0, 1.0);
+    color = texture(sampler2D(tex[0], samp[0]), frag_uv);
 }

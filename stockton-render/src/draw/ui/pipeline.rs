@@ -62,7 +62,7 @@ impl UIPipeline {
         set_layouts: T,
     ) -> Result<Self, error::CreationError>
     where
-        T: IntoIterator,
+        T: IntoIterator + std::fmt::Debug,
         T::Item: Borrow<DescriptorSetLayout>,
     {
         use hal::format::Format;
@@ -125,7 +125,7 @@ impl UIPipeline {
                 .compile_into_spirv(
                     VERTEX_SOURCE,
                     shaderc::ShaderKind::Vertex,
-                    "vertex.vert",
+                    "vertex_ui.vert",
                     ENTRY_NAME,
                     None,
                 )
@@ -135,7 +135,7 @@ impl UIPipeline {
                 .compile_into_spirv(
                     FRAGMENT_SOURCE,
                     shaderc::ShaderKind::Fragment,
-                    "fragment.frag",
+                    "fragment_ui.frag",
                     ENTRY_NAME,
                     None,
                 )
@@ -180,13 +180,14 @@ impl UIPipeline {
         // Vertex buffers
         let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
             binding: 0,
-            stride: (size_of::<f32>() * 5) as u32,
+            stride: ((size_of::<f32>() * 4) + (size_of::<u8>() * 4)) as u32,
             rate: VertexInputRate::Vertex,
         }];
 
         let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
             size_of::<f32>() * 2; Rg32Sfloat,
-            size_of::<f32>() * 3; Rgb32Sfloat
+            size_of::<f32>() * 2; Rg32Sfloat,
+            size_of::<u8>() * 4; Rgba8Uint
         );
 
         // Rasterizer
@@ -207,9 +208,12 @@ impl UIPipeline {
             stencil: None,
         };
 
+        log::debug!("ui set layouts: {:?}", set_layouts);
         // Pipeline layout
-        let layout = unsafe { device.create_pipeline_layout(set_layouts, &[]) }
-            .map_err(|_| error::CreationError::OutOfMemoryError)?;
+        let layout = unsafe {
+            device.create_pipeline_layout(set_layouts, &[(ShaderStageFlags::VERTEX, 0..8)])
+        }
+        .map_err(|_| error::CreationError::OutOfMemoryError)?;
 
         // Colour blending
         let blender = {

@@ -6,3 +6,4 @@ edition = "2018"
 
 [dependencies]
 stockton-types = { path = "../stockton-types" }
+egui = "^0.2"

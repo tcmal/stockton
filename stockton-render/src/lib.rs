@@ -28,6 +28,7 @@ pub mod draw;
 mod error;
 mod types;
 pub mod window;
+pub mod systems;
 
 use culling::get_visible_faces;
 use draw::RenderingContext;
@@ -36,7 +37,7 @@ use legion::IntoQuery;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::sync::RwLock;
-pub use window::WindowEvent;
+pub use window::{WindowEvent, UIState};
 
 use stockton_levels::prelude::*;
 use stockton_types::components::{CameraSettings, Transform};
@@ -50,7 +51,7 @@ use std::sync::mpsc::channel;
 /// Also takes ownership of the window and channels window events to be processed outside winit's event loop.
 pub struct Renderer<'a> {
     /// All the vulkan stuff
-    context: RenderingContext<'a>,
+    pub(crate) context: RenderingContext<'a>,
 
     /// For getting events from the winit event loop
     pub window_events: Receiver<WindowEvent>,
@@ -79,16 +80,16 @@ impl<'a> Renderer<'a> {
     }
 
     /// Render a single frame of the given map.
-    fn render<T: MinBSPFeatures<VulkanSystem>>(&mut self, map: &T, pos: Vector3) {
+    fn render<T: MinBSPFeatures<VulkanSystem>>(&mut self, map: &T, ui: &mut UIState, pos: Vector3) {
         // Get visible faces
         let faces = get_visible_faces(pos, map);
 
         // Then draw them
-        if self.context.draw_vertices(map, &faces).is_err() {
+        if self.context.draw_vertices(map, ui, &faces).is_err() {
             unsafe { self.context.handle_surface_change().unwrap() };
 
             // If it fails twice, then error
-            self.context.draw_vertices(map, &faces).unwrap();
+            self.context.draw_vertices(map, ui, &faces).unwrap();
         }
     }
 
@@ -103,11 +104,12 @@ impl<'a> Renderer<'a> {
 #[read_component(CameraSettings)]
 pub fn do_render<T: 'static + MinBSPFeatures<VulkanSystem>>(
     #[resource] renderer: &mut Renderer<'static>,
+    #[resource] ui: &mut UIState,
     #[resource] map: &T,
     world: &SubWorld,
 ) {
     let mut query = <(&Transform, &CameraSettings)>::query();
     for (transform, _) in query.iter(world) {
-        renderer.render(map, transform.position);
+        renderer.render(map, ui, transform.position);
     }
 }

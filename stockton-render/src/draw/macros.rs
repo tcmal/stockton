@@ -29,6 +29,20 @@
 /// ```
 /// See the hal::pso::Format enum for possible types
 macro_rules! pipeline_vb_attributes {
+	// Special case for single item
+	( $binding:expr, $firstSize:expr; $firstType:ident ) => ({
+		vec![
+			AttributeDesc {
+				location: 0,
+				binding: $binding,
+				element: Element {
+					format: Format::$firstType,
+					offset: $firstSize as u32
+				}
+			}
+		]
+	});
+
 	// Start of recursion
 	( $binding:expr,
 		$firstSize:expr; $firstType:ident,
@@ -53,20 +67,6 @@ macro_rules! pipeline_vb_attributes {
 		);
 
 		vec
-	});
-
-	// Special case for single item
-	( $binding:expr; $firstSize:expr; $firstType:ident ) => ({
-		vec![
-			AttributeDesc {
-				location: 0,
-				binding: $binding,
-				element: Element {
-					format: Format::$firstType,
-					offset: $firstSize as u32
-				}
-			}
-		]
 	});
 
 	// Middle of recursion

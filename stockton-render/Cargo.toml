@@ -12,10 +12,11 @@ winit = "^0.21"
 gfx-hal = "^0.5"
 arrayvec = "0.4.10"
 nalgebra-glm = "^0.6"
-shaderc = "0.6.1"
+shaderc = "^0.7"
 log = "0.4.0"
-image = "0.23.2"
+image = "0.23.11"
 legion = { version = "^0.3" }
+egui = "^0.2"
 
 [features]
 default = ["vulkan"]

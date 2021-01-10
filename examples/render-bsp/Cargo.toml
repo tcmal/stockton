@@ -15,3 +15,5 @@ winit = "^0.21"
 log = "0.4.0"
 simple_logger = "^1.11"
 image = "0.23.2"
+egui = "^0.2"
+legion = { version = "^0.3" }

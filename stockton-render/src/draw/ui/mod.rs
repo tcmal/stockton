@@ -15,8 +15,16 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use egui::paint::color::Srgba;
+
 pub mod pipeline;
 pub mod render;
+pub mod texture;
 
 pub use pipeline::UIPipeline;
 pub use render::do_render;
+use stockton_types::Vector2;
+pub use texture::ensure_textures;
+
+#[derive(Debug)]
+pub struct UIPoint(pub Vector2, pub Vector2, pub Srgba);

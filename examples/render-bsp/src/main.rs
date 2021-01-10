@@ -20,17 +20,21 @@
 #[macro_use]
 extern crate stockton_input_codegen;
 
+#[macro_use]
+extern crate legion;
+
 use std::collections::BTreeMap;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use stockton_contrib::delta_time::*;
 use stockton_contrib::flycam::*;
+
 use stockton_input::{Axis, InputManager, Mouse};
 use stockton_levels::{prelude::*, q3::Q3BSPFile};
-use stockton_render::{
-    do_render_system, draw::calc_vp_matrix_system, window::process_window_events_system, Renderer,
-    WindowEvent,
-};
+
+use stockton_render::systems::*;
+use stockton_render::{Renderer, UIState, WindowEvent};
+
 use stockton_types::components::{CameraSettings, Transform};
 use stockton_types::{Session, Vector3};
 
@@ -56,6 +60,21 @@ impl FlycamInput for MovementInputs {
     fn get_z_axis(&self) -> &Axis {
         &self.z
     }
+}
+
+#[system]
+fn hello_world(#[resource] ui: &mut UIState, #[state] name: &mut String, #[state] age: &mut f32) {
+    let ui = ui.ui();
+    ui.heading("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    // ui.horizontal(|ui| {
+    //     ui.label("Your name: ");
+    //     ui.text_edit(name);
+    // });
+    // ui.add(egui::Slider::f32(age, 0.0..=120.0).text("age"));
+    // if ui.button("Click each year").clicked {
+    //     *age += 1.0;
+    // }
+    // ui.label(format!("Hello '{}', age {}", name, age));
 }
 
 fn main() {
@@ -107,6 +126,7 @@ fn main() {
     // Load everything into the session
     let mut session = Session::new(
         move |resources| {
+            resources.insert(UIState::new(&renderer));
             resources.insert(renderer);
             resources.insert(bsp);
             resources.insert(manager);
@@ -117,6 +137,8 @@ fn main() {
             schedule
                 .add_system(update_deltatime_system())
                 .add_system(process_window_events_system::<MovementInputsManager>())
+                .flush()
+                .add_system(hello_world_system("".to_string(), 0.0))
                 .add_system(flycam_move_system::<MovementInputsManager>())
                 .flush()
                 .add_system(calc_vp_matrix_system())

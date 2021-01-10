@@ -31,8 +31,8 @@ use hal::{
 use na::Mat4;
 
 use super::{
-    buffer::ModifiableBuffer, draw_buffers::DrawBuffers, pipeline::CompletePipeline,
-    texture::image::LoadedImage, ui::UIPipeline,
+    buffer::ModifiableBuffer, draw_buffers::{DrawBuffers, UVPoint}, pipeline::CompletePipeline,
+    texture::image::LoadedImage, ui::{UIPipeline, UIPoint},
 };
 use crate::types::*;
 
@@ -275,7 +275,7 @@ impl TargetChain {
     pub fn prep_next_target<'a>(
         &'a mut self,
         device: &mut Device,
-        draw_buffers: &mut DrawBuffers,
+        draw_buffers: &mut DrawBuffers<UVPoint>,
         pipeline: &CompletePipeline,
         vp: &Mat4,
     ) -> Result<&'a mut crate::types::CommandBuffer, &'static str> {
@@ -373,7 +373,7 @@ impl TargetChain {
 
     pub fn target_2d_pass<'a>(
         &'a mut self,
-        draw_buffers: &mut DrawBuffers,
+        draw_buffers: &mut DrawBuffers<UIPoint>,
         pipeline: &UIPipeline,
     ) -> Result<&'a mut CommandBuffer, &'static str> {
         let target = &mut self.targets[self.last_image as usize];

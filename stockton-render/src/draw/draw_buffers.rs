@@ -31,13 +31,13 @@ pub const INITIAL_VERT_SIZE: u64 = 3 * 3000;
 pub const INITIAL_INDEX_SIZE: u64 = 3000;
 
 /// The buffers used for drawing, ie index and vertex buffer
-pub struct DrawBuffers<'a> {
-    pub vertex_buffer: ManuallyDrop<StagedBuffer<'a, UVPoint>>,
+pub struct DrawBuffers<'a, T: Sized> {
+    pub vertex_buffer: ManuallyDrop<StagedBuffer<'a, T>>,
     pub index_buffer: ManuallyDrop<StagedBuffer<'a, (u16, u16, u16)>>,
 }
 
-impl<'a> DrawBuffers<'a> {
-    pub fn new(device: &mut Device, adapter: &Adapter) -> Result<DrawBuffers<'a>, CreationError> {
+impl<'a, T> DrawBuffers<'a, T> {
+    pub fn new(device: &mut Device, adapter: &Adapter) -> Result<DrawBuffers<'a, T>, CreationError> {
         let vert = StagedBuffer::new(device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)?;
         let index = StagedBuffer::new(device, &adapter, Usage::INDEX, INITIAL_INDEX_SIZE)?;
 
