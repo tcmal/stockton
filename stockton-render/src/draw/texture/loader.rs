@@ -19,6 +19,7 @@
 
 use super::chunk::TextureChunk;
 use crate::draw::texture::chunk::CHUNK_SIZE;
+use crate::draw::texture::image::LoadableImage;
 use crate::draw::texture::resolver::BasicFSResolver;
 use core::mem::ManuallyDrop;
 use std::path::Path;
@@ -43,6 +44,117 @@ pub struct TextureStore {
 }
 
 impl TextureStore {
+    pub fn new_empty(
+        device: &mut Device,
+        adapter: &mut Adapter,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+        size: usize,
+    ) -> Result<TextureStore, error::CreationError> {
+        // Figure out how many textures in this file / how many chunks needed
+        let num_chunks = {
+            let mut x = size / CHUNK_SIZE;
+            if size % CHUNK_SIZE != 0 {
+                x += 1;
+            }
+            x
+        };
+        let rounded_size = num_chunks * CHUNK_SIZE;
+
+        // Descriptor pool, where we get our sets from
+        let mut descriptor_pool = unsafe {
+            use hal::pso::{
+                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType, ImageDescriptorType,
+            };
+
+            device
+                .create_descriptor_pool(
+                    num_chunks,
+                    &[
+                        DescriptorRangeDesc {
+                            ty: DescriptorType::Image {
+                                ty: ImageDescriptorType::Sampled {
+                                    with_sampler: false,
+                                },
+                            },
+                            count: rounded_size,
+                        },
+                        DescriptorRangeDesc {
+                            ty: DescriptorType::Sampler,
+                            count: rounded_size,
+                        },
+                    ],
+                    DescriptorPoolCreateFlags::empty(),
+                )
+                .map_err(|e| {
+                    println!("{:?}", e);
+                    error::CreationError::OutOfMemoryError
+                })?
+        };
+
+        // Layout of our descriptor sets
+        let descriptor_set_layout = unsafe {
+            use hal::pso::{
+                DescriptorSetLayoutBinding, DescriptorType, ImageDescriptorType, ShaderStageFlags,
+            };
+
+            device.create_descriptor_set_layout(
+                &[
+                    DescriptorSetLayoutBinding {
+                        binding: 0,
+                        ty: DescriptorType::Image {
+                            ty: ImageDescriptorType::Sampled {
+                                with_sampler: false,
+                            },
+                        },
+                        count: CHUNK_SIZE,
+                        stage_flags: ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                    DescriptorSetLayoutBinding {
+                        binding: 1,
+                        ty: DescriptorType::Sampler,
+                        count: CHUNK_SIZE,
+                        stage_flags: ShaderStageFlags::FRAGMENT,
+                        immutable_samplers: false,
+                    },
+                ],
+                &[],
+            )
+        }
+        .map_err(|_| error::CreationError::OutOfMemoryError)?;
+
+        log::debug!("texture ds layout: {:?}", descriptor_set_layout);
+
+        // Create texture chunks
+        debug!("Starting to load textures...");
+        let mut chunks = Vec::with_capacity(num_chunks);
+        for i in 0..num_chunks {
+            debug!("Chunk {} / {}", i + 1, num_chunks);
+
+            let descriptor_set = unsafe {
+                descriptor_pool
+                    .allocate_set(&descriptor_set_layout)
+                    .map_err(|_| error::CreationError::OutOfMemoryError)?
+            };
+            chunks.push(TextureChunk::new_empty(
+                device,
+                adapter,
+                command_queue,
+                command_pool,
+                descriptor_set,
+            )?);
+        }
+
+        debug!("All textures loaded.");
+
+        Ok(TextureStore {
+            descriptor_pool: ManuallyDrop::new(descriptor_pool),
+            descriptor_set_layout: ManuallyDrop::new(descriptor_set_layout),
+            chunks: chunks.into_boxed_slice(),
+        })
+    }
+
     /// Create a new texture store for the given file, loading all textures from it.
     pub fn new<T: HasTextures>(
         device: &mut Device,
@@ -179,5 +291,26 @@ impl TextureStore {
     /// Get the descriptor set for a given chunk
     pub fn get_chunk_descriptor_set(&self, idx: usize) -> &DescriptorSet {
         &self.chunks[idx].descriptor_set
+    }
+
+    pub fn put_texture<T: LoadableImage>(
+        &mut self,
+        idx: usize,
+        img: T,
+        device: &mut Device,
+        adapter: &mut Adapter,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+    ) -> Result<(), &'static str> {
+        // TODO: Resizing, etc?
+        let chunk = &mut self.chunks[idx / CHUNK_SIZE];
+        chunk.put_texture(
+            img,
+            idx % CHUNK_SIZE,
+            device,
+            adapter,
+            command_queue,
+            command_pool,
+        )
     }
 }

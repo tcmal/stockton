@@ -35,7 +35,34 @@ use crate::draw::buffer::create_buffer;
 use crate::types::*;
 
 /// The size of each pixel in an image
-const PIXEL_SIZE: usize = size_of::<image::Rgba<u8>>();
+const PIXEL_SIZE: usize = size_of::<u8>() * 4;
+
+/// An object that can be loaded as an image into GPU memory
+pub trait LoadableImage {
+    fn width(&self) -> u32;
+    fn height(&self) -> u32;
+    fn copy_row(&self, y: u32, ptr: *mut u8) -> ();
+}
+
+impl LoadableImage for RgbaImage {
+    fn width(&self) -> u32 {
+        self.width()
+    }
+
+    fn height(&self) -> u32 {
+        self.height()
+    }
+
+    fn copy_row(&self, y: u32, ptr: *mut u8) -> () {
+        let row_size_bytes = self.width() as usize * PIXEL_SIZE;
+        let raw: &Vec<u8> = self.as_raw();
+        let row = &raw[y as usize * row_size_bytes..(y as usize + 1) * row_size_bytes];
+
+        unsafe {
+            copy_nonoverlapping(row.as_ptr(), ptr, row.len());
+        }
+    }
+}
 
 /// Holds an image that's loaded into GPU memory and can be sampled from
 pub struct LoadedImage {
@@ -137,9 +164,9 @@ impl LoadedImage {
     }
 
     /// Load the given image
-    pub fn load(
+    pub fn load<T: LoadableImage>(
         &mut self,
-        img: RgbaImage,
+        img: T,
         device: &mut Device,
         adapter: &Adapter,
         command_queue: &mut CommandQueue,
@@ -166,15 +193,13 @@ impl LoadedImage {
 
         // Copy everything into it
         unsafe {
-            let mapped_memory: *mut u8 = device
+            let mapped_memory: *mut u8 = std::mem::transmute(device
                 .map_memory(&staging_memory, Segment::ALL)
-                .map_err(|_| "Couldn't map buffer memory")?;
+                .map_err(|_| "Couldn't map buffer memory")?);
 
             for y in 0..img.height() as usize {
-                let row = &(*img)[y * initial_row_size..(y + 1) * initial_row_size];
                 let dest_base: isize = (y * row_size).try_into().unwrap();
-
-                copy_nonoverlapping(row.as_ptr(), mapped_memory.offset(dest_base), row.len());
+                img.copy_row(y as u32, mapped_memory.offset(dest_base));
             }
             device
                 .flush_mapped_memory_ranges(once((&staging_memory, Segment::ALL)))
@@ -288,8 +313,8 @@ impl LoadedImage {
     }
 
     /// Load the given image into a new buffer
-    pub fn load_into_new(
-        img: RgbaImage,
+    pub fn load_into_new<T: LoadableImage>(
+        img: T,
         device: &mut Device,
         adapter: &Adapter,
         command_queue: &mut CommandQueue,
@@ -369,8 +394,8 @@ impl SampledImage {
         })
     }
 
-    pub fn load_into_new(
-        img: RgbaImage,
+    pub fn load_into_new<T: LoadableImage>(
+        img: T,
         device: &mut Device,
         adapter: &Adapter,
         command_queue: &mut CommandQueue,

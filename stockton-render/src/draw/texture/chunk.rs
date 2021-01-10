@@ -18,6 +18,7 @@
 //! A chunk of textures is an array of textures, the size of which is known at compile time.
 //! This reduces the number of times we need to re-bind our descriptor sets
 
+use crate::draw::texture::image::LoadableImage;
 use hal::prelude::*;
 use image::{Rgba, RgbaImage};
 
@@ -42,9 +43,39 @@ pub struct TextureChunk {
 }
 
 impl TextureChunk {
+    /// Create a new empty texture chunk
+    pub fn new_empty(
+        device: &mut Device,
+        adapter: &mut Adapter,
+        command_queue: &mut CommandQueue,
+        command_pool: &mut CommandPool,
+        descriptor_set: DescriptorSet,
+    ) -> Result<TextureChunk, error::CreationError> {
+        let mut store = TextureChunk {
+            descriptor_set,
+            sampled_images: Vec::with_capacity(CHUNK_SIZE),
+        };
+
+        for i in 0..CHUNK_SIZE {
+            debug!("Putting a placeholder in slot {}", i);
+            store
+                .put_texture(
+                    RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 1])),
+                    i,
+                    device,
+                    adapter,
+                    command_queue,
+                    command_pool,
+                )
+                .unwrap();
+        }
+
+        Ok(store)
+    }
+
     /// Create a new texture chunk and load in the textures specified by `range` from `file` using `resolver`
     /// Can error if the descriptor pool is too small or if a texture isn't found
-    pub fn new<'a, I, R: TextureResolver>(
+    pub fn new<'a, I, R: TextureResolver<T>, T: LoadableImage>(
         device: &mut Device,
         adapter: &mut Adapter,
         command_queue: &mut CommandQueue,
@@ -99,9 +130,9 @@ impl TextureChunk {
         Ok(store)
     }
 
-    pub fn put_texture(
+    pub fn put_texture<T: LoadableImage>(
         &mut self,
-        image: RgbaImage,
+        image: T,
         idx: usize,
         device: &mut Device,
         adapter: &mut Adapter,
