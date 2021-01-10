@@ -128,7 +128,7 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
             device,
             adapter,
             Usage::TRANSFER_DST | usage,
-            Properties::DEVICE_LOCAL,
+            Properties::DEVICE_LOCAL | Properties::COHERENT,
             size_bytes,
         )?;
 
@@ -177,14 +177,6 @@ impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
     ) -> &'b Buffer {
         // Only commit if there's changes to commit.
         if self.staged_is_dirty {
-            // Flush mapped memory to ensure the staged buffer is filled
-            unsafe {
-                use std::ops::Deref;
-                device
-                    .flush_mapped_memory_ranges(once((self.staged_memory.deref(), Segment::ALL)))
-                    .unwrap();
-            }
-
             // Copy from staged to buffer
             let buf = unsafe {
                 use hal::command::{BufferCopy, CommandBufferFlags};

@@ -186,7 +186,7 @@ impl LoadedImage {
             device,
             adapter,
             BufUsage::TRANSFER_SRC,
-            MemProperties::CPU_VISIBLE,
+            MemProperties::CPU_VISIBLE | MemProperties::COHERENT,
             total_size,
         )
         .map_err(|_| "Couldn't create staging buffer")?;
@@ -201,9 +201,7 @@ impl LoadedImage {
                 let dest_base: isize = (y * row_size).try_into().unwrap();
                 img.copy_row(y as u32, mapped_memory.offset(dest_base));
             }
-            device
-                .flush_mapped_memory_ranges(once((&staging_memory, Segment::ALL)))
-                .map_err(|_| "Couldn't write buffer memory")?;
+
             device.unmap_memory(&staging_memory);
         }
 
