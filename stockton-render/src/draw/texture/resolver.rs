@@ -48,7 +48,7 @@ impl<'a> TextureResolver<RgbaImage> for BasicFSResolver<'a> {
         if let Ok(file) = Reader::open(path) {
             if let Ok(guessed) = file.with_guessed_format() {
                 if let Ok(decoded) = guessed.decode() {
-                    return Some(decoded.into_rgba());
+                    return Some(decoded.into_rgba8());
                 }
             }
         }
