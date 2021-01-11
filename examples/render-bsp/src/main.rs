@@ -63,18 +63,9 @@ impl FlycamInput for MovementInputs {
 }
 
 #[system]
-fn hello_world(#[resource] ui: &mut UIState, #[state] name: &mut String, #[state] age: &mut f32) {
+fn hello_world(#[resource] ui: &mut UIState) {
     let ui = ui.ui();
     ui.heading("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
-    // ui.horizontal(|ui| {
-    //     ui.label("Your name: ");
-    //     ui.text_edit(name);
-    // });
-    // ui.add(egui::Slider::f32(age, 0.0..=120.0).text("age"));
-    // if ui.button("Click each year").clicked {
-    //     *age += 1.0;
-    // }
-    // ui.label(format!("Hello '{}', age {}", name, age));
 }
 
 fn main() {
@@ -138,7 +129,7 @@ fn main() {
                 .add_system(update_deltatime_system())
                 .add_system(process_window_events_system::<MovementInputsManager>())
                 .flush()
-                .add_system(hello_world_system("".to_string(), 0.0))
+                .add_system(hello_world_system())
                 .add_system(flycam_move_system::<MovementInputsManager>())
                 .flush()
                 .add_system(calc_vp_matrix_system())
