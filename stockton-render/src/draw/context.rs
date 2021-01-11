@@ -25,8 +25,8 @@ use arrayvec::ArrayVec;
 use hal::{pool::CommandPoolCreateFlags, prelude::*};
 use log::debug;
 use na::Mat4;
-use winit::window::Window;
 use rendy_memory::DynamicConfig;
+use winit::window::Window;
 
 use super::{
     buffer::ModifiableBuffer,
@@ -161,9 +161,9 @@ impl<'a> RenderingContext<'a> {
         // Memory allocators
         let mut texture_allocator = unsafe {
             use hal::{
-                memory::Properties,
-                image::{Kind, Tiling, Usage, ViewCapabilities},
                 format::Format,
+                image::{Kind, Tiling, Usage, ViewCapabilities},
+                memory::Properties,
             };
 
             // We create an empty image with the same format as used for textures
@@ -175,29 +175,32 @@ impl<'a> RenderingContext<'a> {
 
             // TODO: Way to tune these options
 
-            let img = device.create_image(
-                Kind::D2(16 as u32, 16 as u32, 1, 1),
-                1,
-                Format::Rgba8Srgb,
-                Tiling::Optimal,
-                Usage::SAMPLED,
-                ViewCapabilities::empty()
-            ).map_err(|_| error::CreationError::OutOfMemoryError)?;
+            let img = device
+                .create_image(
+                    Kind::D2(16, 16, 1, 1),
+                    1,
+                    Format::Rgba8Srgb,
+                    Tiling::Optimal,
+                    Usage::SAMPLED,
+                    ViewCapabilities::empty(),
+                )
+                .map_err(|_| error::CreationError::OutOfMemoryError)?;
 
             let type_mask = device.get_image_requirements(&img).type_mask;
 
             device.destroy_image(img);
 
             let props = Properties::DEVICE_LOCAL;
-            
+
             DynamicAllocator::new(
-                find_memory_type_id(&adapter, type_mask, props).ok_or(error::CreationError::OutOfMemoryError)?,
+                find_memory_type_id(&adapter, type_mask, props)
+                    .ok_or(error::CreationError::OutOfMemoryError)?,
                 props,
                 DynamicConfig {
                     block_size_granularity: 4 * 32 * 32, // 32x32 image
                     max_chunk_size: u64::pow(2, 63),
                     min_device_allocation: 4 * 32 * 32,
-                }
+                },
             )
         };
 
@@ -276,7 +279,7 @@ impl<'a> RenderingContext<'a> {
             ui_draw_buffers: ManuallyDrop::new(ui_draw_buffers),
 
             ui_texture_store: ManuallyDrop::new(ui_texture_store),
-            
+
             texture_allocator: ManuallyDrop::new(texture_allocator),
 
             vp_matrix: Mat4::identity(),
@@ -433,8 +436,10 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 
             ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.ui_draw_buffers)).deactivate(&mut self.device);
-            ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device, &mut self.texture_allocator);
-            ManuallyDrop::into_inner(read(&self.ui_texture_store)).deactivate(&mut self.device, &mut self.texture_allocator);
+            ManuallyDrop::into_inner(read(&self.texture_store))
+                .deactivate(&mut self.device, &mut self.texture_allocator);
+            ManuallyDrop::into_inner(read(&self.ui_texture_store))
+                .deactivate(&mut self.device, &mut self.texture_allocator);
 
             ManuallyDrop::into_inner(read(&self.texture_allocator)).dispose();
 

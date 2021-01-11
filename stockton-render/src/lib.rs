@@ -26,9 +26,9 @@ extern crate legion;
 mod culling;
 pub mod draw;
 mod error;
+pub mod systems;
 mod types;
 pub mod window;
-pub mod systems;
 
 use culling::get_visible_faces;
 use draw::RenderingContext;
@@ -37,7 +37,7 @@ use legion::IntoQuery;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::sync::RwLock;
-pub use window::{WindowEvent, UIState};
+pub use window::{UIState, WindowEvent};
 
 use stockton_levels::prelude::*;
 use stockton_types::components::{CameraSettings, Transform};

@@ -29,8 +29,8 @@ use hal::{
     MemoryTypeId,
 };
 use image::RgbaImage;
-use std::{convert::TryInto, iter::once};
 use rendy_memory::{Allocator, Block};
+use std::{convert::TryInto, iter::once};
 
 use crate::draw::buffer::create_buffer;
 use crate::types::*;
@@ -42,7 +42,7 @@ const PIXEL_SIZE: usize = size_of::<u8>() * 4;
 pub trait LoadableImage {
     fn width(&self) -> u32;
     fn height(&self) -> u32;
-    fn copy_row(&self, y: u32, ptr: *mut u8) -> ();
+    fn copy_row(&self, y: u32, ptr: *mut u8);
 }
 
 impl LoadableImage for RgbaImage {
@@ -54,7 +54,7 @@ impl LoadableImage for RgbaImage {
         self.height()
     }
 
-    fn copy_row(&self, y: u32, ptr: *mut u8) -> () {
+    fn copy_row(&self, y: u32, ptr: *mut u8) {
         let row_size_bytes = self.width() as usize * PIXEL_SIZE;
         let raw: &Vec<u8> = self.as_raw();
         let row = &raw[y as usize * row_size_bytes..(y as usize + 1) * row_size_bytes];
@@ -113,12 +113,9 @@ pub fn create_image_view(
     let (block, _) = unsafe {
         let requirements = device.get_image_requirements(&image_ref);
 
-        allocator.alloc(
-            device,
-            requirements.size,
-            requirements.alignment
-        )
-    }.map_err(|_| "Out of memory")?;
+        allocator.alloc(device, requirements.size, requirements.alignment)
+    }
+    .map_err(|_| "Out of memory")?;
 
     unsafe {
         device
@@ -140,7 +137,8 @@ impl LoadedImage {
         width: usize,
         height: usize,
     ) -> Result<LoadedImage, &'static str> {
-        let (memory, image_ref) = create_image_view(device, adapter, allocator, format, usage, width, height)?;
+        let (memory, image_ref) =
+            create_image_view(device, adapter, allocator, format, usage, width, height)?;
 
         // Create ImageView and sampler
         let image_view = unsafe {
@@ -161,7 +159,6 @@ impl LoadedImage {
         img: T,
         device: &mut Device,
         adapter: &Adapter,
-        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
     ) -> Result<(), &'static str> {
@@ -186,9 +183,11 @@ impl LoadedImage {
 
         // Copy everything into it
         unsafe {
-            let mapped_memory: *mut u8 = std::mem::transmute(device
-                .map_memory(&staging_memory, 0..total_size)
-                .map_err(|_| "Couldn't map buffer memory")?);
+            let mapped_memory: *mut u8 = std::mem::transmute(
+                device
+                    .map_memory(&staging_memory, 0..total_size)
+                    .map_err(|_| "Couldn't map buffer memory")?,
+            );
 
             for y in 0..img.height() as usize {
                 let dest_base: isize = (y * row_size).try_into().unwrap();
@@ -303,36 +302,6 @@ impl LoadedImage {
         Ok(())
     }
 
-    /// Load the given image into a new buffer
-    pub fn load_into_new<T: LoadableImage>(
-        img: T,
-        device: &mut Device,
-        adapter: &Adapter,
-        allocator: &mut DynamicAllocator,
-        command_queue: &mut CommandQueue,
-        command_pool: &mut CommandPool,
-        format: Format,
-        usage: ImgUsage,
-    ) -> Result<LoadedImage, &'static str> {
-        let mut loaded_image = Self::new(
-            device,
-            adapter,
-            allocator,
-            format,
-            usage | ImgUsage::TRANSFER_DST,
-            SubresourceRange {
-                aspects: Aspects::COLOR,
-                levels: 0..1,
-                layers: 0..1,
-            },
-            img.width() as usize,
-            img.height() as usize,
-        )?;
-        loaded_image.load(img, device, adapter, allocator, command_queue, command_pool)?;
-
-        Ok(loaded_image)
-    }
-
     /// Properly frees/destroys all the objects in this struct
     /// Dropping without doing this is a bad idea
     pub fn deactivate(self, device: &mut Device, allocator: &mut DynamicAllocator) {
@@ -410,7 +379,7 @@ impl SampledImage {
         )?;
         sampled_image
             .image
-            .load(img, device, adapter, allocator, command_queue, command_pool)?;
+            .load(img, device, adapter, command_queue, command_pool)?;
 
         Ok(sampled_image)
     }
@@ -438,7 +407,6 @@ pub struct DedicatedLoadedImage {
     memory: ManuallyDrop<Memory>,
 }
 
-
 impl DedicatedLoadedImage {
     pub fn new(
         device: &mut Device,
@@ -455,7 +423,8 @@ impl DedicatedLoadedImage {
             let limits = adapter.physical_device.limits();
             let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
 
-            let row_size = ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
+            let row_size =
+                ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
             debug_assert!(row_size as usize >= initial_row_size);
 
             // Make the image
@@ -474,7 +443,7 @@ impl DedicatedLoadedImage {
             .map_err(|_| "Couldn't create image")?;
 
             // Allocate memory
-            
+
             // Allocate memory
             let memory = unsafe {
                 let requirements = device.get_image_requirements(&image_ref);
@@ -549,9 +518,11 @@ impl DedicatedLoadedImage {
 
         // Copy everything into it
         unsafe {
-            let mapped_memory: *mut u8 = std::mem::transmute(device
-                .map_memory(&staging_memory, 0..total_size)
-                .map_err(|_| "Couldn't map buffer memory")?);
+            let mapped_memory: *mut u8 = std::mem::transmute(
+                device
+                    .map_memory(&staging_memory, 0..total_size)
+                    .map_err(|_| "Couldn't map buffer memory")?,
+            );
 
             for y in 0..img.height() as usize {
                 let dest_base: isize = (y * row_size).try_into().unwrap();

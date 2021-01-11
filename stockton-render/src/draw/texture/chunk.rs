@@ -101,7 +101,15 @@ impl TextureChunk {
         for tex in textures {
             if let Some(img) = resolver.resolve(tex) {
                 store
-                    .put_texture(img, local_idx, device, adapter, allocator, command_queue, command_pool)
+                    .put_texture(
+                        img,
+                        local_idx,
+                        device,
+                        adapter,
+                        allocator,
+                        command_queue,
+                        command_pool,
+                    )
                     .unwrap();
             } else {
                 // Texture not found. For now, tear everything down.

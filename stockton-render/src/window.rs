@@ -15,27 +15,29 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+use crate::Renderer;
+use egui::Context;
+use legion::systems::Runnable;
 use log::debug;
 use std::sync::Arc;
-use egui::Context;
-use crate::Renderer;
-use legion::systems::Runnable;
 
-use egui::{RawInput, Ui, Pos2, Output, PaintJobs};
+use egui::{Output, PaintJobs, Pos2, RawInput, Ui};
 
 use stockton_input::{Action as KBAction, InputManager, Mouse};
 
-use winit::event::{ElementState, Event as WinitEvent, WindowEvent as WinitWindowEvent, MouseButton};
+use winit::event::{
+    ElementState, Event as WinitEvent, MouseButton, WindowEvent as WinitWindowEvent,
+};
 use winit::event_loop::ControlFlow;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WindowEvent {
-    SizeChanged (u32, u32),
+    SizeChanged(u32, u32),
     CloseRequested,
     KeyboardAction(KBAction),
     MouseAction(KBAction),
     MouseMoved(f32, f32),
-    MouseLeft
+    MouseLeft,
 }
 
 impl WindowEvent {
@@ -44,7 +46,9 @@ impl WindowEvent {
         match winit_event {
             WinitEvent::WindowEvent { event, .. } => match event {
                 WinitWindowEvent::CloseRequested => Some(WindowEvent::CloseRequested),
-                WinitWindowEvent::Resized(size) => Some(WindowEvent::SizeChanged (size.width, size.height)),
+                WinitWindowEvent::Resized(size) => {
+                    Some(WindowEvent::SizeChanged(size.width, size.height))
+                }
                 WinitWindowEvent::KeyboardInput { input, .. } => match input.state {
                     ElementState::Pressed => Some(WindowEvent::KeyboardAction(KBAction::KeyPress(
                         input.scancode,
@@ -63,14 +67,18 @@ impl WindowEvent {
                         MouseButton::Left => stockton_input::MouseButton::Left,
                         MouseButton::Right => stockton_input::MouseButton::Right,
                         MouseButton::Middle => stockton_input::MouseButton::Middle,
-                        MouseButton::Other(x) => stockton_input::MouseButton::Other(*x)
+                        MouseButton::Other(x) => stockton_input::MouseButton::Other(*x),
                     };
 
                     match state {
-                        ElementState::Pressed => Some(WindowEvent::MouseAction(KBAction::MousePress(mb))),
-                        ElementState::Released => Some(WindowEvent::MouseAction(KBAction::MouseRelease(mb)))
+                        ElementState::Pressed => {
+                            Some(WindowEvent::MouseAction(KBAction::MousePress(mb)))
+                        }
+                        ElementState::Released => {
+                            Some(WindowEvent::MouseAction(KBAction::MouseRelease(mb)))
+                        }
                     }
-                },
+                }
                 _ => None,
             },
             _ => None,
@@ -87,7 +95,7 @@ pub struct UIState {
 }
 
 impl UIState {
-    pub fn ui<'a>(&'a mut self) -> &'a mut Ui {
+    pub fn ui(&mut self) -> &mut Ui {
         if self.ui.is_none() {
             self.ui = Some(self.begin_frame());
         }
@@ -103,7 +111,7 @@ impl UIState {
     }
 
     fn set_mouse_pos(&mut self, x: f32, y: f32) {
-        self.raw_input.mouse_pos = Some(Pos2 {x, y})
+        self.raw_input.mouse_pos = Some(Pos2 { x, y })
     }
 
     fn set_mouse_left(&mut self) {
@@ -112,7 +120,7 @@ impl UIState {
     fn set_dimensions(&mut self, w: u32, h: u32) {
         self.raw_input.screen_size = egui::math::Vec2 {
             x: w as f32,
-            y: h as f32
+            y: h as f32,
         }
     }
     fn set_pixels_per_point(&mut self, ppp: Option<f32>) {
@@ -132,7 +140,7 @@ impl UIState {
             KBAction::MouseRelease(stockton_input::MouseButton::Right) => {
                 self.raw_input.mouse_down = false;
             }
-            _ => ()
+            _ => (),
         }
     }
 
@@ -141,7 +149,7 @@ impl UIState {
             ctx: Context::new(),
             raw_input: RawInput::default(),
             ui: None,
-            last_tex_ver: 0
+            last_tex_ver: 0,
         };
 
         let props = &renderer.context.target_chain.properties;
@@ -169,7 +177,7 @@ pub fn _process_window_events<T: 'static + InputManager>(
             WindowEvent::SizeChanged(w, h) => {
                 renderer.resize();
                 ui_state.set_dimensions(w, h);
-            },
+            }
             WindowEvent::CloseRequested => {
                 let mut flow = renderer.update_control_flow.write().unwrap();
                 // TODO: Let everything know this is our last frame
@@ -190,10 +198,10 @@ pub fn _process_window_events<T: 'static + InputManager>(
                 mouse_delta.y = y;
 
                 ui_state.set_mouse_pos(x, y);
-            },
+            }
             WindowEvent::MouseLeft => {
                 ui_state.set_mouse_left();
-            },
+            }
             WindowEvent::MouseAction(action) => {
                 if actions_buf_cursor >= actions_buf.len() {
                     actions_buf.push(action);

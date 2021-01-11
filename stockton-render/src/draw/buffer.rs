@@ -21,12 +21,7 @@ use std::iter::once;
 use std::ops::{Index, IndexMut};
 
 use hal::prelude::*;
-use hal::{
-    buffer::Usage,
-    memory::Properties,
-    queue::Submission,
-    MemoryTypeId,
-};
+use hal::{buffer::Usage, memory::Properties, queue::Submission, MemoryTypeId};
 
 use crate::error::CreationError;
 use crate::types::*;

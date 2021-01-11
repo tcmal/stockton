@@ -14,10 +14,10 @@
  * You should have received a copy of the GNU General Public License along
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-use egui::Texture;
+use crate::draw::texture::{LoadableImage, TextureStore};
 use crate::types::*;
-use crate::draw::texture::{TextureStore, LoadableImage};
 use crate::UIState;
+use egui::Texture;
 
 impl LoadableImage for &Texture {
     fn width(&self) -> u32 {
@@ -26,30 +26,43 @@ impl LoadableImage for &Texture {
     fn height(&self) -> u32 {
         self.height as u32
     }
-    fn copy_row(&self, y: u32, ptr: *mut u8) -> () {
+    fn copy_row(&self, y: u32, ptr: *mut u8) {
         let row_size = self.width();
         let pixels = &self.pixels[(y * row_size) as usize..((y + 1) * row_size) as usize];
 
-        for (i,x) in pixels.iter().enumerate() {
+        for (i, x) in pixels.iter().enumerate() {
             unsafe {
                 *ptr.offset(i as isize * 3) = *x;
                 *ptr.offset((i as isize * 3) + 1) = *x;
                 *ptr.offset((i as isize * 3) + 2) = *x;
             }
-        }     
+        }
     }
 }
 
-pub fn ensure_textures(texture_store: &mut TextureStore, ui: &mut UIState, 
-        device: &mut Device,
-        adapter: &mut Adapter,
-        allocator: &mut DynamicAllocator,
-        command_queue: &mut CommandQueue,
-        command_pool: &mut CommandPool) {
+pub fn ensure_textures(
+    texture_store: &mut TextureStore,
+    ui: &mut UIState,
+    device: &mut Device,
+    adapter: &mut Adapter,
+    allocator: &mut DynamicAllocator,
+    command_queue: &mut CommandQueue,
+    command_pool: &mut CommandPool,
+) {
     let tex = ui.ctx.texture();
 
     if tex.version != ui.last_tex_ver {
-        texture_store.put_texture(0, &*tex, device, adapter, allocator, command_queue, command_pool).unwrap(); // TODO
+        texture_store
+            .put_texture(
+                0,
+                &*tex,
+                device,
+                adapter,
+                allocator,
+                command_queue,
+                command_pool,
+            )
+            .unwrap(); // TODO
         ui.last_tex_ver = tex.version;
-    } 
+    }
 }

@@ -37,7 +37,10 @@ pub struct DrawBuffers<'a, T: Sized> {
 }
 
 impl<'a, T> DrawBuffers<'a, T> {
-    pub fn new(device: &mut Device, adapter: &Adapter) -> Result<DrawBuffers<'a, T>, CreationError> {
+    pub fn new(
+        device: &mut Device,
+        adapter: &Adapter,
+    ) -> Result<DrawBuffers<'a, T>, CreationError> {
         let vert = StagedBuffer::new(device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)?;
         let index = StagedBuffer::new(device, &adapter, Usage::INDEX, INITIAL_INDEX_SIZE)?;
 

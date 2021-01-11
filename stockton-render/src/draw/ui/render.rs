@@ -17,7 +17,6 @@
 
 use crate::draw::texture::TextureStore;
 use arrayvec::ArrayVec;
-use egui::Pos2;
 use hal::prelude::*;
 use hal::pso::ShaderStageFlags;
 
@@ -26,7 +25,6 @@ use crate::draw::draw_buffers::DrawBuffers;
 use crate::types::*;
 use crate::UIState;
 use std::convert::TryInto;
-use std::mem::transmute;
 use stockton_types::Vector2;
 
 pub fn do_render(
@@ -45,7 +43,7 @@ pub fn do_render(
             &pipeline_layout,
             ShaderStageFlags::VERTEX,
             0,
-            &[transmute(screen.x), transmute(screen.y)],
+            &[screen.x.to_bits(), screen.y.to_bits()],
         );
     }
 

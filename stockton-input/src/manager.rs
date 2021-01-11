@@ -28,17 +28,18 @@ pub enum MouseButton {
     Left,
     Right,
     Middle,
-    Other(u8)
+    Other(u8),
 }
 
 impl MouseButton {
     fn keycode(&self) -> u32 {
-        u32::MAX - match self {
-            MouseButton::Left => 0,
-            MouseButton::Right => 1,
-            MouseButton::Middle => 2,
-            MouseButton::Other(x) => *x as u32
-        }
+        u32::MAX
+            - match self {
+                MouseButton::Left => 0,
+                MouseButton::Right => 1,
+                MouseButton::Middle => 2,
+                MouseButton::Other(x) => *x as u32,
+            }
     }
 }
 
@@ -48,7 +49,7 @@ pub enum Action {
     KeyPress(u32),
     KeyRelease(u32),
     MousePress(MouseButton),
-    MouseRelease(MouseButton)
+    MouseRelease(MouseButton),
 }
 
 impl Action {
@@ -58,7 +59,6 @@ impl Action {
             Action::KeyRelease(x) => *x,
             Action::MousePress(x) => x.keycode(),
             Action::MouseRelease(x) => x.keycode(),
-
         }
     }
     pub fn is_down(&self) -> bool {

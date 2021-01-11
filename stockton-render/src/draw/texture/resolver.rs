@@ -26,7 +26,6 @@ use std::path::Path;
 
 /// An object that can be used to resolve a texture from a BSP File
 pub trait TextureResolver<T: LoadableImage> {
-
     /// Get the given texture, or None if it's corrupt/not there.
     fn resolve(&mut self, texture: &Texture) -> Option<T>;
 }

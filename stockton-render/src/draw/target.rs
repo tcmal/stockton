@@ -31,8 +31,11 @@ use hal::{
 use na::Mat4;
 
 use super::{
-    buffer::ModifiableBuffer, draw_buffers::{DrawBuffers, UVPoint}, pipeline::CompletePipeline,
-    texture::image::DedicatedLoadedImage, ui::{UIPipeline, UIPoint},
+    buffer::ModifiableBuffer,
+    draw_buffers::{DrawBuffers, UVPoint},
+    pipeline::CompletePipeline,
+    texture::image::DedicatedLoadedImage,
+    ui::{UIPipeline, UIPoint},
 };
 use crate::types::*;
 
@@ -53,8 +56,18 @@ pub struct SwapchainProperties {
     pub extent: Extent,
 }
 
+/// Indicates the given property has no acceptable values
+pub enum NoSupportedValuesError {
+    DepthFormat,
+    PresentMode,
+    CompositeAlphaMode,
+}
+
 impl SwapchainProperties {
-    pub fn find_best(adapter: &Adapter, surface: &Surface) -> Result<SwapchainProperties, ()> {
+    pub fn find_best(
+        adapter: &Adapter,
+        surface: &Surface,
+    ) -> Result<SwapchainProperties, NoSupportedValuesError> {
         let caps = surface.capabilities(&adapter.physical_device);
         let formats = surface.supported_formats(&adapter.physical_device);
 
@@ -83,7 +96,7 @@ impl SwapchainProperties {
                     .optimal_tiling
                     .contains(ImageFeature::DEPTH_STENCIL_ATTACHMENT)
         })
-        .ok_or(())?;
+        .ok_or(NoSupportedValuesError::DepthFormat)?;
 
         let present_mode = {
             [
@@ -95,7 +108,7 @@ impl SwapchainProperties {
             .iter()
             .cloned()
             .find(|pm| caps.present_modes.contains(*pm))
-            .ok_or(())?
+            .ok_or(NoSupportedValuesError::PresentMode)?
         };
         let composite_alpha_mode = {
             [
@@ -107,7 +120,7 @@ impl SwapchainProperties {
             .iter()
             .cloned()
             .find(|ca| caps.composite_alpha_modes.contains(*ca))
-            .ok_or(())?
+            .ok_or(NoSupportedValuesError::CompositeAlphaMode)?
         };
 
         let extent = caps.extents.end().to_extent(); // Size

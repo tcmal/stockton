@@ -64,9 +64,7 @@ impl TextureStore {
 
         // Descriptor pool, where we get our sets from
         let mut descriptor_pool = unsafe {
-            use hal::pso::{
-                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType,
-            };
+            use hal::pso::{DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType};
 
             device
                 .create_descriptor_pool(
@@ -91,9 +89,7 @@ impl TextureStore {
 
         // Layout of our descriptor sets
         let descriptor_set_layout = unsafe {
-            use hal::pso::{
-                DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags,
-            };
+            use hal::pso::{DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags};
 
             device.create_descriptor_set_layout(
                 &[
@@ -171,9 +167,7 @@ impl TextureStore {
 
         // Descriptor pool, where we get our sets from
         let mut descriptor_pool = unsafe {
-            use hal::pso::{
-                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType,
-            };
+            use hal::pso::{DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType};
 
             device
                 .create_descriptor_pool(
@@ -198,9 +192,7 @@ impl TextureStore {
 
         // Layout of our descriptor sets
         let descriptor_set_layout = unsafe {
-            use hal::pso::{
-                DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags,
-            };
+            use hal::pso::{DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags};
 
             device.create_descriptor_set_layout(
                 &[
