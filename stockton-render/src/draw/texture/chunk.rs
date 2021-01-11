@@ -47,6 +47,7 @@ impl TextureChunk {
     pub fn new_empty(
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
         descriptor_set: DescriptorSet,
@@ -64,6 +65,7 @@ impl TextureChunk {
                     i,
                     device,
                     adapter,
+                    allocator,
                     command_queue,
                     command_pool,
                 )
@@ -78,6 +80,7 @@ impl TextureChunk {
     pub fn new<'a, I, R: TextureResolver<T>, T: LoadableImage>(
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
         descriptor_set: DescriptorSet,
@@ -98,11 +101,11 @@ impl TextureChunk {
         for tex in textures {
             if let Some(img) = resolver.resolve(tex) {
                 store
-                    .put_texture(img, local_idx, device, adapter, command_queue, command_pool)
+                    .put_texture(img, local_idx, device, adapter, allocator, command_queue, command_pool)
                     .unwrap();
             } else {
                 // Texture not found. For now, tear everything down.
-                store.deactivate(device);
+                store.deactivate(device, allocator);
 
                 return Err(error::CreationError::BadDataError);
             }
@@ -119,6 +122,7 @@ impl TextureChunk {
                     local_idx,
                     device,
                     adapter,
+                    allocator,
                     command_queue,
                     command_pool,
                 )
@@ -136,6 +140,7 @@ impl TextureChunk {
         idx: usize,
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
     ) -> Result<(), &'static str> {
@@ -144,6 +149,7 @@ impl TextureChunk {
             image,
             device,
             adapter,
+            allocator,
             command_queue,
             command_pool,
             hal::format::Format::Rgba8Srgb, // TODO
@@ -177,7 +183,7 @@ impl TextureChunk {
         // Store it so we can safely deactivate it when we need to
         // Deactivate the old image if we need to
         if idx < self.sampled_images.len() {
-            replace(&mut self.sampled_images[idx], texture).deactivate(device);
+            replace(&mut self.sampled_images[idx], texture).deactivate(device, allocator);
         } else {
             self.sampled_images.push(texture);
         }
@@ -185,9 +191,9 @@ impl TextureChunk {
         Ok(())
     }
 
-    pub fn deactivate(mut self, device: &mut Device) {
+    pub fn deactivate(mut self, device: &mut Device, allocator: &mut DynamicAllocator) {
         for img in self.sampled_images.drain(..) {
-            img.deactivate(device);
+            img.deactivate(device, allocator);
         }
     }
 }

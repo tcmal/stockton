@@ -41,7 +41,7 @@ pub enum CreationError {
     BufferNoMemory,
 
     SwapchainError(hal::window::CreationError),
-    ImageViewError(hal::image::ViewCreationError),
+    ImageViewError(hal::image::ViewError),
 
     BadDataError,
 }

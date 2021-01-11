@@ -97,7 +97,7 @@ impl UIPipeline {
 
             let external_dependency = SubpassDependency {
                 flags: Dependencies::empty(),
-                passes: None..Some(0),
+                passes: SubpassRef::External..SubpassRef::Pass(0),
                 stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
                     ..(PipelineStage::COLOR_ATTACHMENT_OUTPUT
                         | PipelineStage::EARLY_FRAGMENT_TESTS),
@@ -198,7 +198,6 @@ impl UIPipeline {
             depth_clamping: false,
             depth_bias: None,
             conservative: true,
-            line_width: hal::pso::State::Static(1.0),
         };
 
         // Depth stencil

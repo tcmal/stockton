@@ -32,7 +32,7 @@ use na::Mat4;
 
 use super::{
     buffer::ModifiableBuffer, draw_buffers::{DrawBuffers, UVPoint}, pipeline::CompletePipeline,
-    texture::image::LoadedImage, ui::{UIPipeline, UIPoint},
+    texture::image::DedicatedLoadedImage, ui::{UIPipeline, UIPoint},
 };
 use crate::types::*;
 
@@ -134,7 +134,7 @@ pub struct TargetChain {
     pub properties: SwapchainProperties,
 
     /// The depth buffer/image used for drawing
-    pub depth_buffer: ManuallyDrop<LoadedImage>,
+    pub depth_buffer: ManuallyDrop<DedicatedLoadedImage>,
 
     /// Resources tied to each target frame in the swapchain
     pub targets: Box<[TargetResources]>,
@@ -192,11 +192,11 @@ impl TargetChain {
                 .map_err(|_| TargetChainCreationError::Todo)?
         };
 
-        let depth_buffer: LoadedImage = {
+        let depth_buffer = {
             use hal::format::Aspects;
             use hal::image::SubresourceRange;
 
-            LoadedImage::new(
+            DedicatedLoadedImage::new(
                 device,
                 adapter,
                 properties.depth_format,
@@ -306,7 +306,7 @@ impl TargetChain {
 
         // Record commands
         unsafe {
-            use hal::buffer::{IndexBufferView, SubRange};
+            use hal::buffer::IndexBufferView;
             use hal::command::{
                 ClearColor, ClearDepthStencil, ClearValue, CommandBufferFlags, SubpassContents,
             };
@@ -332,7 +332,7 @@ impl TargetChain {
                 let vbufref: &<back::Backend as hal::Backend>::Buffer =
                     draw_buffers.vertex_buffer.get_buffer();
 
-                let vbufs: ArrayVec<[_; 1]> = [(vbufref, SubRange::WHOLE)].into();
+                let vbufs: ArrayVec<[_; 1]> = [(vbufref, 0)].into();
                 let ibuf = draw_buffers.index_buffer.get_buffer();
 
                 (vbufs, ibuf)
@@ -363,7 +363,7 @@ impl TargetChain {
             target.cmd_buffer.bind_vertex_buffers(0, vbufs);
             target.cmd_buffer.bind_index_buffer(IndexBufferView {
                 buffer: ibuf,
-                range: SubRange::WHOLE,
+                offset: 0,
                 index_type: hal::IndexType::U16,
             });
         };
@@ -391,7 +391,7 @@ impl TargetChain {
 
         // Record commands
         unsafe {
-            use hal::buffer::{IndexBufferView, SubRange};
+            use hal::buffer::IndexBufferView;
             use hal::command::{ClearColor, ClearValue, SubpassContents};
 
             // Colour to clear window to
@@ -406,7 +406,7 @@ impl TargetChain {
                 let vbufref: &<back::Backend as hal::Backend>::Buffer =
                     draw_buffers.vertex_buffer.get_buffer();
 
-                let vbufs: ArrayVec<[_; 1]> = [(vbufref, SubRange::WHOLE)].into();
+                let vbufs: ArrayVec<[_; 1]> = [(vbufref, 0)].into();
                 let ibuf = draw_buffers.index_buffer.get_buffer();
 
                 (vbufs, ibuf)
@@ -426,7 +426,7 @@ impl TargetChain {
             target.cmd_buffer.bind_vertex_buffers(0, vbufs);
             target.cmd_buffer.bind_index_buffer(IndexBufferView {
                 buffer: ibuf,
-                range: SubRange::WHOLE,
+                offset: 0,
                 index_type: hal::IndexType::U16,
             });
         };
@@ -611,7 +611,7 @@ pub enum TargetChainCreationError {
 
 #[derive(Debug)]
 pub enum TargetResourcesCreationError {
-    ImageViewError(hal::image::ViewCreationError),
+    ImageViewError(hal::image::ViewError),
     FrameBufferNoMemory,
     SyncObjectsNoMemory,
 }

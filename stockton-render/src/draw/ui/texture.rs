@@ -43,12 +43,13 @@ impl LoadableImage for &Texture {
 pub fn ensure_textures(texture_store: &mut TextureStore, ui: &mut UIState, 
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool) {
     let tex = ui.ctx.texture();
 
     if tex.version != ui.last_tex_ver {
-        texture_store.put_texture(0, &*tex, device, adapter, command_queue, command_pool).unwrap(); // TODO
+        texture_store.put_texture(0, &*tex, device, adapter, allocator, command_queue, command_pool).unwrap(); // TODO
         ui.last_tex_ver = tex.version;
     } 
 }

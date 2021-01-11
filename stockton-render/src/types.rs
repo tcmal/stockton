@@ -41,3 +41,6 @@ pub type RenderPass = <back::Backend as hal::Backend>::RenderPass;
 
 pub type Adapter = hal::adapter::Adapter<back::Backend>;
 pub type QueueGroup = hal::queue::QueueGroup<back::Backend>;
+
+pub type DynamicAllocator = rendy_memory::DynamicAllocator<back::Backend>;
+pub type DynamicBlock = rendy_memory::DynamicBlock<back::Backend>;

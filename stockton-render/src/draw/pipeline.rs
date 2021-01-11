@@ -196,7 +196,6 @@ impl CompletePipeline {
             depth_clamping: false,
             depth_bias: None,
             conservative: true,
-            line_width: hal::pso::State::Static(1.0),
         };
 
         // Depth stencil

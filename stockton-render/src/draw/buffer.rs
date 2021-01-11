@@ -23,7 +23,7 @@ use std::ops::{Index, IndexMut};
 use hal::prelude::*;
 use hal::{
     buffer::Usage,
-    memory::{Properties, Segment},
+    memory::Properties,
     queue::Submission,
     MemoryTypeId,
 };
@@ -134,7 +134,7 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
 
         // Map it somewhere and get a slice to that memory
         let staged_mapped_memory = unsafe {
-            let ptr = device.map_memory(&staged_memory, Segment::ALL).unwrap(); // TODO
+            let ptr = device.map_memory(&staged_memory, 0..size_bytes).unwrap(); // TODO
 
             std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into().unwrap())
         };

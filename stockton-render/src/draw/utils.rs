@@ -15,22 +15,24 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-//! Given 3D points and some camera information, renders to the screen.
+use crate::types::*;
+use hal::{
+    memory::{Properties as MemProperties},
+    MemoryTypeId,
+    prelude::*,
+};
 
-pub mod target;
+pub fn find_memory_type_id(adapter: &Adapter, type_mask: u64, props: MemProperties) -> Option<MemoryTypeId> {
+    adapter
+        .physical_device
+        .memory_properties()
+        .memory_types
+        .iter()
+        .enumerate()
+        .find(|&(id, memory_type)| {
+            type_mask & (1 << id) != 0 &&
+                memory_type.properties.contains(props)
+        })
+        .map(|(id, _)| MemoryTypeId(id))
 
-#[macro_use]
-mod macros;
-mod buffer;
-mod camera;
-mod context;
-mod draw_buffers;
-mod pipeline;
-mod render;
-mod texture;
-mod ui;
-mod utils;
-
-pub use self::camera::calc_vp_matrix_system;
-pub use self::context::RenderingContext;
-pub use self::draw_buffers::UVPoint;
+}

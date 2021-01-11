@@ -26,6 +26,7 @@ use hal::{pool::CommandPoolCreateFlags, prelude::*};
 use log::debug;
 use na::Mat4;
 use winit::window::Window;
+use rendy_memory::DynamicConfig;
 
 use super::{
     buffer::ModifiableBuffer,
@@ -35,6 +36,7 @@ use super::{
     target::{SwapchainProperties, TargetChain},
     texture::TextureStore,
     ui::{do_render as do_render_ui, ensure_textures as ensure_textures_ui, UIPipeline, UIPoint},
+    utils::find_memory_type_id,
 };
 use crate::{error, types::*, window::UIState};
 use stockton_levels::prelude::*;
@@ -84,6 +86,10 @@ pub struct RenderingContext<'a> {
 
     /// Buffers used for drawing the UI
     ui_draw_buffers: ManuallyDrop<DrawBuffers<'a, UIPoint>>,
+
+    /// Memory allocator used for any sort of textures / maps
+    /// Guaranteed suitable for 2D RGBA images with `Optimal` tiling and `Usage::Sampled`
+    texture_allocator: ManuallyDrop<DynamicAllocator>,
 
     /// View projection matrix
     pub(crate) vp_matrix: Mat4,
@@ -152,10 +158,54 @@ impl<'a> RenderingContext<'a> {
         // UI Vertex and index buffers
         let ui_draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
 
+        // Memory allocators
+        let mut texture_allocator = unsafe {
+            use hal::{
+                memory::Properties,
+                image::{Kind, Tiling, Usage, ViewCapabilities},
+                format::Format,
+            };
+
+            // We create an empty image with the same format as used for textures
+            // this is to get the type_mask required, which will stay the same for
+            // all colour images of the same tiling. (certain memory flags excluded).
+
+            // Size and alignment don't necessarily stay the same, so we're forced to
+            // guess at the alignment for our allocator.
+
+            // TODO: Way to tune these options
+
+            let img = device.create_image(
+                Kind::D2(16 as u32, 16 as u32, 1, 1),
+                1,
+                Format::Rgba8Srgb,
+                Tiling::Optimal,
+                Usage::SAMPLED,
+                ViewCapabilities::empty()
+            ).map_err(|_| error::CreationError::OutOfMemoryError)?;
+
+            let type_mask = device.get_image_requirements(&img).type_mask;
+
+            device.destroy_image(img);
+
+            let props = Properties::DEVICE_LOCAL;
+            
+            DynamicAllocator::new(
+                find_memory_type_id(&adapter, type_mask, props).ok_or(error::CreationError::OutOfMemoryError)?,
+                props,
+                DynamicConfig {
+                    block_size_granularity: 4 * 32 * 32, // 32x32 image
+                    max_chunk_size: u64::pow(2, 63),
+                    min_device_allocation: 4 * 32 * 32,
+                }
+            )
+        };
+
         // Texture store
         let texture_store = TextureStore::new(
             &mut device,
             &mut adapter,
+            &mut texture_allocator,
             &mut queue_group.queues[0],
             &mut cmd_pool,
             file,
@@ -165,6 +215,7 @@ impl<'a> RenderingContext<'a> {
         let ui_texture_store = TextureStore::new_empty(
             &mut device,
             &mut adapter,
+            &mut texture_allocator,
             &mut queue_group.queues[0],
             &mut cmd_pool,
             1, // TODO
@@ -225,6 +276,8 @@ impl<'a> RenderingContext<'a> {
             ui_draw_buffers: ManuallyDrop::new(ui_draw_buffers),
 
             ui_texture_store: ManuallyDrop::new(ui_texture_store),
+            
+            texture_allocator: ManuallyDrop::new(texture_allocator),
 
             vp_matrix: Mat4::identity(),
 
@@ -305,6 +358,7 @@ impl<'a> RenderingContext<'a> {
             ui,
             &mut self.device,
             &mut self.adapter,
+            &mut self.texture_allocator,
             &mut self.queue_group.queues[0],
             &mut self.cmd_pool,
         );
@@ -379,8 +433,10 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 
             ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.ui_draw_buffers)).deactivate(&mut self.device);
-            ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device);
-            ManuallyDrop::into_inner(read(&self.ui_texture_store)).deactivate(&mut self.device);
+            ManuallyDrop::into_inner(read(&self.texture_store)).deactivate(&mut self.device, &mut self.texture_allocator);
+            ManuallyDrop::into_inner(read(&self.ui_texture_store)).deactivate(&mut self.device, &mut self.texture_allocator);
+
+            ManuallyDrop::into_inner(read(&self.texture_allocator)).dispose();
 
             ManuallyDrop::into_inner(read(&self.target_chain))
                 .deactivate(&mut self.device, &mut self.cmd_pool);

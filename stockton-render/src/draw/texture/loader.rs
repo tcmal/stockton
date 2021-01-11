@@ -47,6 +47,7 @@ impl TextureStore {
     pub fn new_empty(
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
         size: usize,
@@ -64,7 +65,7 @@ impl TextureStore {
         // Descriptor pool, where we get our sets from
         let mut descriptor_pool = unsafe {
             use hal::pso::{
-                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType, ImageDescriptorType,
+                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType,
             };
 
             device
@@ -72,11 +73,7 @@ impl TextureStore {
                     num_chunks,
                     &[
                         DescriptorRangeDesc {
-                            ty: DescriptorType::Image {
-                                ty: ImageDescriptorType::Sampled {
-                                    with_sampler: false,
-                                },
-                            },
+                            ty: DescriptorType::SampledImage,
                             count: rounded_size,
                         },
                         DescriptorRangeDesc {
@@ -95,18 +92,14 @@ impl TextureStore {
         // Layout of our descriptor sets
         let descriptor_set_layout = unsafe {
             use hal::pso::{
-                DescriptorSetLayoutBinding, DescriptorType, ImageDescriptorType, ShaderStageFlags,
+                DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags,
             };
 
             device.create_descriptor_set_layout(
                 &[
                     DescriptorSetLayoutBinding {
                         binding: 0,
-                        ty: DescriptorType::Image {
-                            ty: ImageDescriptorType::Sampled {
-                                with_sampler: false,
-                            },
-                        },
+                        ty: DescriptorType::SampledImage,
                         count: CHUNK_SIZE,
                         stage_flags: ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,
@@ -140,6 +133,7 @@ impl TextureStore {
             chunks.push(TextureChunk::new_empty(
                 device,
                 adapter,
+                allocator,
                 command_queue,
                 command_pool,
                 descriptor_set,
@@ -159,6 +153,7 @@ impl TextureStore {
     pub fn new<T: HasTextures>(
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
         file: &T,
@@ -177,7 +172,7 @@ impl TextureStore {
         // Descriptor pool, where we get our sets from
         let mut descriptor_pool = unsafe {
             use hal::pso::{
-                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType, ImageDescriptorType,
+                DescriptorPoolCreateFlags, DescriptorRangeDesc, DescriptorType,
             };
 
             device
@@ -185,11 +180,7 @@ impl TextureStore {
                     num_chunks,
                     &[
                         DescriptorRangeDesc {
-                            ty: DescriptorType::Image {
-                                ty: ImageDescriptorType::Sampled {
-                                    with_sampler: false,
-                                },
-                            },
+                            ty: DescriptorType::SampledImage,
                             count: rounded_size,
                         },
                         DescriptorRangeDesc {
@@ -208,18 +199,14 @@ impl TextureStore {
         // Layout of our descriptor sets
         let descriptor_set_layout = unsafe {
             use hal::pso::{
-                DescriptorSetLayoutBinding, DescriptorType, ImageDescriptorType, ShaderStageFlags,
+                DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags,
             };
 
             device.create_descriptor_set_layout(
                 &[
                     DescriptorSetLayoutBinding {
                         binding: 0,
-                        ty: DescriptorType::Image {
-                            ty: ImageDescriptorType::Sampled {
-                                with_sampler: false,
-                            },
-                        },
+                        ty: DescriptorType::SampledImage,
                         count: CHUNK_SIZE,
                         stage_flags: ShaderStageFlags::FRAGMENT,
                         immutable_samplers: false,
@@ -254,6 +241,7 @@ impl TextureStore {
             chunks.push(TextureChunk::new(
                 device,
                 adapter,
+                allocator,
                 command_queue,
                 command_pool,
                 descriptor_set,
@@ -272,12 +260,12 @@ impl TextureStore {
     }
 
     /// Call this before dropping
-    pub fn deactivate(mut self, device: &mut Device) {
+    pub fn deactivate(mut self, device: &mut Device, allocator: &mut DynamicAllocator) {
         unsafe {
             use core::ptr::read;
 
             for chunk in self.chunks.into_vec().drain(..) {
-                chunk.deactivate(device)
+                chunk.deactivate(device, allocator);
             }
 
             self.descriptor_pool.reset();
@@ -299,6 +287,7 @@ impl TextureStore {
         img: T,
         device: &mut Device,
         adapter: &mut Adapter,
+        allocator: &mut DynamicAllocator,
         command_queue: &mut CommandQueue,
         command_pool: &mut CommandPool,
     ) -> Result<(), &'static str> {
@@ -309,6 +298,7 @@ impl TextureStore {
             idx % CHUNK_SIZE,
             device,
             adapter,
+            allocator,
             command_queue,
             command_pool,
         )
