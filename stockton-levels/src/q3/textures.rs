@@ -17,7 +17,7 @@
 
 use std::str;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::slice_to_u32;
 use crate::traits::textures::*;
@@ -58,15 +58,19 @@ pub fn from_data(lump: &[u8]) -> Result<Box<[Texture]>> {
     Ok(textures.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasTextures for Q3BSPFile<T> {
+impl<T: CoordSystem> HasTextures for Q3BspFile<T> {
     type TexturesIter<'a> = std::slice::Iter<'a, Texture>;
 
     fn textures_iter(&self) -> Self::TexturesIter<'_> {
         self.textures.iter()
     }
 
-    fn get_texture(&self, idx: u32) -> &Texture {
-        &self.textures[idx as usize]
+    fn get_texture(&self, idx: u32) -> Option<&Texture> {
+        if idx >= self.textures.len() as u32 {
+            None
+        } else {
+            Some(&self.textures[idx as usize])
+        }
     }
 }
 

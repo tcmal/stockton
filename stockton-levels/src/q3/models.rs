@@ -15,7 +15,7 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::{slice_to_u32, slice_to_vec3};
 use crate::traits::models::*;
@@ -69,7 +69,7 @@ pub fn from_data(data: &[u8], n_faces: u32, n_brushes: u32) -> Result<Box<[Model
     Ok(models.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasModels<T> for Q3BSPFile<T> {
+impl<T: CoordSystem> HasModels<T> for Q3BspFile<T> {
     type ModelsIter<'a> = std::slice::Iter<'a, Model>;
 
     fn models_iter(&self) -> Self::ModelsIter<'_> {

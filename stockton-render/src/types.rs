@@ -18,6 +18,7 @@
 //! Convenience module to reference types that are stored in the backend's enum
 
 pub type Device = <back::Backend as hal::Backend>::Device;
+pub type Gpu = hal::adapter::Gpu<back::Backend>;
 pub type Buffer = <back::Backend as hal::Backend>::Buffer;
 pub type Memory = <back::Backend as hal::Backend>::Memory;
 pub type Swapchain = <back::Backend as hal::Backend>::Swapchain;
@@ -28,7 +29,6 @@ pub type CommandPool = <back::Backend as hal::Backend>::CommandPool;
 pub type CommandBuffer = <back::Backend as hal::Backend>::CommandBuffer;
 pub type CommandQueue = <back::Backend as hal::Backend>::CommandQueue;
 pub type DescriptorSetLayout = <back::Backend as hal::Backend>::DescriptorSetLayout;
-pub type DescriptorPool = <back::Backend as hal::Backend>::DescriptorPool;
 pub type DescriptorSet = <back::Backend as hal::Backend>::DescriptorSet;
 pub type PipelineLayout = <back::Backend as hal::Backend>::PipelineLayout;
 pub type GraphicsPipeline = <back::Backend as hal::Backend>::GraphicsPipeline;
@@ -42,5 +42,8 @@ pub type RenderPass = <back::Backend as hal::Backend>::RenderPass;
 pub type Adapter = hal::adapter::Adapter<back::Backend>;
 pub type QueueGroup = hal::queue::QueueGroup<back::Backend>;
 
+pub type DescriptorAllocator = rendy_descriptor::DescriptorAllocator<back::Backend>;
 pub type DynamicAllocator = rendy_memory::DynamicAllocator<back::Backend>;
 pub type DynamicBlock = rendy_memory::DynamicBlock<back::Backend>;
+
+pub type RDescriptorSet = rendy_descriptor::DescriptorSet<back::Backend>;

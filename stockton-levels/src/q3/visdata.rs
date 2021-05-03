@@ -20,7 +20,7 @@
 use bitvec::prelude::*;
 use std::vec::IntoIter;
 
-use super::file::Q3BSPFile;
+use super::file::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::slice_to_i32;
 use crate::traits::visdata::*;
@@ -49,7 +49,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[BitBox<Local, u8>]>> {
     Ok(vecs.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasVisData for Q3BSPFile<T> {
+impl<T: CoordSystem> HasVisData for Q3BspFile<T> {
     type VisibleIterator = IntoIter<ClusterId>;
 
     fn all_visible_from(&self, from: ClusterId) -> Self::VisibleIterator {

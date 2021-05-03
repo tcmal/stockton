@@ -24,6 +24,7 @@ mod macros;
 mod buffer;
 mod camera;
 mod context;
+mod depth_buffer;
 mod draw_buffers;
 mod pipeline;
 mod render;
@@ -33,4 +34,4 @@ mod utils;
 
 pub use self::camera::calc_vp_matrix_system;
 pub use self::context::RenderingContext;
-pub use self::draw_buffers::UVPoint;
+pub use self::draw_buffers::UvPoint;

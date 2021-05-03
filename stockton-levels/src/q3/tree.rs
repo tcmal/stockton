@@ -17,7 +17,7 @@
 
 //! Parses the BSP tree into a usable format
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::{slice_to_i32, slice_to_u32, slice_to_vec3i};
 use crate::traits::tree::*;
@@ -33,12 +33,12 @@ pub fn from_data(
     leaf_brushes: &[u8],
     n_faces: u32,
     n_brushes: u32,
-) -> Result<BSPNode> {
+) -> Result<BspNode> {
     if nodes.len() % NODE_SIZE != 0 || leaves.len() % LEAF_SIZE != 0 {
         return Err(ParseError::Invalid);
     }
 
-    Ok(compile_node(
+    compile_node(
         0,
         nodes,
         leaves,
@@ -46,7 +46,7 @@ pub fn from_data(
         leaf_brushes,
         n_faces,
         n_brushes,
-    )?)
+    )
 }
 
 /// Internal function. Visits given node and all its children. Used to recursively build tree.
@@ -58,7 +58,7 @@ fn compile_node(
     leaf_brushes: &[u8],
     n_faces: u32,
     n_brushes: u32,
-) -> Result<BSPNode> {
+) -> Result<BspNode> {
     if i < 0 {
         // Leaf.
         let i = i.abs() - 1;
@@ -111,7 +111,7 @@ fn compile_node(
             brushes.into_boxed_slice()
         };
 
-        let leaf = BSPLeaf {
+        let leaf = BspLeaf {
             cluster_id: slice_to_u32(&raw[0..4]),
             area: slice_to_i32(&raw[4..8]),
             // 8..20 = min
@@ -120,11 +120,11 @@ fn compile_node(
             brushes_idx,
         };
 
-        Ok(BSPNode {
+        Ok(BspNode {
             plane_idx: 0,
             min: slice_to_vec3i(&raw[8..20]),
             max: slice_to_vec3i(&raw[20..32]),
-            value: BSPNodeValue::Leaf(leaf),
+            value: BspNodeValue::Leaf(leaf),
         })
     } else {
         // Node.
@@ -152,17 +152,17 @@ fn compile_node(
         let min = slice_to_vec3i(&raw[12..24]);
         let max = slice_to_vec3i(&raw[24..36]);
 
-        Ok(BSPNode {
+        Ok(BspNode {
             plane_idx,
-            value: BSPNodeValue::Children(Box::new(child_one), Box::new(child_two)),
+            value: BspNodeValue::Children(Box::new(child_one), Box::new(child_two)),
             min,
             max,
         })
     }
 }
 
-impl<T: CoordSystem> HasBSPTree<T> for Q3BSPFile<T> {
-    fn get_bsp_root(&self) -> &BSPNode {
+impl<T: CoordSystem> HasBspTree<T> for Q3BspFile<T> {
+    fn get_bsp_root(&self) -> &BspNode {
         &self.tree_root
     }
 }

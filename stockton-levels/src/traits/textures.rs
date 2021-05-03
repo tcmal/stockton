@@ -160,5 +160,5 @@ pub trait HasTextures {
     type TexturesIter<'a>: Iterator<Item = &'a Texture>;
 
     fn textures_iter(&self) -> Self::TexturesIter<'_>;
-    fn get_texture(&self, idx: u32) -> &Texture;
+    fn get_texture(&self, idx: u32) -> Option<&Texture>;
 }

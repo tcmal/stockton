@@ -19,7 +19,7 @@
 //! In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 //! You'll need something else to actually find/sort the faces though.
 
-use std::{mem::ManuallyDrop, ops::Deref};
+use std::{mem::ManuallyDrop, pin::Pin};
 
 use arrayvec::ArrayVec;
 use hal::{pool::CommandPoolCreateFlags, prelude::*};
@@ -30,27 +30,32 @@ use winit::window::Window;
 
 use super::{
     buffer::ModifiableBuffer,
-    draw_buffers::{DrawBuffers, UVPoint},
+    draw_buffers::{DrawBuffers, UvPoint},
     pipeline::CompletePipeline,
     render::do_render,
     target::{SwapchainProperties, TargetChain},
-    texture::TextureStore,
-    ui::{do_render as do_render_ui, ensure_textures as ensure_textures_ui, UIPipeline, UIPoint},
+    texture::{resolver::BasicFsResolver, TextureRepo},
+    ui::{
+        do_render as do_render_ui, ensure_textures as ensure_textures_ui, UiPipeline, UiPoint,
+        UiTextures,
+    },
     utils::find_memory_type_id,
 };
-use crate::{error, types::*, window::UIState};
+use crate::{error, types::*, window::UiState};
 use stockton_levels::prelude::*;
 
 /// Contains all the hal related stuff.
 /// In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 // TODO: Settings for clear colour, buffer sizes, etc
-pub struct RenderingContext<'a> {
+pub struct RenderingContext<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
+    pub map: Pin<Box<M>>,
+
     // Parents for most of these things
     /// Vulkan Instance
     instance: ManuallyDrop<back::Instance>,
 
     /// Device we're using
-    device: ManuallyDrop<Device>,
+    device: Pin<Box<Device>>,
 
     /// Adapter we're using
     adapter: Adapter,
@@ -66,7 +71,7 @@ pub struct RenderingContext<'a> {
     pipeline: ManuallyDrop<CompletePipeline>,
 
     /// 2D Graphics pipeline and associated objects
-    ui_pipeline: ManuallyDrop<UIPipeline>,
+    ui_pipeline: ManuallyDrop<UiPipeline>,
 
     // Command pool and buffers
     /// The command pool used for our buffers
@@ -75,17 +80,17 @@ pub struct RenderingContext<'a> {
     /// The queue group our buffers belong to
     queue_group: QueueGroup,
 
-    /// Texture store
-    texture_store: ManuallyDrop<TextureStore>,
+    /// Main Texture repo
+    tex_repo: ManuallyDrop<TextureRepo<'a>>,
 
-    /// Texture store for UI
-    ui_texture_store: ManuallyDrop<TextureStore>,
+    /// UI Texture repo
+    ui_tex_repo: ManuallyDrop<TextureRepo<'a>>,
 
     /// Buffers used for drawing
-    draw_buffers: ManuallyDrop<DrawBuffers<'a, UVPoint>>,
+    draw_buffers: ManuallyDrop<DrawBuffers<'a, UvPoint>>,
 
     /// Buffers used for drawing the UI
-    ui_draw_buffers: ManuallyDrop<DrawBuffers<'a, UIPoint>>,
+    ui_draw_buffers: ManuallyDrop<DrawBuffers<'a, UiPoint>>,
 
     /// Memory allocator used for any sort of textures / maps
     /// Guaranteed suitable for 2D RGBA images with `Optimal` tiling and `Usage::Sampled`
@@ -97,9 +102,11 @@ pub struct RenderingContext<'a> {
     pub(crate) pixels_per_point: f32,
 }
 
-impl<'a> RenderingContext<'a> {
+impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
     /// Create a new RenderingContext for the given window.
-    pub fn new<T: HasTextures>(window: &Window, file: &T) -> Result<Self, error::CreationError> {
+    pub fn new(window: &Window, map: M) -> Result<Self, error::CreationError> {
+        let map = Box::pin(map);
+
         // Create surface
         let (instance, mut surface, mut adapters) = unsafe {
             use hal::Instance;
@@ -115,10 +122,10 @@ impl<'a> RenderingContext<'a> {
         };
 
         // TODO: Properly figure out which adapter to use
-        let mut adapter = adapters.remove(0);
+        let adapter = adapters.remove(0);
 
         // Device & Queue group
-        let (mut device, mut queue_group) = {
+        let (mut device, queue_group) = {
             let family = adapter
                 .queue_families
                 .iter()
@@ -134,7 +141,7 @@ impl<'a> RenderingContext<'a> {
                     .unwrap()
             };
 
-            (gpu.device, gpu.queue_groups.pop().unwrap())
+            (Box::pin(gpu.device), gpu.queue_groups.pop().unwrap())
         };
 
         // Figure out what our swapchain will look like
@@ -159,7 +166,7 @@ impl<'a> RenderingContext<'a> {
         let ui_draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
 
         // Memory allocators
-        let mut texture_allocator = unsafe {
+        let texture_allocator = unsafe {
             use hal::{
                 format::Format,
                 image::{Kind, Tiling, Usage, ViewCapabilities},
@@ -204,31 +211,32 @@ impl<'a> RenderingContext<'a> {
             )
         };
 
-        // Texture store
-        let texture_store = TextureStore::new(
-            &mut device,
-            &mut adapter,
-            &mut texture_allocator,
-            &mut queue_group.queues[0],
-            &mut cmd_pool,
-            file,
-        )?;
+        // Texture repos
+        let long_device_pointer = unsafe { &mut *(&mut *device as *mut Device) };
+        let long_texs_pointer: &'static M = unsafe { &*(&*map as *const M) };
 
-        // Texture store for UI elements
-        let ui_texture_store = TextureStore::new_empty(
-            &mut device,
-            &mut adapter,
-            &mut texture_allocator,
-            &mut queue_group.queues[0],
-            &mut cmd_pool,
-            1, // TODO
-        )?;
+        let tex_repo = TextureRepo::new(
+            long_device_pointer,
+            &adapter,
+            long_texs_pointer,
+            BasicFsResolver::new(std::path::Path::new(".")),
+        )
+        .unwrap(); // TODO
+        let long_device_pointer = unsafe { &mut *(&mut *device as *mut Device) };
+
+        let ui_tex_repo = TextureRepo::new(
+            long_device_pointer,
+            &adapter,
+            &UiTextures,
+            BasicFsResolver::new(std::path::Path::new(".")),
+        )
+        .unwrap(); // TODO
 
         let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
-        descriptor_set_layouts.push(texture_store.descriptor_set_layout.deref());
+        descriptor_set_layouts.push(tex_repo.get_ds_layout());
 
         let mut ui_descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
-        ui_descriptor_set_layouts.push(ui_texture_store.descriptor_set_layout.deref());
+        ui_descriptor_set_layouts.push(tex_repo.get_ds_layout());
 
         // Graphics pipeline
         let pipeline = CompletePipeline::new(
@@ -239,7 +247,7 @@ impl<'a> RenderingContext<'a> {
         )?;
 
         // UI pipeline
-        let ui_pipeline = UIPipeline::new(
+        let ui_pipeline = UiPipeline::new(
             &mut device,
             swapchain_properties.extent,
             &swapchain_properties,
@@ -260,10 +268,11 @@ impl<'a> RenderingContext<'a> {
         .map_err(error::CreationError::TargetChainCreationError)?;
 
         Ok(RenderingContext {
+            map,
             instance: ManuallyDrop::new(instance),
             surface: ManuallyDrop::new(surface),
 
-            device: ManuallyDrop::new(device),
+            device,
             adapter,
             queue_group,
 
@@ -273,12 +282,11 @@ impl<'a> RenderingContext<'a> {
             pipeline: ManuallyDrop::new(pipeline),
             ui_pipeline: ManuallyDrop::new(ui_pipeline),
 
-            texture_store: ManuallyDrop::new(texture_store),
+            tex_repo: ManuallyDrop::new(tex_repo),
+            ui_tex_repo: ManuallyDrop::new(ui_tex_repo),
 
             draw_buffers: ManuallyDrop::new(draw_buffers),
             ui_draw_buffers: ManuallyDrop::new(ui_draw_buffers),
-
-            ui_texture_store: ManuallyDrop::new(ui_texture_store),
 
             texture_allocator: ManuallyDrop::new(texture_allocator),
 
@@ -304,7 +312,7 @@ impl<'a> RenderingContext<'a> {
         ManuallyDrop::into_inner(read(&self.pipeline)).deactivate(&mut self.device);
         self.pipeline = ManuallyDrop::new({
             let mut descriptor_set_layouts: ArrayVec<[_; 2]> = ArrayVec::new();
-            descriptor_set_layouts.push(self.texture_store.descriptor_set_layout.deref());
+            descriptor_set_layouts.push(self.tex_repo.get_ds_layout());
 
             CompletePipeline::new(
                 &mut self.device,
@@ -319,9 +327,9 @@ impl<'a> RenderingContext<'a> {
         ManuallyDrop::into_inner(read(&self.ui_pipeline)).deactivate(&mut self.device);
         self.ui_pipeline = ManuallyDrop::new({
             let mut descriptor_set_layouts: ArrayVec<[_; 1]> = ArrayVec::new();
-            descriptor_set_layouts.push(self.ui_texture_store.descriptor_set_layout.deref());
+            descriptor_set_layouts.push(self.ui_tex_repo.get_ds_layout());
 
-            UIPipeline::new(
+            UiPipeline::new(
                 &mut self.device,
                 properties.extent,
                 &properties,
@@ -349,15 +357,10 @@ impl<'a> RenderingContext<'a> {
     }
 
     /// Draw all vertices in the buffer
-    pub fn draw_vertices<M: MinBSPFeatures<VulkanSystem>>(
-        &mut self,
-        file: &M,
-        ui: &mut UIState,
-        faces: &[u32],
-    ) -> Result<(), &'static str> {
+    pub fn draw_vertices(&mut self, ui: &mut UiState, faces: &[u32]) -> Result<(), &'static str> {
         // Ensure UI texture(s) are loaded
         ensure_textures_ui(
-            &mut self.ui_texture_store,
+            &mut self.ui_tex_repo,
             ui,
             &mut self.device,
             &mut self.adapter,
@@ -365,6 +368,9 @@ impl<'a> RenderingContext<'a> {
             &mut self.queue_group.queues[0],
             &mut self.cmd_pool,
         );
+
+        // Get any textures that just finished loading
+        self.tex_repo.process_responses();
 
         // 3D Pass
         let cmd_buffer = self.target_chain.prep_next_target(
@@ -376,9 +382,9 @@ impl<'a> RenderingContext<'a> {
         do_render(
             cmd_buffer,
             &mut self.draw_buffers,
-            &self.texture_store,
+            &mut self.tex_repo,
             &self.pipeline.pipeline_layout,
-            file,
+            &*self.map,
             faces,
         );
 
@@ -390,7 +396,7 @@ impl<'a> RenderingContext<'a> {
             cmd_buffer,
             &self.ui_pipeline.pipeline_layout,
             &mut self.ui_draw_buffers,
-            &mut self.ui_texture_store,
+            &mut self.ui_tex_repo,
             ui,
         );
 
@@ -427,7 +433,7 @@ impl<'a> RenderingContext<'a> {
     }
 }
 
-impl<'a> core::ops::Drop for RenderingContext<'a> {
+impl<'a, M: MinBspFeatures<VulkanSystem>> core::ops::Drop for RenderingContext<'a, M> {
     fn drop(&mut self) {
         self.device.wait_idle().unwrap();
 
@@ -436,10 +442,8 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 
             ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut self.device);
             ManuallyDrop::into_inner(read(&self.ui_draw_buffers)).deactivate(&mut self.device);
-            ManuallyDrop::into_inner(read(&self.texture_store))
-                .deactivate(&mut self.device, &mut self.texture_allocator);
-            ManuallyDrop::into_inner(read(&self.ui_texture_store))
-                .deactivate(&mut self.device, &mut self.texture_allocator);
+            ManuallyDrop::into_inner(read(&self.tex_repo)).deactivate(&mut self.device);
+            ManuallyDrop::into_inner(read(&self.ui_tex_repo)).deactivate(&mut self.device);
 
             ManuallyDrop::into_inner(read(&self.texture_allocator)).dispose();
 
@@ -454,8 +458,6 @@ impl<'a> core::ops::Drop for RenderingContext<'a> {
 
             self.instance
                 .destroy_surface(ManuallyDrop::into_inner(read(&self.surface)));
-
-            ManuallyDrop::drop(&mut self.device);
         }
     }
 }

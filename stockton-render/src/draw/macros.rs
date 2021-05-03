@@ -28,9 +28,11 @@
 /// );
 /// ```
 /// See the hal::pso::Format enum for possible types
+#[allow(clippy::vec_init_then_push)]
 macro_rules! pipeline_vb_attributes {
 	// Special case for single item
 	( $binding:expr, $firstSize:expr; $firstType:ident ) => ({
+		#![allow(clippy::vec_init_then_push)]
 		vec![
 			AttributeDesc {
 				location: 0,

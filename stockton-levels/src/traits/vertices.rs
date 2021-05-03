@@ -17,7 +17,7 @@
 
 use crate::coords::CoordSystem;
 use crate::helpers::slice_to_f32;
-use crate::types::RGBA;
+use crate::types::Rgba;
 use na::Vector3;
 
 /// A vertex, used to describe a face.
@@ -26,7 +26,7 @@ pub struct Vertex {
     pub position: Vector3<f32>,
     pub tex: TexCoord,
     pub normal: Vector3<f32>,
-    pub color: RGBA,
+    pub color: Rgba,
 }
 
 /// Represents a TexCoord. 0 = surface, 1= lightmap.

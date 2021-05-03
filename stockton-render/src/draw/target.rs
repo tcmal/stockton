@@ -32,10 +32,10 @@ use na::Mat4;
 
 use super::{
     buffer::ModifiableBuffer,
-    draw_buffers::{DrawBuffers, UVPoint},
+    depth_buffer::DedicatedLoadedImage,
+    draw_buffers::{DrawBuffers, UvPoint},
     pipeline::CompletePipeline,
-    texture::image::DedicatedLoadedImage,
-    ui::{UIPipeline, UIPoint},
+    ui::{UiPipeline, UiPoint},
 };
 use crate::types::*;
 
@@ -170,7 +170,7 @@ impl TargetChain {
         adapter: &Adapter,
         surface: &mut Surface,
         pipeline: &CompletePipeline,
-        ui_pipeline: &UIPipeline,
+        ui_pipeline: &UiPipeline,
         cmd_pool: &mut CommandPool,
         properties: SwapchainProperties,
         old_swapchain: Option<Swapchain>,
@@ -288,7 +288,7 @@ impl TargetChain {
     pub fn prep_next_target<'a>(
         &'a mut self,
         device: &mut Device,
-        draw_buffers: &mut DrawBuffers<UVPoint>,
+        draw_buffers: &mut DrawBuffers<UvPoint>,
         pipeline: &CompletePipeline,
         vp: &Mat4,
     ) -> Result<&'a mut crate::types::CommandBuffer, &'static str> {
@@ -386,8 +386,8 @@ impl TargetChain {
 
     pub fn target_2d_pass<'a>(
         &'a mut self,
-        draw_buffers: &mut DrawBuffers<UIPoint>,
-        pipeline: &UIPipeline,
+        draw_buffers: &mut DrawBuffers<UiPoint>,
+        pipeline: &UiPipeline,
     ) -> Result<&'a mut CommandBuffer, &'static str> {
         let target = &mut self.targets[self.last_image as usize];
 
@@ -487,7 +487,6 @@ impl TargetChain {
                 .map_err(|_| "FrameError::PresentError")?;
         };
 
-        // TODO
         Ok(())
     }
 }

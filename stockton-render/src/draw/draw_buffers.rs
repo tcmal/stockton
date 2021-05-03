@@ -22,7 +22,7 @@ use stockton_types::{Vector2, Vector3};
 
 /// Represents a point of a triangle, including UV and texture information.
 #[derive(Debug, Clone, Copy)]
-pub struct UVPoint(pub Vector3, pub i32, pub Vector2);
+pub struct UvPoint(pub Vector3, pub i32, pub Vector2);
 
 /// Initial size of vertex buffer. TODO: Way of overriding this
 pub const INITIAL_VERT_SIZE: u64 = 3 * 3000;

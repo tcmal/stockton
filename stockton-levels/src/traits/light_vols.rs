@@ -15,12 +15,12 @@
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-use crate::types::RGB;
+use crate::types::Rgb;
 
 #[derive(Debug, Clone, Copy)]
 pub struct LightVol {
-    pub ambient: RGB,
-    pub directional: RGB,
+    pub ambient: Rgb,
+    pub directional: Rgb,
     pub dir: [u8; 2],
 }
 

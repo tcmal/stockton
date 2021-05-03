@@ -36,11 +36,11 @@ use crate::traits::light_vols::LightVol;
 use crate::traits::models::Model;
 use crate::traits::planes::Plane;
 use crate::traits::textures::Texture;
-use crate::traits::tree::BSPNode;
+use crate::traits::tree::BspNode;
 use crate::traits::vertices::{MeshVert, Vertex};
 
 /// A parsed Quake 3 BSP File.
-pub struct Q3BSPFile<T: CoordSystem> {
+pub struct Q3BspFile<T: CoordSystem> {
     pub(crate) visdata: Box<[BitBox<Local, u8>]>,
     pub(crate) textures: Box<[Texture]>,
     pub(crate) entities: Box<[Entity]>,
@@ -53,13 +53,13 @@ pub struct Q3BSPFile<T: CoordSystem> {
     pub(crate) effects: Box<[Effect]>,
     pub(crate) faces: Box<[Face]>,
     pub(crate) models: Box<[Model]>,
-    pub(crate) tree_root: BSPNode,
+    pub(crate) tree_root: BspNode,
     _phantom: PhantomData<T>,
 }
 
-impl Q3BSPFile<Q3System> {
+impl Q3BspFile<Q3System> {
     /// Parse `data` as a quake 3 bsp file.
-    pub fn parse_file(data: &[u8]) -> Result<Q3BSPFile<Q3System>> {
+    pub fn parse_file(data: &[u8]) -> Result<Q3BspFile<Q3System>> {
         let header = Header::from(data)?;
 
         let entities = entities::from_data(header.get_lump(&data, 0))?;
@@ -101,7 +101,7 @@ impl Q3BSPFile<Q3System> {
             brushes.len() as u32,
         )?;
 
-        Ok(Q3BSPFile {
+        Ok(Q3BspFile {
             visdata,
             textures,
             entities,
@@ -120,8 +120,8 @@ impl Q3BSPFile<Q3System> {
     }
 }
 
-impl<T: CoordSystem> Q3BSPFile<T> {
-    pub fn swizzle_to<D: CoordSystem>(mut self) -> Q3BSPFile<D>
+impl<T: CoordSystem> Q3BspFile<T> {
+    pub fn swizzle_to<D: CoordSystem>(mut self) -> Q3BspFile<D>
     where
         Swizzler: SwizzleFromTo<T, D>,
     {
@@ -144,7 +144,7 @@ impl<T: CoordSystem> Q3BSPFile<T> {
         }
 
         // TODO: Possibly don't need to move?
-        Q3BSPFile {
+        Q3BspFile {
             visdata: self.visdata,
             textures: self.textures,
             entities: self.entities,

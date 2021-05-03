@@ -17,11 +17,11 @@
 
 use std::convert::TryInto;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::{slice_to_u32, slice_to_vec3};
 use crate::traits::vertices::*;
-use crate::types::{ParseError, Result, RGBA};
+use crate::types::{ParseError, Result, Rgba};
 
 /// The size of one vertex
 const VERTEX_SIZE: usize = (4 * 3) + (2 * 2 * 4) + (4 * 3) + 4;
@@ -42,7 +42,7 @@ pub fn verts_from_data(data: &[u8]) -> Result<Box<[Vertex]>> {
             position: slice_to_vec3(&vertex[0..12]),
             tex: TexCoord::from_bytes(&vertex[12..28].try_into().unwrap()),
             normal: slice_to_vec3(&vertex[28..40]),
-            color: RGBA::from_slice(&vertex[40..44]),
+            color: Rgba::from_slice(&vertex[40..44]),
         })
     }
 
@@ -64,7 +64,7 @@ pub fn meshverts_from_data(data: &[u8]) -> Result<Box<[MeshVert]>> {
     Ok(meshverts.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasVertices<T> for Q3BSPFile<T> {
+impl<T: CoordSystem> HasVertices<T> for Q3BspFile<T> {
     type VerticesIter<'a> = std::slice::Iter<'a, Vertex>;
 
     fn vertices_iter(&self) -> Self::VerticesIter<'_> {
@@ -76,7 +76,7 @@ impl<T: CoordSystem> HasVertices<T> for Q3BSPFile<T> {
     }
 }
 
-impl<T: CoordSystem> HasMeshVerts<T> for Q3BSPFile<T> {
+impl<T: CoordSystem> HasMeshVerts<T> for Q3BspFile<T> {
     type MeshVertsIter<'a> = std::slice::Iter<'a, MeshVert>;
 
     fn meshverts_iter(&self) -> Self::MeshVertsIter<'_> {

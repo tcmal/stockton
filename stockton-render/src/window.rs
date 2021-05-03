@@ -20,6 +20,7 @@ use egui::Context;
 use legion::systems::Runnable;
 use log::debug;
 use std::sync::Arc;
+use stockton_levels::prelude::{MinBspFeatures, VulkanSystem};
 
 use egui::{Output, PaintJobs, Pos2, RawInput, Ui};
 
@@ -86,7 +87,7 @@ impl WindowEvent {
     }
 }
 
-pub struct UIState {
+pub struct UiState {
     pub(crate) ctx: Arc<Context>,
     pub(crate) raw_input: RawInput,
     ui: Option<Ui>,
@@ -94,7 +95,7 @@ pub struct UIState {
     pub(crate) last_tex_ver: u64,
 }
 
-impl UIState {
+impl UiState {
     pub fn ui(&mut self) -> &mut Ui {
         if self.ui.is_none() {
             self.ui = Some(self.begin_frame());
@@ -144,8 +145,8 @@ impl UIState {
         }
     }
 
-    pub fn new(renderer: &Renderer) -> Self {
-        let mut state = UIState {
+    pub fn new<T: MinBspFeatures<VulkanSystem>>(renderer: &Renderer<T>) -> Self {
+        let mut state = UiState {
             ctx: Context::new(),
             raw_input: RawInput::default(),
             ui: None,
@@ -162,11 +163,14 @@ impl UIState {
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn _process_window_events<T: 'static + InputManager>(
-    #[resource] renderer: &mut Renderer<'static>,
+pub fn _process_window_events<
+    T: 'static + InputManager,
+    M: 'static + MinBspFeatures<VulkanSystem>,
+>(
+    #[resource] renderer: &mut Renderer<'static, M>,
     #[resource] manager: &mut T,
     #[resource] mouse: &mut Mouse,
-    #[resource] ui_state: &mut UIState,
+    #[resource] ui_state: &mut UiState,
     #[state] actions_buf: &mut Vec<KBAction>,
 ) {
     let mut actions_buf_cursor = 0;
@@ -220,6 +224,9 @@ pub fn _process_window_events<T: 'static + InputManager>(
     manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
 }
 
-pub fn process_window_events_system<T: 'static + InputManager>() -> impl Runnable {
-    _process_window_events_system::<T>(Vec::with_capacity(4))
+pub fn process_window_events_system<
+    T: 'static + InputManager,
+    M: 'static + MinBspFeatures<VulkanSystem>,
+>() -> impl Runnable {
+    _process_window_events_system::<T, M>(Vec::with_capacity(4))
 }

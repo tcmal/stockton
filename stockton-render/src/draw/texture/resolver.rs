@@ -20,9 +20,9 @@
 use crate::draw::texture::image::LoadableImage;
 use stockton_levels::traits::textures::Texture;
 
-use image::{io::Reader, RgbaImage};
-
 use std::path::Path;
+
+use image::{io::Reader, RgbaImage};
 
 /// An object that can be used to resolve a texture from a BSP File
 pub trait TextureResolver<T: LoadableImage> {
@@ -31,17 +31,17 @@ pub trait TextureResolver<T: LoadableImage> {
 }
 
 /// A basic filesystem resolver which expects no file extension and guesses the image format
-pub struct BasicFSResolver<'a> {
+pub struct BasicFsResolver<'a> {
     path: &'a Path,
 }
 
-impl<'a> BasicFSResolver<'a> {
-    pub fn new(path: &'a Path) -> BasicFSResolver<'a> {
-        BasicFSResolver { path }
+impl<'a> BasicFsResolver<'a> {
+    pub fn new(path: &'a Path) -> BasicFsResolver<'a> {
+        BasicFsResolver { path }
     }
 }
 
-impl<'a> TextureResolver<RgbaImage> for BasicFSResolver<'a> {
+impl<'a> TextureResolver<RgbaImage> for BasicFsResolver<'a> {
     fn resolve(&mut self, tex: &Texture) -> Option<RgbaImage> {
         let path = self.path.join(&tex.name);
 

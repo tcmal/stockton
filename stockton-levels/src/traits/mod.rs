@@ -39,6 +39,6 @@ pub use self::light_vols::HasLightVols;
 pub use self::models::HasModels;
 pub use self::planes::HasPlanes;
 pub use self::textures::HasTextures;
-pub use self::tree::HasBSPTree;
+pub use self::tree::HasBspTree;
 pub use self::vertices::{HasMeshVerts, HasVertices};
 pub use self::visdata::HasVisData;

@@ -14,7 +14,8 @@
  * You should have received a copy of the GNU General Public License along
  * with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
-
+#![allow(incomplete_features)]
+#![feature(generic_associated_types)]
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 extern crate gfx_hal as hal;
@@ -37,7 +38,7 @@ use legion::IntoQuery;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::Arc;
 use std::sync::RwLock;
-pub use window::{UIState, WindowEvent};
+pub use window::{UiState, WindowEvent};
 
 use stockton_levels::prelude::*;
 use stockton_types::components::{CameraSettings, Transform};
@@ -49,9 +50,9 @@ use std::sync::mpsc::channel;
 
 /// Renders a world to a window when you tell it to.
 /// Also takes ownership of the window and channels window events to be processed outside winit's event loop.
-pub struct Renderer<'a> {
+pub struct Renderer<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
     /// All the vulkan stuff
-    pub(crate) context: RenderingContext<'a>,
+    pub(crate) context: RenderingContext<'a, M>,
 
     /// For getting events from the winit event loop
     pub window_events: Receiver<WindowEvent>,
@@ -60,12 +61,9 @@ pub struct Renderer<'a> {
     pub update_control_flow: Arc<RwLock<ControlFlow>>,
 }
 
-impl<'a> Renderer<'a> {
+impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
     /// Create a new Renderer.
-    pub fn new<T: MinBSPFeatures<VulkanSystem>>(
-        window: &Window,
-        file: &T,
-    ) -> (Self, Sender<WindowEvent>) {
+    pub fn new(window: &Window, file: M) -> (Self, Sender<WindowEvent>) {
         let (tx, rx) = channel();
         let update_control_flow = Arc::new(RwLock::new(ControlFlow::Poll));
 
@@ -80,16 +78,16 @@ impl<'a> Renderer<'a> {
     }
 
     /// Render a single frame of the given map.
-    fn render<T: MinBSPFeatures<VulkanSystem>>(&mut self, map: &T, ui: &mut UIState, pos: Vector3) {
+    fn render(&mut self, ui: &mut UiState, pos: Vector3) {
         // Get visible faces
-        let faces = get_visible_faces(pos, map);
+        let faces = get_visible_faces(pos, &*self.context.map);
 
         // Then draw them
-        if self.context.draw_vertices(map, ui, &faces).is_err() {
+        if self.context.draw_vertices(ui, &faces).is_err() {
             unsafe { self.context.handle_surface_change().unwrap() };
 
             // If it fails twice, then error
-            self.context.draw_vertices(map, ui, &faces).unwrap();
+            self.context.draw_vertices(ui, &faces).unwrap();
         }
     }
 
@@ -102,14 +100,13 @@ impl<'a> Renderer<'a> {
 #[system]
 #[read_component(Transform)]
 #[read_component(CameraSettings)]
-pub fn do_render<T: 'static + MinBSPFeatures<VulkanSystem>>(
-    #[resource] renderer: &mut Renderer<'static>,
-    #[resource] ui: &mut UIState,
-    #[resource] map: &T,
+pub fn do_render<T: 'static + MinBspFeatures<VulkanSystem>>(
+    #[resource] renderer: &mut Renderer<'static, T>,
+    #[resource] ui: &mut UiState,
     world: &SubWorld,
 ) {
     let mut query = <(&Transform, &CameraSettings)>::query();
     for (transform, _) in query.iter(world) {
-        renderer.render(map, ui, transform.position);
+        renderer.render(ui, transform.position);
     }
 }

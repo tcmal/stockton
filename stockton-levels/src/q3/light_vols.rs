@@ -17,10 +17,10 @@
 
 use std::convert::TryInto;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::traits::light_vols::*;
-use crate::types::{ParseError, Result, RGB};
+use crate::types::{ParseError, Result, Rgb};
 
 const VOL_LENGTH: usize = (3 * 2) + 2;
 
@@ -34,8 +34,8 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightVol]>> {
     for n in 0..length {
         let data = &data[n * VOL_LENGTH..(n + 1) * VOL_LENGTH];
         vols.push(LightVol {
-            ambient: RGB::from_slice(&data[0..3]),
-            directional: RGB::from_slice(&data[3..6]),
+            ambient: Rgb::from_slice(&data[0..3]),
+            directional: Rgb::from_slice(&data[3..6]),
             dir: data[6..8].try_into().unwrap(),
         });
     }
@@ -43,7 +43,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[LightVol]>> {
     Ok(vols.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasLightVols for Q3BSPFile<T> {
+impl<T: CoordSystem> HasLightVols for Q3BspFile<T> {
     type LightVolsIter<'a> = std::slice::Iter<'a, LightVol>;
 
     fn lightvols_iter(&self) -> Self::LightVolsIter<'_> {

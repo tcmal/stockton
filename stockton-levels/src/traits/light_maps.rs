@@ -17,12 +17,12 @@
 
 use std::fmt;
 
-use crate::types::RGB;
+use crate::types::Rgb;
 
 /// Stores light map textures that help make surface lighting more realistic
 #[derive(Clone)]
 pub struct LightMap {
-    pub map: [[RGB; 128]; 128],
+    pub map: [[Rgb; 128]; 128],
 }
 
 impl PartialEq for LightMap {

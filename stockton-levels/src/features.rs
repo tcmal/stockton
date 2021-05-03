@@ -32,5 +32,5 @@
 use crate::coords::CoordSystem;
 use crate::traits::*;
 
-pub trait MinBSPFeatures<S: CoordSystem>: HasBSPTree<S> + Send + Sync {}
-impl<T, S: CoordSystem> MinBSPFeatures<S> for T where T: HasBSPTree<S> + Send + Sync {}
+pub trait MinBspFeatures<S: CoordSystem>: HasBspTree<S> + Send + Sync {}
+impl<T, S: CoordSystem> MinBspFeatures<S> for T where T: HasBspTree<S> + Send + Sync {}

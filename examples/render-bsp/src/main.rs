@@ -30,10 +30,10 @@ use stockton_contrib::delta_time::*;
 use stockton_contrib::flycam::*;
 
 use stockton_input::{Axis, InputManager, Mouse};
-use stockton_levels::{prelude::*, q3::Q3BSPFile};
+use stockton_levels::{prelude::*, q3::Q3BspFile};
 
 use stockton_render::systems::*;
-use stockton_render::{Renderer, UIState, WindowEvent};
+use stockton_render::{Renderer, UiState, WindowEvent};
 
 use stockton_types::components::{CameraSettings, Transform};
 use stockton_types::{Session, Vector3};
@@ -63,7 +63,7 @@ impl FlycamInput for MovementInputs {
 }
 
 #[system]
-fn hello_world(#[resource] ui: &mut UIState) {
+fn hello_world(#[resource] ui: &mut UiState) {
     let ui = ui.ui();
     ui.heading("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
 }
@@ -88,13 +88,13 @@ fn main() {
     let data = include_bytes!("../data/newtest.bsp")
         .to_vec()
         .into_boxed_slice();
-    let bsp: Result<Q3BSPFile<Q3System>, stockton_levels::types::ParseError> =
-        Q3BSPFile::parse_file(&data);
-    let bsp: Q3BSPFile<Q3System> = bsp.unwrap();
-    let bsp: Q3BSPFile<VulkanSystem> = bsp.swizzle_to();
+    let bsp: Result<Q3BspFile<Q3System>, stockton_levels::types::ParseError> =
+        Q3BspFile::parse_file(&data);
+    let bsp: Q3BspFile<Q3System> = bsp.unwrap();
+    let bsp: Q3BspFile<VulkanSystem> = bsp.swizzle_to();
 
     // Create the renderer
-    let (renderer, tx) = Renderer::new(&window, &bsp);
+    let (renderer, tx) = Renderer::new(&window, bsp);
     let new_control_flow = renderer.update_control_flow.clone();
 
     // Create the input manager
@@ -117,9 +117,8 @@ fn main() {
     // Load everything into the session
     let mut session = Session::new(
         move |resources| {
-            resources.insert(UIState::new(&renderer));
+            resources.insert(UiState::new(&renderer));
             resources.insert(renderer);
-            resources.insert(bsp);
             resources.insert(manager);
             resources.insert(Timing::default());
             resources.insert(Mouse::default());
@@ -127,13 +126,16 @@ fn main() {
         move |schedule| {
             schedule
                 .add_system(update_deltatime_system())
-                .add_system(process_window_events_system::<MovementInputsManager>())
+                .add_system(process_window_events_system::<
+                    MovementInputsManager,
+                    Q3BspFile<VulkanSystem>,
+                >())
                 .flush()
                 .add_system(hello_world_system())
                 .add_system(flycam_move_system::<MovementInputsManager>())
                 .flush()
-                .add_system(calc_vp_matrix_system())
-                .add_thread_local(do_render_system::<Q3BSPFile<VulkanSystem>>());
+                .add_system(calc_vp_matrix_system::<Q3BspFile<VulkanSystem>>())
+                .add_thread_local(do_render_system::<Q3BspFile<VulkanSystem>>());
         },
     );
 

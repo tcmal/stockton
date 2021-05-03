@@ -17,8 +17,7 @@
 
 use crate::draw::draw_buffers::INITIAL_INDEX_SIZE;
 use crate::draw::draw_buffers::INITIAL_VERT_SIZE;
-use crate::draw::texture::TextureStore;
-use crate::draw::UVPoint;
+use crate::draw::UvPoint;
 use arrayvec::ArrayVec;
 use faces::FaceType;
 use hal::prelude::*;
@@ -29,10 +28,32 @@ use stockton_types::Vector2;
 use crate::draw::draw_buffers::DrawBuffers;
 use crate::types::*;
 
-pub fn do_render<M: MinBSPFeatures<VulkanSystem>>(
+use super::texture::TextureRepo;
+
+fn draw_or_queue(
+    current_chunk: usize,
+    tex_repo: &mut TextureRepo,
     cmd_buffer: &mut CommandBuffer,
-    draw_buffers: &mut DrawBuffers<UVPoint>,
-    texture_store: &TextureStore,
+    pipeline_layout: &PipelineLayout,
+    chunk_start: u32,
+    curr_idx_idx: u32,
+) {
+    if let Some(ds) = tex_repo.attempt_get_descriptor_set(current_chunk) {
+        let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
+        descriptor_sets.push(ds);
+        unsafe {
+            cmd_buffer.bind_graphics_descriptor_sets(pipeline_layout, 0, descriptor_sets, &[]);
+            cmd_buffer.draw_indexed(chunk_start * 3..(curr_idx_idx * 3) + 1, 0, 0..1);
+        }
+    } else {
+        tex_repo.queue_load(current_chunk).unwrap()
+    }
+}
+
+pub fn do_render<M: MinBspFeatures<VulkanSystem>>(
+    cmd_buffer: &mut CommandBuffer,
+    draw_buffers: &mut DrawBuffers<UvPoint>,
+    tex_repo: &mut TextureRepo,
     pipeline_layout: &PipelineLayout,
     file: &M,
     faces: &[u32],
@@ -46,17 +67,15 @@ pub fn do_render<M: MinBSPFeatures<VulkanSystem>>(
 
     for face in faces.iter().map(|idx| file.get_face(*idx)) {
         if current_chunk != face.texture_idx as usize / 8 {
-            // Last index was last of group, so draw it all.
-            let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-            descriptor_sets.push(texture_store.get_chunk_descriptor_set(current_chunk));
-            unsafe {
-                cmd_buffer.bind_graphics_descriptor_sets(pipeline_layout, 0, descriptor_sets, &[]);
-                cmd_buffer.draw_indexed(
-                    chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1,
-                    0,
-                    0..1,
-                );
-            }
+            // Last index was last of group, so draw it all if textures are loaded.
+            draw_or_queue(
+                current_chunk,
+                tex_repo,
+                cmd_buffer,
+                pipeline_layout,
+                chunk_start as u32,
+                curr_idx_idx as u32,
+            );
 
             // Next group of same-chunked faces starts here.
             chunk_start = curr_idx_idx;
@@ -74,7 +93,7 @@ pub fn do_render<M: MinBSPFeatures<VulkanSystem>>(
                     let vert = &file.resolve_meshvert(idx2 as u32, base);
                     let uv = Vector2::new(vert.tex.u[0], vert.tex.v[0]);
 
-                    let uvp = UVPoint(vert.position, face.texture_idx.try_into().unwrap(), uv);
+                    let uvp = UvPoint(vert.position, face.texture_idx.try_into().unwrap(), uv);
                     draw_buffers.vertex_buffer[curr_vert_idx] = uvp;
 
                     curr_vert_idx += 1;
@@ -104,14 +123,12 @@ pub fn do_render<M: MinBSPFeatures<VulkanSystem>>(
     }
 
     // Draw the final group of chunks
-    let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-    descriptor_sets.push(texture_store.get_chunk_descriptor_set(current_chunk));
-    unsafe {
-        cmd_buffer.bind_graphics_descriptor_sets(&pipeline_layout, 0, descriptor_sets, &[]);
-        cmd_buffer.draw_indexed(
-            chunk_start as u32 * 3..(curr_idx_idx as u32 * 3) + 1,
-            0,
-            0..1,
-        );
-    }
+    draw_or_queue(
+        current_chunk,
+        tex_repo,
+        cmd_buffer,
+        pipeline_layout,
+        chunk_start as u32,
+        curr_idx_idx as u32,
+    );
 }

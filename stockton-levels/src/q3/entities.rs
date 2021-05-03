@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::str;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::traits::entities::*;
 use crate::types::{ParseError, Result};
@@ -103,7 +103,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Entity]>> {
     Ok(entities.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasEntities for Q3BSPFile<T> {
+impl<T: CoordSystem> HasEntities for Q3BspFile<T> {
     type EntitiesIter<'a> = std::slice::Iter<'a, Entity>;
 
     fn entities_iter(&self) -> Self::EntitiesIter<'_> {

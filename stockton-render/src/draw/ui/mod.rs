@@ -21,10 +21,10 @@ pub mod pipeline;
 pub mod render;
 pub mod texture;
 
-pub use pipeline::UIPipeline;
+pub use pipeline::UiPipeline;
 pub use render::do_render;
 use stockton_types::Vector2;
-pub use texture::ensure_textures;
+pub use texture::{ensure_textures, UiTextures};
 
 #[derive(Debug)]
-pub struct UIPoint(pub Vector2, pub Vector2, pub Srgba);
+pub struct UiPoint(pub Vector2, pub Vector2, pub Srgba);

@@ -17,7 +17,7 @@
 
 use std::str;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::slice_to_u32;
 use crate::traits::effects::*;
@@ -52,7 +52,7 @@ pub fn from_data(data: &[u8], n_brushes: u32) -> Result<Box<[Effect]>> {
     Ok(effects.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasEffects<T> for Q3BSPFile<T> {
+impl<T: CoordSystem> HasEffects<T> for Q3BspFile<T> {
     type EffectsIter<'a> = std::slice::Iter<'a, Effect>;
 
     fn effects_iter(&self) -> Self::EffectsIter<'_> {

@@ -17,7 +17,7 @@
 
 const PLANE_SIZE: usize = (4 * 3) + 4;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::{slice_to_f32, slice_to_vec3};
 use crate::traits::planes::*;
@@ -44,7 +44,7 @@ pub fn from_data(data: &[u8]) -> Result<Box<[Plane]>> {
     Ok(planes.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasPlanes<T> for Q3BSPFile<T> {
+impl<T: CoordSystem> HasPlanes<T> for Q3BspFile<T> {
     type PlanesIter<'a> = std::slice::Iter<'a, Plane>;
 
     fn planes_iter(&self) -> Self::PlanesIter<'_> {

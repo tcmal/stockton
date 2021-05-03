@@ -37,7 +37,7 @@ use crate::error;
 use crate::types::*;
 
 /// A complete 2D graphics pipeline and associated resources
-pub struct UIPipeline {
+pub struct UiPipeline {
     /// Our main render pass
     pub(crate) renderpass: ManuallyDrop<RenderPass>,
 
@@ -54,7 +54,7 @@ pub struct UIPipeline {
     pub(crate) fs_module: ManuallyDrop<ShaderModule>,
 }
 
-impl UIPipeline {
+impl UiPipeline {
     pub fn new<T>(
         device: &mut Device,
         extent: hal::image::Extent,
@@ -271,7 +271,7 @@ impl UIPipeline {
         let pipeline = unsafe { device.create_graphics_pipeline(&pipeline_desc, None) }
             .map_err(error::CreationError::PipelineError)?;
 
-        Ok(UIPipeline {
+        Ok(UiPipeline {
             renderpass: ManuallyDrop::new(renderpass),
             pipeline_layout: ManuallyDrop::new(layout),
             pipeline: ManuallyDrop::new(pipeline),

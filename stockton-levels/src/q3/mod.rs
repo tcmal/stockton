@@ -32,4 +32,4 @@ mod tree;
 mod vertices;
 mod visdata;
 
-pub use self::file::Q3BSPFile;
+pub use self::file::Q3BspFile;

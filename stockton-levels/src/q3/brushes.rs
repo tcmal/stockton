@@ -23,7 +23,7 @@ const BRUSH_SIZE: usize = 4 * 3;
 /// The size of one brushsize record
 const SIDE_SIZE: usize = 4 * 2;
 
-use super::Q3BSPFile;
+use super::Q3BspFile;
 use crate::coords::CoordSystem;
 use crate::helpers::slice_to_i32;
 use crate::traits::brushes::*;
@@ -104,7 +104,7 @@ fn get_sides(
     Ok(sides.into_boxed_slice())
 }
 
-impl<T: CoordSystem> HasBrushes<T> for Q3BSPFile<T> {
+impl<T: CoordSystem> HasBrushes<T> for Q3BspFile<T> {
     type BrushesIter<'a> = std::slice::Iter<'a, Brush>;
 
     fn brushes_iter(&self) -> Self::BrushesIter<'_> {
