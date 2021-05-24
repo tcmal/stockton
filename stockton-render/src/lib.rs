@@ -64,7 +64,7 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
     /// Render a single frame of the given map.
     fn render(&mut self, ui: &mut UiState, pos: Vector3) {
         // Get visible faces
-        let faces = get_visible_faces(pos, &*self.context.map);
+        let faces = get_visible_faces(pos, &*self.context.map.read().unwrap());
 
         // Then draw them
         if self.context.draw_vertices(ui, &faces).is_err() {

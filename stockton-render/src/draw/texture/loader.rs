@@ -7,7 +7,10 @@ use std::{
     collections::VecDeque,
     marker::PhantomData,
     mem::ManuallyDrop,
-    sync::mpsc::{Receiver, Sender},
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc, RwLock,
+    },
     thread::sleep,
     time::Duration,
 };
@@ -29,9 +32,9 @@ pub type BlockRef = usize;
 
 /// Manages the loading/unloading of textures
 /// This is expected to load the textures, then send the loaded blocks back
-pub struct TextureLoader<'a, T, R, I> {
+pub struct TextureLoader<T, R, I> {
     /// Handle to the device we're using
-    pub(crate) device: &'a mut Device,
+    pub(crate) device: Arc<RwLock<Device>>,
 
     /// Blocks for which commands have been queued and are done loading once the fence is triggered.
     pub(crate) commands_queued: ArrayVec<[QueuedLoad<DynamicBlock>; NUM_SIMULTANEOUS_CMDS]>,
@@ -57,7 +60,7 @@ pub struct TextureLoader<'a, T, R, I> {
     /// Allocator for descriptor sets
     pub(crate) descriptor_allocator: ManuallyDrop<DescriptorAllocator>,
 
-    pub(crate) ds_layout: &'a DescriptorSetLayout,
+    pub(crate) ds_layout: Arc<RwLock<DescriptorSetLayout>>,
 
     /// Type ID for staging memory
     pub(crate) staging_memory_type: MemoryTypeId,
@@ -66,7 +69,7 @@ pub struct TextureLoader<'a, T, R, I> {
     pub(crate) optimal_buffer_copy_pitch_alignment: hal::buffer::Offset,
 
     /// The textures lump to get info from
-    pub(crate) textures: &'a T,
+    pub(crate) textures: Arc<RwLock<T>>,
 
     /// The resolver which gets image data for a given texture.
     pub(crate) resolver: R,
@@ -81,7 +84,7 @@ pub struct TextureLoader<'a, T, R, I> {
     pub(crate) _li: PhantomData<I>,
 }
 
-impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<'a, T, R, I> {
+impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R, I> {
     pub fn loop_forever(mut self) -> Result<TextureLoaderRemains, &'static str> {
         debug!("TextureLoader starting main loop");
         let mut res = Ok(());
@@ -103,21 +106,23 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
         }
     }
     fn main(&mut self) -> Result<(), LoopEndReason> {
+        let mut device = self.device.write().unwrap();
+
         // Check for blocks that are finished, then send them back
         let mut i = 0;
         while i < self.commands_queued.len() {
-            let signalled = unsafe { self.device.get_fence_status(&self.commands_queued[i].fence) }
+            let signalled = unsafe { device.get_fence_status(&self.commands_queued[i].fence) }
                 .map_err(|_| LoopEndReason::Error("Device lost by TextureManager"))?;
 
             if signalled {
-                let (assets, staging_bufs, block) = self.commands_queued.remove(i).dissolve();
+                let (assets, mut staging_bufs, block) = self.commands_queued.remove(i).dissolve();
                 debug!("Done loading texture block {:?}", block.id);
 
                 // Destroy staging buffers
-                staging_bufs
-                    .into_iter()
-                    .map(|x| x.deactivate(self.device, &mut self.staging_allocator))
-                    .for_each(|_| {});
+                while staging_bufs.len() > 0 {
+                    let buf = staging_bufs.pop().unwrap();
+                    buf.deactivate(&mut device, &mut self.staging_allocator);
+                }
 
                 self.buffers.push_back(assets);
                 self.return_channel.send(block).unwrap();
@@ -125,6 +130,8 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 i += 1;
             }
         }
+
+        drop(device);
 
         // Check for messages to start loading blocks
         let req_iter: Vec<_> = self.request_channel.try_iter().collect();
@@ -144,16 +151,18 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
     }
 
     pub fn new(
-        device: &'a mut Device,
+        device_lock: Arc<RwLock<Device>>,
         adapter: &Adapter,
         family: QueueFamilyId,
         gpu: Gpu,
-        ds_layout: &'a DescriptorSetLayout,
+        ds_layout: Arc<RwLock<DescriptorSetLayout>>,
         request_channel: Receiver<LoaderRequest>,
         return_channel: Sender<TexturesBlock<DynamicBlock>>,
-        texs: &'a T,
+        texs: Arc<RwLock<T>>,
         resolver: R,
     ) -> Result<Self, &'static str> {
+        let device = device_lock.write().unwrap();
+
         // Pool
         let mut pool = unsafe {
             use hal::pool::CommandPoolCreateFlags;
@@ -248,8 +257,10 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             .position(|x| x.family == family)
             .unwrap();
 
+        std::mem::drop(device);
+
         Ok(TextureLoader {
-            device,
+            device: device_lock,
             commands_queued: ArrayVec::new(),
             buffers,
             pool: ManuallyDrop::new(pool),
@@ -281,13 +292,14 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
     fn deactivate(mut self) -> TextureLoaderRemains {
         use std::ptr::read;
 
+        let mut device = self.device.write().unwrap();
+
         unsafe {
             // Wait for any currently queued loads to be done
             while self.commands_queued.len() > 0 {
                 let mut i = 0;
                 while i < self.commands_queued.len() {
-                    let signalled = self
-                        .device
+                    let signalled = device
                         .get_fence_status(&self.commands_queued[i].fence)
                         .expect("Device lost by TextureManager");
 
@@ -296,12 +308,13 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                         let (assets, mut staging_bufs, block) =
                             self.commands_queued.remove(i).dissolve();
 
-                        self.device.destroy_fence(assets.0);
+                        device.destroy_fence(assets.0);
                         // Command buffer will be freed when we reset the command pool
-                        staging_bufs
-                            .drain(..)
-                            .map(|x| x.deactivate(self.device, &mut self.staging_allocator))
-                            .for_each(|_| {});
+                        // Destroy staging buffers
+                        while staging_bufs.len() > 0 {
+                            let buf = staging_bufs.pop().unwrap();
+                            buf.deactivate(&mut device, &mut self.staging_allocator);
+                        }
 
                         self.return_channel
                             .send(block)
@@ -318,12 +331,12 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             let vec: Vec<_> = self.buffers.drain(..).collect();
 
             vec.into_iter()
-                .map(|(f, _)| self.device.destroy_fence(f))
+                .map(|(f, _)| device.destroy_fence(f))
                 .for_each(|_| {});
 
             // Free command pool
             self.pool.reset(true);
-            self.device.destroy_command_pool(read(&*self.pool));
+            device.destroy_command_pool(read(&*self.pool));
 
             debug!("Done deactivating TextureLoader");
 

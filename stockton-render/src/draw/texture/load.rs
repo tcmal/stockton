@@ -41,7 +41,7 @@ impl<B: Block<back::Backend>> QueuedLoad<B> {
     }
 }
 
-impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<'a, T, R, I> {
+impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R, I> {
     const FORMAT: Format = Format::Rgba8Srgb;
     const RESOURCES: SubresourceRange = SubresourceRange {
         aspects: Aspects::COLOR,
@@ -58,11 +58,42 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
         &mut self,
         block_ref: usize,
     ) -> Option<QueuedLoad<DynamicBlock>> {
+        let mut device = self.device.write().unwrap();
+        let textures = self.textures.read().unwrap();
+
         // Get assets to use
         let (fence, mut buf) = self.buffers.pop_front()?;
 
         // Create descriptor set
-        let descriptor_set = self.create_descriptor_set();
+        let descriptor_set = {
+            let mut v: ArrayVec<[RDescriptorSet; 1]> = ArrayVec::new();
+            self.descriptor_allocator
+                .allocate(
+                    &device,
+                    &*self.ds_layout.read().unwrap(),
+                    DescriptorRanges::from_bindings(&[
+                        DescriptorSetLayoutBinding {
+                            binding: 0,
+                            ty: DescriptorType::SampledImage,
+                            count: BLOCK_SIZE,
+                            stage_flags: ShaderStageFlags::FRAGMENT,
+                            immutable_samplers: false,
+                        },
+                        DescriptorSetLayoutBinding {
+                            binding: 1,
+                            ty: DescriptorType::Sampler,
+                            count: BLOCK_SIZE,
+                            stage_flags: ShaderStageFlags::FRAGMENT,
+                            immutable_samplers: false,
+                        },
+                    ]),
+                    1,
+                    &mut v,
+                )
+                .unwrap();
+
+            v.pop().unwrap()
+        };
 
         // Get a command buffer
         buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
@@ -74,7 +105,7 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
         // For each texture in block
         for tex_idx in (block_ref * BLOCK_SIZE)..(block_ref + 1) * BLOCK_SIZE {
             // Get texture and Resolve image
-            let tex = self.textures.get_texture(tex_idx as u32);
+            let tex = textures.get_texture(tex_idx as u32);
             if tex.is_none() {
                 break; // Past the end
                        // TODO: We should actually write blank descriptors
@@ -89,7 +120,7 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
 
             // Create staging buffer
             let mut staging_buffer = StagingBuffer::new(
-                &mut self.device,
+                &mut device,
                 &mut self.staging_allocator,
                 total_size as u64,
                 self.staging_memory_type,
@@ -98,16 +129,16 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
 
             // Write to staging buffer
             let mapped_memory = staging_buffer
-                .map_memory(&mut self.device)
+                .map_memory(&mut device)
                 .expect("Error mapping staged memory");
 
             img_data.copy_into(mapped_memory, row_size);
 
-            staging_buffer.unmap_memory(&mut self.device);
+            staging_buffer.unmap_memory(&mut device);
 
             // Create image
             let (img_mem, img) = create_image_view(
-                &mut self.device,
+                &mut device,
                 &mut *self.tex_allocator,
                 Self::FORMAT,
                 ImgUsage::SAMPLED,
@@ -116,8 +147,7 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             .unwrap();
 
             // Create image view
-            let img_view = self
-                .device
+            let img_view = device
                 .create_image_view(
                     &img,
                     ViewKind::D2,
@@ -142,14 +172,13 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             });
 
             // Create sampler
-            let sampler = self
-                .device
+            let sampler = device
                 .create_sampler(&SamplerDesc::new(Filter::Nearest, WrapMode::Tile))
                 .expect("Failed to create sampler");
 
             // Write to descriptor set
             {
-                self.device.write_descriptor_sets(vec![
+                device.write_descriptor_sets(vec![
                     DescriptorSetWrite {
                         set: descriptor_set.raw(),
                         binding: 0,
@@ -264,36 +293,6 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 descriptor_set: ManuallyDrop::new(descriptor_set),
             },
         })
-    }
-
-    pub(crate) unsafe fn create_descriptor_set(&mut self) -> RDescriptorSet {
-        let mut v: ArrayVec<[RDescriptorSet; 1]> = ArrayVec::new();
-        self.descriptor_allocator
-            .allocate(
-                self.device,
-                &*self.ds_layout,
-                DescriptorRanges::from_bindings(&[
-                    DescriptorSetLayoutBinding {
-                        binding: 0,
-                        ty: DescriptorType::SampledImage,
-                        count: BLOCK_SIZE,
-                        stage_flags: ShaderStageFlags::FRAGMENT,
-                        immutable_samplers: false,
-                    },
-                    DescriptorSetLayoutBinding {
-                        binding: 1,
-                        ty: DescriptorType::Sampler,
-                        count: BLOCK_SIZE,
-                        stage_flags: ShaderStageFlags::FRAGMENT,
-                        immutable_samplers: false,
-                    },
-                ]),
-                1,
-                &mut v,
-            )
-            .unwrap();
-
-        v.pop().unwrap()
     }
 }
 

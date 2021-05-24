@@ -11,9 +11,12 @@ use crate::types::*;
 use std::{
     collections::HashMap,
     marker::PhantomData,
+    mem::drop,
     mem::ManuallyDrop,
-    pin::Pin,
-    sync::mpsc::{channel, Receiver, Sender},
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, RwLock, RwLockReadGuard,
+    },
     thread::JoinHandle,
 };
 
@@ -31,7 +34,7 @@ pub const BLOCK_SIZE: usize = 8;
 
 pub struct TextureRepo<'a> {
     joiner: ManuallyDrop<JoinHandle<Result<TextureLoaderRemains, &'static str>>>,
-    ds_layout: Pin<Box<DescriptorSetLayout>>,
+    ds_layout: Arc<RwLock<DescriptorSetLayout>>,
     req_send: Sender<LoaderRequest>,
     resp_recv: Receiver<TexturesBlock<DynamicBlock>>,
     blocks: HashMap<BlockRef, Option<TexturesBlock<DynamicBlock>>>,
@@ -41,13 +44,13 @@ pub struct TextureRepo<'a> {
 
 impl<'a> TextureRepo<'a> {
     pub fn new<
-        T: HasTextures + Send + Sync,
+        T: 'static + HasTextures + Send + Sync,
         R: 'static + TextureResolver<I> + Send + Sync,
         I: 'static + LoadableImage + Send,
     >(
-        device: &'static mut Device,
+        device_lock: Arc<RwLock<Device>>,
         adapter: &Adapter,
-        texs: &'static T,
+        texs_lock: Arc<RwLock<T>>,
         resolver: R,
     ) -> Result<Self, &'static str> {
         let (req_send, req_recv) = channel();
@@ -67,7 +70,9 @@ impl<'a> TextureRepo<'a> {
                 .unwrap()
         };
 
-        let mut ds_layout = Box::pin(
+        let device = device_lock.write().unwrap();
+
+        let ds_lock = Arc::new(RwLock::new(
             unsafe {
                 device.create_descriptor_set_layout(
                     &[
@@ -90,21 +95,20 @@ impl<'a> TextureRepo<'a> {
                 )
             }
             .map_err(|_| "Couldn't create descriptor set layout")?,
-        );
+        ));
 
-        let long_ds_pointer: &'static DescriptorSetLayout =
-            unsafe { &mut *(&mut *ds_layout as *mut DescriptorSetLayout) };
+        drop(device);
 
         let joiner = {
             let loader = TextureLoader::new(
-                device,
+                device_lock,
                 adapter,
                 family.id(),
                 gpu,
-                long_ds_pointer,
+                ds_lock.clone(),
                 req_recv,
                 resp_send,
-                texs,
+                texs_lock,
                 resolver,
             )?;
 
@@ -113,7 +117,7 @@ impl<'a> TextureRepo<'a> {
 
         Ok(TextureRepo {
             joiner: ManuallyDrop::new(joiner),
-            ds_layout,
+            ds_layout: ds_lock,
             blocks: HashMap::new(),
             req_send,
             resp_recv,
@@ -121,8 +125,8 @@ impl<'a> TextureRepo<'a> {
         })
     }
 
-    pub fn get_ds_layout(&self) -> &DescriptorSetLayout {
-        &*self.ds_layout
+    pub fn get_ds_layout(&self) -> RwLockReadGuard<DescriptorSetLayout> {
+        self.ds_layout.read().unwrap()
     }
 
     pub fn queue_load(&mut self, block_id: BlockRef) -> Result<(), &'static str> {
@@ -157,7 +161,7 @@ impl<'a> TextureRepo<'a> {
         }
     }
 
-    pub fn deactivate(mut self, device: &mut Device) {
+    pub fn deactivate(mut self, device_lock: &mut Arc<RwLock<Device>>) {
         unsafe {
             use std::ptr::read;
 
@@ -168,12 +172,15 @@ impl<'a> TextureRepo<'a> {
             // Process any ones that just got done loading
             self.process_responses();
 
+            // Only now can we lock device without deadlocking
+            let mut device = device_lock.write().unwrap();
+
             // Return all the texture memory and descriptors.
             for (i, v) in self.blocks.drain() {
                 debug!("Deactivating blockref {:?}", i);
                 if let Some(block) = v {
                     block.deactivate(
-                        device,
+                        &mut device,
                         &mut *remains.tex_allocator,
                         &mut remains.descriptor_allocator,
                     );
@@ -184,7 +191,7 @@ impl<'a> TextureRepo<'a> {
 
             // Dispose of both allocators
             read(&*remains.tex_allocator).dispose();
-            read(&*remains.descriptor_allocator).dispose(device);
+            read(&*remains.descriptor_allocator).dispose(&device);
 
             debug!("Disposed of allocators");
         }
