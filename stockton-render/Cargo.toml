@@ -19,6 +19,8 @@ legion = { version = "^0.3" }
 egui = "^0.2"
 rendy-memory = "0.5.2"
 rendy-descriptor = "0.5.1"
+anyhow = "1.0.40"
+thiserror = "1.0.25"
 
 [features]
 default = ["vulkan"]

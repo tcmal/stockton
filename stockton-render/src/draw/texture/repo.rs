@@ -20,12 +20,14 @@ use std::{
     thread::JoinHandle,
 };
 
+use anyhow::{Context, Result};
 use hal::{
     prelude::*,
     pso::{DescriptorSetLayoutBinding, DescriptorType, ShaderStageFlags},
     Features,
 };
 use log::debug;
+use thiserror::Error;
 
 /// The number of textures in one 'block'
 /// The textures of the loaded file are divided into blocks of this size.
@@ -33,13 +35,22 @@ use log::debug;
 pub const BLOCK_SIZE: usize = 8;
 
 pub struct TextureRepo<'a> {
-    joiner: ManuallyDrop<JoinHandle<Result<TextureLoaderRemains, &'static str>>>,
+    joiner: ManuallyDrop<JoinHandle<Result<TextureLoaderRemains>>>,
     ds_layout: Arc<RwLock<DescriptorSetLayout>>,
     req_send: Sender<LoaderRequest>,
     resp_recv: Receiver<TexturesBlock<DynamicBlock>>,
     blocks: HashMap<BlockRef, Option<TexturesBlock<DynamicBlock>>>,
 
     _a: PhantomData<&'a ()>,
+}
+
+#[derive(Error, Debug)]
+pub enum TextureRepoError {
+    #[error("No suitable queue family")]
+    NoQueueFamilies,
+
+    #[error("Lock poisoned")]
+    LockPoisoned,
 }
 
 impl<'a> TextureRepo<'a> {
@@ -52,7 +63,7 @@ impl<'a> TextureRepo<'a> {
         adapter: &Adapter,
         texs_lock: Arc<RwLock<T>>,
         resolver: R,
-    ) -> Result<Self, &'static str> {
+    ) -> Result<Self> {
         let (req_send, req_recv) = channel();
         let (resp_send, resp_recv) = channel();
         let family = adapter
@@ -62,15 +73,18 @@ impl<'a> TextureRepo<'a> {
                 family.queue_type().supports_transfer()
                     && family.max_queues() >= NUM_SIMULTANEOUS_CMDS
             })
-            .unwrap();
+            .ok_or(TextureRepoError::NoQueueFamilies)?;
+
         let gpu = unsafe {
             adapter
                 .physical_device
-                .open(&[(family, &[1.0])], Features::empty())
-                .unwrap()
+                .open(&[(family, &[1.0])], Features::empty())?
         };
 
-        let device = device_lock.write().unwrap();
+        let device = device_lock
+            .write()
+            .map_err(|_| TextureRepoError::LockPoisoned)
+            .context("Error getting device lock")?;
 
         let ds_lock = Arc::new(RwLock::new(
             unsafe {
@@ -94,7 +108,8 @@ impl<'a> TextureRepo<'a> {
                     &[],
                 )
             }
-            .map_err(|_| "Couldn't create descriptor set layout")?,
+            .map_err::<HalErrorWrapper, _>(|e| e.into())
+            .context("Error creating descriptor set layout")?,
         ));
 
         drop(device);
@@ -129,7 +144,7 @@ impl<'a> TextureRepo<'a> {
         self.ds_layout.read().unwrap()
     }
 
-    pub fn queue_load(&mut self, block_id: BlockRef) -> Result<(), &'static str> {
+    pub fn queue_load(&mut self, block_id: BlockRef) -> Result<()> {
         if self.blocks.contains_key(&block_id) {
             return Ok(());
         }
@@ -137,10 +152,10 @@ impl<'a> TextureRepo<'a> {
         self.force_queue_load(block_id)
     }
 
-    pub fn force_queue_load(&mut self, block_id: BlockRef) -> Result<(), &'static str> {
+    pub fn force_queue_load(&mut self, block_id: BlockRef) -> Result<()> {
         self.req_send
             .send(LoaderRequest::Load(block_id))
-            .map_err(|_| "Couldn't send load request")?;
+            .context("Error queuing texture block load")?;
 
         self.blocks.insert(block_id, None);
 

@@ -1,6 +1,11 @@
 //! Manages the loading/unloading of textures
 
-use super::{block::TexturesBlock, load::QueuedLoad, resolver::TextureResolver, LoadableImage};
+use super::{
+    block::TexturesBlock,
+    load::{QueuedLoad, TextureLoadError},
+    resolver::TextureResolver,
+    LoadableImage,
+};
 use crate::{draw::utils::find_memory_type_id, types::*};
 
 use std::{
@@ -15,6 +20,7 @@ use std::{
     time::Duration,
 };
 
+use anyhow::{Context, Result};
 use arrayvec::ArrayVec;
 use hal::{
     format::Format, memory::Properties as MemProps, prelude::*, queue::family::QueueFamilyId,
@@ -23,6 +29,7 @@ use hal::{
 use log::*;
 use rendy_memory::DynamicConfig;
 use stockton_levels::prelude::HasTextures;
+use thiserror::Error;
 
 /// The number of command buffers to have in flight simultaneously.
 pub const NUM_SIMULTANEOUS_CMDS: usize = 2;
@@ -84,35 +91,44 @@ pub struct TextureLoader<T, R, I> {
     pub(crate) _li: PhantomData<I>,
 }
 
+#[derive(Error, Debug)]
+pub enum TextureLoaderError {
+    #[error("Couldn't find a suitable memory type")]
+    NoMemoryTypes,
+}
+
 impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R, I> {
-    pub fn loop_forever(mut self) -> Result<TextureLoaderRemains, &'static str> {
+    pub fn loop_forever(mut self) -> Result<TextureLoaderRemains> {
         debug!("TextureLoader starting main loop");
-        let mut res = Ok(());
+        let mut res = Ok(false);
         while res.is_ok() {
             res = self.main();
+            if let Ok(true) = res {
+                break;
+            }
+
             sleep(Duration::from_secs(0));
         }
 
         match res {
-            Err(r) => match r {
-                LoopEndReason::Graceful => {
-                    debug!("Starting to deactivate TextureLoader");
+            Ok(true) => {
+                debug!("Starting to deactivate TextureLoader");
 
-                    Ok(self.deactivate())
-                }
-                LoopEndReason::Error(r) => Err(r),
-            },
-            Ok(_) => Err(""),
+                Ok(self.deactivate())
+            }
+            Err(r) => Err(r.context("Error in TextureLoader loop")),
+            _ => unreachable!(),
         }
     }
-    fn main(&mut self) -> Result<(), LoopEndReason> {
+    fn main(&mut self) -> Result<bool> {
         let mut device = self.device.write().unwrap();
 
         // Check for blocks that are finished, then send them back
         let mut i = 0;
         while i < self.commands_queued.len() {
             let signalled = unsafe { device.get_fence_status(&self.commands_queued[i].fence) }
-                .map_err(|_| LoopEndReason::Error("Device lost by TextureManager"))?;
+                .map_err::<HalErrorWrapper, _>(|e| e.into())
+                .context("Error checking fence status")?;
 
             if signalled {
                 let (assets, mut staging_bufs, block) = self.commands_queued.remove(i).dissolve();
@@ -139,15 +155,20 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
             match to_load {
                 LoaderRequest::Load(to_load) => {
                     // Attempt to load given block
-                    if let Some(queued_load) = unsafe { self.attempt_queue_load(to_load) } {
-                        self.commands_queued.push(queued_load);
+                    let result = unsafe { self.attempt_queue_load(to_load) };
+                    match result {
+                        Ok(queued_load) => self.commands_queued.push(queued_load),
+                        Err(x) => match x.downcast_ref::<TextureLoadError>() {
+                            Some(TextureLoadError::NoResources) => {}
+                            _ => return Err(x).context("Error queuing texture load"),
+                        },
                     }
                 }
-                LoaderRequest::End => return Err(LoopEndReason::Graceful),
+                LoaderRequest::End => return Ok(true),
             }
         }
 
-        Ok(())
+        Ok(false)
     }
 
     pub fn new(
@@ -160,8 +181,11 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
         return_channel: Sender<TexturesBlock<DynamicBlock>>,
         texs: Arc<RwLock<T>>,
         resolver: R,
-    ) -> Result<Self, &'static str> {
-        let device = device_lock.write().unwrap();
+    ) -> Result<Self> {
+        let device = device_lock
+            .write()
+            .map_err(|_| LockPoisoned::Device)
+            .context("Error getting device lock")?;
 
         // Pool
         let mut pool = unsafe {
@@ -169,7 +193,8 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
 
             device.create_command_pool(family, CommandPoolCreateFlags::RESET_INDIVIDUAL)
         }
-        .map_err(|_| "Couldn't create command pool")?;
+        .map_err::<HalErrorWrapper, _>(|e| e.into())
+        .context("Error creating command pool")?;
 
         let type_mask = unsafe {
             use hal::image::{Kind, Tiling, Usage, ViewCapabilities};
@@ -191,7 +216,8 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                     Usage::SAMPLED,
                     ViewCapabilities::empty(),
                 )
-                .map_err(|_| "Couldn't make image to get memory requirements")?;
+                .map_err::<HalErrorWrapper, _>(|e| e.into())
+                .context("Error creating test image to get buffer settings")?;
 
             let type_mask = device.get_image_requirements(&img).type_mask;
 
@@ -206,7 +232,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
 
             DynamicAllocator::new(
                 find_memory_type_id(&adapter, type_mask, props)
-                    .ok_or("Couldn't find memory type supporting image")?,
+                    .ok_or(TextureLoaderError::NoMemoryTypes)?,
                 props,
                 DynamicConfig {
                     block_size_granularity: 4 * 32 * 32, // 32x32 image
@@ -219,7 +245,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
         let (staging_memory_type, staging_allocator) = {
             let props = MemProps::CPU_VISIBLE | MemProps::COHERENT;
             let t = find_memory_type_id(&adapter, type_mask, props)
-                .ok_or("Couldn't find memory type supporting image")?;
+                .ok_or(TextureLoaderError::NoMemoryTypes)?;
             (
                 t,
                 DynamicAllocator::new(
@@ -242,7 +268,8 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                     data.push_back((
                         device
                             .create_fence(false)
-                            .map_err(|_| "Couldn't create fence")?,
+                            .map_err::<HalErrorWrapper, _>(|e| e.into())
+                            .context("Error creating fence")?,
                         pool.allocate_one(hal::command::Level::Primary),
                     ));
                 };
@@ -351,11 +378,6 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
 pub struct TextureLoaderRemains {
     pub tex_allocator: ManuallyDrop<DynamicAllocator>,
     pub descriptor_allocator: ManuallyDrop<DescriptorAllocator>,
-}
-
-enum LoopEndReason {
-    Graceful,
-    Error(&'static str),
 }
 
 pub enum LoaderRequest {

@@ -5,6 +5,7 @@ use super::{
 use crate::types::*;
 use stockton_levels::prelude::*;
 
+use anyhow::{Context, Result};
 use arrayvec::ArrayVec;
 use hal::{
     command::{BufferImageCopy, CommandBufferFlags},
@@ -21,6 +22,19 @@ use hal::{
 use rendy_descriptor::{DescriptorRanges, DescriptorSetLayoutBinding, DescriptorType};
 use rendy_memory::{Allocator, Block};
 use std::mem::ManuallyDrop;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum TextureLoadError {
+    #[error("No available resources")]
+    NoResources,
+
+    #[error("Texture is not in map")]
+    NotInMap(usize),
+
+    #[error("Texture could not be resolved")]
+    ResolveFailed(usize),
+}
 
 pub struct QueuedLoad<B: Block<back::Backend>> {
     pub fence: Fence,
@@ -57,12 +71,21 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
     pub(crate) unsafe fn attempt_queue_load(
         &mut self,
         block_ref: usize,
-    ) -> Option<QueuedLoad<DynamicBlock>> {
-        let mut device = self.device.write().unwrap();
+    ) -> Result<QueuedLoad<DynamicBlock>> {
+        let mut device = self
+            .device
+            .write()
+            .map_err(|_| LockPoisoned::Device)
+            .context("Error getting device lock")?;
+
         let textures = self.textures.read().unwrap();
 
         // Get assets to use
-        let (fence, mut buf) = self.buffers.pop_front()?;
+        let (fence, mut buf) = self
+            .buffers
+            .pop_front()
+            .ok_or(TextureLoadError::NoResources)
+            .context("Error getting resources to use")?;
 
         // Create descriptor set
         let descriptor_set = {
@@ -90,7 +113,8 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                     1,
                     &mut v,
                 )
-                .unwrap();
+                .map_err::<HalErrorWrapper, _>(|e| e.into())
+                .context("Error creating descriptor set")?;
 
             v.pop().unwrap()
         };
@@ -110,9 +134,12 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 break; // Past the end
                        // TODO: We should actually write blank descriptors
             }
-            let tex = tex.unwrap();
+            let tex = tex.ok_or(TextureLoadError::NotInMap(tex_idx))?;
 
-            let img_data = self.resolver.resolve(tex).expect("Invalid texture");
+            let img_data = self
+                .resolver
+                .resolve(tex)
+                .ok_or(TextureLoadError::ResolveFailed(tex_idx))?;
 
             // Calculate buffer size
             let (row_size, total_size) =
@@ -125,12 +152,13 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 total_size as u64,
                 self.staging_memory_type,
             )
-            .expect("Couldn't create staging buffer");
+            .context("Error creating staging buffer")?;
 
             // Write to staging buffer
             let mapped_memory = staging_buffer
                 .map_memory(&mut device)
-                .expect("Error mapping staged memory");
+                .map_err::<HalErrorWrapper, _>(|e| e.into())
+                .context("Error mapping staged memory")?;
 
             img_data.copy_into(mapped_memory, row_size);
 
@@ -144,7 +172,7 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 ImgUsage::SAMPLED,
                 &img_data,
             )
-            .unwrap();
+            .context("Error creating image")?;
 
             // Create image view
             let img_view = device
@@ -155,7 +183,8 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                     Swizzle::NO,
                     Self::RESOURCES,
                 )
-                .expect("Error creating image view");
+                .map_err::<HalErrorWrapper, _>(|e| e.into())
+                .context("Error creating image view")?;
 
             // Queue copy from buffer to image
             copy_cmds.push(BufferImageCopy {
@@ -174,7 +203,8 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             // Create sampler
             let sampler = device
                 .create_sampler(&SamplerDesc::new(Filter::Nearest, WrapMode::Tile))
-                .expect("Failed to create sampler");
+                .map_err::<HalErrorWrapper, _>(|e| e.into())
+                .context("Error creating sampler")?;
 
             // Write to descriptor set
             {
@@ -283,7 +313,7 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             Some(&fence),
         );
 
-        Some(QueuedLoad {
+        Ok(QueuedLoad {
             staging_bufs,
             fence,
             buf,
@@ -313,7 +343,7 @@ fn create_image_view<T, I>(
     format: Format,
     usage: ImgUsage,
     img: &I,
-) -> Result<(T::Block, Image), &'static str>
+) -> Result<(T::Block, Image)>
 where
     T: Allocator<back::Backend>,
     I: LoadableImage,
@@ -331,7 +361,8 @@ where
             ViewCapabilities::empty(),
         )
     }
-    .map_err(|_| "Couldn't create image")?;
+    .map_err::<HalErrorWrapper, _>(|e| e.into())
+    .context("Error creating image")?;
 
     // Allocate memory
     let (block, _) = unsafe {
@@ -339,12 +370,14 @@ where
 
         allocator.alloc(device, requirements.size, requirements.alignment)
     }
-    .map_err(|_| "Out of memory")?;
+    .map_err::<HalErrorWrapper, _>(|e| e.into())
+    .context("Error allocating memory")?;
 
     unsafe {
         device
             .bind_image_memory(&block.memory(), block.range().start, &mut image_ref)
-            .map_err(|_| "Couldn't bind memory to image")?;
+            .map_err::<HalErrorWrapper, _>(|e| e.into())
+            .context("Error binding memory to image")?;
     }
 
     Ok((block, image_ref))

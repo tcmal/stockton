@@ -2,6 +2,7 @@ use crate::types::*;
 
 use std::mem::ManuallyDrop;
 
+use anyhow::{Context, Result};
 use hal::{device::MapError, prelude::*, MemoryTypeId};
 use rendy_memory::{Allocator, Block};
 
@@ -18,18 +19,21 @@ impl StagingBuffer {
         alloc: &mut DynamicAllocator,
         size: u64,
         _memory_type_id: MemoryTypeId,
-    ) -> Result<StagingBuffer, &'static str> {
+    ) -> Result<StagingBuffer> {
         let mut buffer = unsafe { device.create_buffer(size, Self::USAGE) }
-            .map_err(|_| "Couldn't create staging buffer")?;
+            .map_err::<HalErrorWrapper, _>(|e| e.into())
+            .context("Error creating buffer")?;
 
         let requirements = unsafe { device.get_buffer_requirements(&buffer) };
 
         let (memory, _) = alloc
             .alloc(device, requirements.size, requirements.alignment)
-            .map_err(|_| "Couldn't allocate staging memory")?;
+            .map_err::<HalErrorWrapper, _>(|e| e.into())
+            .context("Error allocating staging memory")?;
 
         unsafe { device.bind_buffer_memory(memory.memory(), 0, &mut buffer) }
-            .map_err(|_| "Couldn't bind staging memory to buffer")?;
+            .map_err::<HalErrorWrapper, _>(|e| e.into())
+            .context("Error binding staging memory to buffer")?;
 
         Ok(StagingBuffer {
             buf: ManuallyDrop::new(buffer),

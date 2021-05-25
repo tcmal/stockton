@@ -1,5 +1,7 @@
 //! Convenience module to reference types that are stored in the backend's enum
 
+use thiserror::Error;
+
 pub type Device = <back::Backend as hal::Backend>::Device;
 pub type Gpu = hal::adapter::Gpu<back::Backend>;
 pub type Buffer = <back::Backend as hal::Backend>::Buffer;
@@ -30,3 +32,45 @@ pub type DynamicAllocator = rendy_memory::DynamicAllocator<back::Backend>;
 pub type DynamicBlock = rendy_memory::DynamicBlock<back::Backend>;
 
 pub type RDescriptorSet = rendy_descriptor::DescriptorSet<back::Backend>;
+
+#[derive(Error, Debug)]
+pub enum LockPoisoned {
+    #[error("Device lock poisoned")]
+    Device,
+
+    #[error("Map lock poisoned")]
+    Map,
+
+    #[error("Other lock poisoned")]
+    Other,
+}
+
+#[derive(Error, Debug)]
+pub enum HalErrorWrapper {
+    #[error("Device Creation Error: {0}")]
+    DeviceCreationError(#[from] hal::device::CreationError),
+
+    #[error("Buffer Creation Error: {0}")]
+    BufferCreationError(#[from] hal::buffer::CreationError),
+
+    #[error("Image Creation Error: {0}")]
+    ImageCreationError(#[from] hal::image::CreationError),
+
+    #[error("View Error: {0}")]
+    ImageViewError(#[from] hal::image::ViewError),
+
+    #[error("Out of memory on {0}")]
+    OutOfMemory(#[from] hal::device::OutOfMemory),
+
+    #[error("Device Lost: {0}")]
+    DeviceLost(#[from] hal::device::DeviceLost),
+
+    #[error("Allocation Error: {0}")]
+    AllocationError(#[from] hal::device::AllocationError),
+
+    #[error("Bind Error: {0}")]
+    BindError(#[from] hal::device::BindError),
+
+    #[error("Map Error: {0}")]
+    MapError(#[from] hal::device::MapError),
+}
