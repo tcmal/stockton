@@ -180,8 +180,7 @@ impl<'a> TextureRepo<'a> {
             let mut device = device_lock.write().unwrap();
 
             // Return all the texture memory and descriptors.
-            for (i, v) in self.blocks.drain() {
-                debug!("Deactivating blockref {:?}", i);
+            for (_, v) in self.blocks.drain() {
                 if let Some(block) = v {
                     block.deactivate(
                         &mut device,
@@ -191,13 +190,16 @@ impl<'a> TextureRepo<'a> {
                 }
             }
 
-            debug!("Deactivated all blocks");
-
             // Dispose of both allocators
             read(&*remains.tex_allocator).dispose();
             read(&*remains.descriptor_allocator).dispose(&device);
 
-            debug!("Disposed of allocators");
+            // Deactivate DS Layout
+            let ds_layout = Arc::try_unwrap(self.ds_layout)
+                .unwrap()
+                .into_inner()
+                .unwrap();
+            device.destroy_descriptor_set_layout(ds_layout);
         }
     }
 }
