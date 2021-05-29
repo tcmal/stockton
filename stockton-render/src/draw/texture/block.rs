@@ -2,7 +2,6 @@ use super::{loader::BlockRef, repo::BLOCK_SIZE};
 use crate::types::*;
 
 use arrayvec::ArrayVec;
-use hal::prelude::*;
 use rendy_memory::{Allocator, Block};
 use std::{iter::once, mem::ManuallyDrop};
 
@@ -15,7 +14,7 @@ pub struct TexturesBlock<B: Block<back::Backend>> {
 impl<B: Block<back::Backend>> TexturesBlock<B> {
     pub fn deactivate<T: Allocator<back::Backend, Block = B>>(
         mut self,
-        device: &mut Device,
+        device: &mut DeviceT,
         tex_alloc: &mut T,
         desc_alloc: &mut DescriptorAllocator,
     ) {
@@ -36,9 +35,9 @@ impl<B: Block<back::Backend>> TexturesBlock<B> {
 
 pub struct LoadedImage<B: Block<back::Backend>> {
     pub mem: ManuallyDrop<B>,
-    pub img: ManuallyDrop<Image>,
-    pub img_view: ManuallyDrop<ImageView>,
-    pub sampler: ManuallyDrop<Sampler>,
+    pub img: ManuallyDrop<ImageT>,
+    pub img_view: ManuallyDrop<ImageViewT>,
+    pub sampler: ManuallyDrop<SamplerT>,
     pub row_size: usize,
     pub height: u32,
     pub width: u32,
@@ -47,7 +46,7 @@ pub struct LoadedImage<B: Block<back::Backend>> {
 impl<B: Block<back::Backend>> LoadedImage<B> {
     pub fn deactivate<T: Allocator<back::Backend, Block = B>>(
         self,
-        device: &mut Device,
+        device: &mut DeviceT,
         alloc: &mut T,
     ) {
         unsafe {

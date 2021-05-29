@@ -14,5 +14,6 @@ Code & Assets (including from `rust-bsp`) are licensed under the GNU GPL v3.0, a
 
 Exceptions:
 
+  - `rendy-memory` and `rendy-descriptor` are both modified from [here](https://github.com/amethyst/rendy) and are licensed under MIT.
   - `examples/render-quad/data/test1.png` - [Photo by Lisa Fotios from Pexels](https://www.pexels.com/photo/white-petaled-flowers-painting-2224220/)
   - `examples/render-quad/data/test2.png` - [Photo by Elina Sazonova from Pexels](https://www.pexels.com/photo/brown-tabby-cat-on-pink-textile-3971972/)

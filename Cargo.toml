@@ -6,6 +6,8 @@ members = [
     "stockton-render",
     "stockton-levels",
     "stockton-contrib",
+    "rendy-memory",
+    "rendy-descriptor",
     "examples/render-bsp",
-    "examples/input-codegen"
+    "examples/input-codegen",
 ]

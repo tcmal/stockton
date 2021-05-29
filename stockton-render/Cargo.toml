@@ -9,7 +9,7 @@ stockton-input = { path = "../stockton-input" }
 stockton-levels = { path = "../stockton-levels" }
 stockton-types = { path = "../stockton-types" }
 winit = "^0.21"
-gfx-hal = "0.4.1"
+gfx-hal = "^0.8.0"
 arrayvec = "0.4.10"
 nalgebra-glm = "^0.6"
 shaderc = "^0.7"
@@ -17,8 +17,8 @@ log = "0.4.0"
 image = "0.23.11"
 legion = { version = "^0.3" }
 egui = "^0.2"
-rendy-memory = "0.5.2"
-rendy-descriptor = "0.5.1"
+rendy-memory = { path = "../rendy-memory" }
+rendy-descriptor = { path = "../rendy-descriptor" }
 anyhow = "1.0.40"
 thiserror = "1.0.25"
 
@@ -27,6 +27,5 @@ default = ["vulkan"]
 vulkan = ["gfx-backend-vulkan"]
 
 [dependencies.gfx-backend-vulkan]
-version = "0.4.1"
-features = ["x11"]
+version = "^0.8.0"
 optional = true

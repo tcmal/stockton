@@ -1,6 +1,7 @@
 //! Error types
 
 use super::draw::target::TargetChainCreationError;
+use thiserror::Error;
 
 /// An error encountered creating a rendering context.
 #[derive(Debug)]
@@ -23,8 +24,8 @@ pub enum CreationError {
     BufferError(hal::buffer::CreationError),
     BufferNoMemory,
 
-    SwapchainError(hal::window::CreationError),
-    ImageViewError(hal::image::ViewError),
+    SwapchainError,
+    ImageViewError,
 
     BadDataError,
 }
@@ -34,3 +35,15 @@ pub enum CreationError {
 /// You'll likely need to exit or create a new context.
 #[derive(Debug, Clone)]
 pub enum FrameError {}
+
+#[derive(Error, Debug)]
+pub enum LockPoisoned {
+    #[error("Device lock poisoned")]
+    Device,
+
+    #[error("Map lock poisoned")]
+    Map,
+
+    #[error("Queue lock poisoned")]
+    Queue,
+}

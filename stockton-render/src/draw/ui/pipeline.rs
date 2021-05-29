@@ -10,11 +10,10 @@ const VERTEX_SOURCE: &str = include_str!("./data/stockton.vert");
 const FRAGMENT_SOURCE: &str = include_str!("./data/stockton.frag");
 
 use std::{
-    borrow::Borrow,
+    array::IntoIter,
+    iter::once,
     mem::{size_of, ManuallyDrop},
 };
-
-use hal::prelude::*;
 
 use crate::draw::target::SwapchainProperties;
 use crate::error;
@@ -23,32 +22,28 @@ use crate::types::*;
 /// A complete 2D graphics pipeline and associated resources
 pub struct UiPipeline {
     /// Our main render pass
-    pub(crate) renderpass: ManuallyDrop<RenderPass>,
+    pub(crate) renderpass: ManuallyDrop<RenderPassT>,
 
     /// The layout of our main graphics pipeline
-    pub(crate) pipeline_layout: ManuallyDrop<PipelineLayout>,
+    pub(crate) pipeline_layout: ManuallyDrop<PipelineLayoutT>,
 
     /// Our main graphics pipeline
-    pub(crate) pipeline: ManuallyDrop<GraphicsPipeline>,
+    pub(crate) pipeline: ManuallyDrop<GraphicsPipelineT>,
 
     /// The vertex shader module
-    pub(crate) vs_module: ManuallyDrop<ShaderModule>,
+    pub(crate) vs_module: ManuallyDrop<ShaderModuleT>,
 
     /// The fragment shader module
-    pub(crate) fs_module: ManuallyDrop<ShaderModule>,
+    pub(crate) fs_module: ManuallyDrop<ShaderModuleT>,
 }
 
 impl UiPipeline {
-    pub fn new<T>(
-        device: &mut Device,
+    pub fn new<'a, T: Iterator<Item = &'a DescriptorSetLayoutT>>(
+        device: &mut DeviceT,
         extent: hal::image::Extent,
         swapchain_properties: &SwapchainProperties,
         set_layouts: T,
-    ) -> Result<Self, error::CreationError>
-    where
-        T: IntoIterator + std::fmt::Debug,
-        T::Item: Borrow<DescriptorSetLayout>,
-    {
+    ) -> Result<Self, error::CreationError> {
         use hal::format::Format;
         use hal::pso::*;
 
@@ -81,7 +76,7 @@ impl UiPipeline {
 
             let external_dependency = SubpassDependency {
                 flags: Dependencies::empty(),
-                passes: SubpassRef::External..SubpassRef::Pass(0),
+                passes: None..Some(0),
                 stages: PipelineStage::COLOR_ATTACHMENT_OUTPUT
                     ..(PipelineStage::COLOR_ATTACHMENT_OUTPUT
                         | PipelineStage::EARLY_FRAGMENT_TESTS),
@@ -90,7 +85,11 @@ impl UiPipeline {
             };
 
             unsafe {
-                device.create_render_pass(&[img_attachment], &[subpass], &[external_dependency])
+                device.create_render_pass(
+                    IntoIter::new([img_attachment]),
+                    IntoIter::new([subpass]),
+                    IntoIter::new([external_dependency]),
+                )
             }
             .map_err(|_| error::CreationError::OutOfMemoryError)?
         };
@@ -152,28 +151,6 @@ impl UiPipeline {
             },
         );
 
-        // Shader set
-        let shaders = GraphicsShaderSet {
-            vertex: vs_entry,
-            fragment: Some(fs_entry),
-            hull: None,
-            domain: None,
-            geometry: None,
-        };
-
-        // Vertex buffers
-        let vertex_buffers: Vec<VertexBufferDesc> = vec![VertexBufferDesc {
-            binding: 0,
-            stride: ((size_of::<f32>() * 4) + (size_of::<u8>() * 4)) as u32,
-            rate: VertexInputRate::Vertex,
-        }];
-
-        let attributes: Vec<AttributeDesc> = pipeline_vb_attributes!(0,
-            size_of::<f32>() * 2; Rg32Sfloat,
-            size_of::<f32>() * 2; Rg32Sfloat,
-            size_of::<u8>() * 4; R32Uint
-        );
-
         // Rasterizer
         let rasterizer = Rasterizer {
             polygon_mode: PolygonMode::Fill,
@@ -182,6 +159,7 @@ impl UiPipeline {
             depth_clamping: false,
             depth_bias: None,
             conservative: true,
+            line_width: State::Static(1.0),
         };
 
         // Depth stencil
@@ -191,10 +169,9 @@ impl UiPipeline {
             stencil: None,
         };
 
-        log::debug!("ui set layouts: {:?}", set_layouts);
         // Pipeline layout
         let layout = unsafe {
-            device.create_pipeline_layout(set_layouts, &[(ShaderStageFlags::VERTEX, 0..8)])
+            device.create_pipeline_layout(set_layouts, once((ShaderStageFlags::VERTEX, 0..8)))
         }
         .map_err(|_| error::CreationError::OutOfMemoryError)?;
 
@@ -227,18 +204,55 @@ impl UiPipeline {
                 depth: (0.0..1.0),
             }),
             scissor: Some(extent.rect()),
-            blend_color: None,
+            blend_constants: None,
             depth_bounds: None,
         };
 
-        // Input assembler
-        let input_assembler = InputAssemblerDesc::new(Primitive::TriangleList);
+        // Primitive assembler
+        let primitive_assembler = PrimitiveAssemblerDesc::Vertex {
+            buffers: &[VertexBufferDesc {
+                binding: 0,
+                stride: (size_of::<f32>() * 6) as u32,
+                rate: VertexInputRate::Vertex,
+            }],
+            attributes: &[
+                AttributeDesc {
+                    location: 0,
+                    binding: 0,
+                    element: Element {
+                        format: Format::Rg32Sfloat,
+                        offset: 0,
+                    },
+                },
+                AttributeDesc {
+                    location: 1,
+                    binding: 0,
+                    element: Element {
+                        format: Format::Rg32Sfloat,
+                        offset: (size_of::<f32>() * 2) as u32,
+                    },
+                },
+                AttributeDesc {
+                    location: 2,
+                    binding: 0,
+                    element: Element {
+                        format: Format::R32Uint,
+                        offset: (size_of::<f32>() * 4) as u32,
+                    },
+                },
+            ],
+            input_assembler: InputAssemblerDesc::new(Primitive::TriangleList),
+            vertex: vs_entry,
+            tessellation: None,
+            geometry: None,
+        };
 
         // Pipeline description
         let pipeline_desc = GraphicsPipelineDesc {
-            shaders,
+            label: Some("UI Pipeline"),
+            primitive_assembler,
             rasterizer,
-            vertex_buffers,
+            fragment: Some(fs_entry),
             blender,
             depth_stencil,
             multisampling: None,
@@ -247,8 +261,6 @@ impl UiPipeline {
             subpass,
             flags: PipelineCreationFlags::empty(),
             parent: BasePipeline::None,
-            input_assembler,
-            attributes,
         };
 
         // Pipeline
@@ -265,7 +277,7 @@ impl UiPipeline {
     }
 
     /// Deactivate vulkan resources. Use before dropping
-    pub fn deactivate(self, device: &mut Device) {
+    pub fn deactivate(self, device: &mut DeviceT) {
         unsafe {
             use core::ptr::read;
 

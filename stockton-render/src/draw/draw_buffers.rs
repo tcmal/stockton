@@ -21,7 +21,7 @@ pub struct DrawBuffers<'a, T: Sized> {
 
 impl<'a, T> DrawBuffers<'a, T> {
     pub fn new(
-        device: &mut Device,
+        device: &mut DeviceT,
         adapter: &Adapter,
     ) -> Result<DrawBuffers<'a, T>, CreationError> {
         let vert = StagedBuffer::new(device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)?;
@@ -33,7 +33,7 @@ impl<'a, T> DrawBuffers<'a, T> {
         })
     }
 
-    pub fn deactivate(self, device: &mut Device) {
+    pub fn deactivate(self, device: &mut DeviceT) {
         unsafe {
             use core::ptr::read;
 

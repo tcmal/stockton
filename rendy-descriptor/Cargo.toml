@@ -1,0 +1,17 @@
+[package]
+name = "rendy-descriptor"
+version = "0.5.1"
+authors = ["omni-viral <scareaangel@gmail.com>"]
+edition = "2018"
+repository = "https://github.com/amethyst/rendy"
+license = "MIT OR Apache-2.0"
+documentation = "https://docs.rs/rendy-descriptor"
+keywords = ["graphics", "gfx-hal", "rendy"]
+categories = ["rendering"]
+description = "Rendy's descriptor allocator"
+
+[dependencies]
+gfx-hal = "^0.8"
+log = "0.4.11"
+relevant = { version = "0.4.2", features = ["log"] }
+smallvec = "1.5.1"

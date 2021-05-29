@@ -1,15 +1,15 @@
 use crate::draw::buffer::create_buffer;
-use gfx_hal::{format::Aspects, memory::Properties, queue::Submission, MemoryTypeId};
+use gfx_hal::{format::Aspects, memory::Properties, MemoryTypeId};
 use hal::{
     buffer::Usage as BufUsage,
     format::{Format, Swizzle},
-    image::{SubresourceRange, Usage, ViewKind},
+    image::{SubresourceRange, Usage, Usage as ImgUsage, ViewKind},
     memory,
+    memory::Segment,
 };
-use std::convert::TryInto;
+use std::{array::IntoIter, convert::TryInto, iter::empty};
 
 use crate::types::*;
-use hal::prelude::*;
 use std::mem::ManuallyDrop;
 
 use super::texture::{LoadableImage, PIXEL_SIZE};
@@ -17,18 +17,18 @@ use super::texture::{LoadableImage, PIXEL_SIZE};
 /// Holds an image that's loaded into GPU memory dedicated only to that image, bypassing the memory allocator.
 pub struct DedicatedLoadedImage {
     /// The GPU Image handle
-    image: ManuallyDrop<Image>,
+    image: ManuallyDrop<ImageT>,
 
     /// The full view of the image
-    pub image_view: ManuallyDrop<ImageView>,
+    pub image_view: ManuallyDrop<ImageViewT>,
 
     /// The memory backing the image
-    memory: ManuallyDrop<Memory>,
+    memory: ManuallyDrop<MemoryT>,
 }
 
 impl DedicatedLoadedImage {
     pub fn new(
-        device: &mut Device,
+        device: &mut DeviceT,
         adapter: &Adapter,
         format: Format,
         usage: Usage,
@@ -39,7 +39,7 @@ impl DedicatedLoadedImage {
         let (memory, image_ref) = {
             // Round up the size to align properly
             let initial_row_size = PIXEL_SIZE * width;
-            let limits = adapter.physical_device.limits();
+            let limits = adapter.physical_device.properties().limits;
             let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
 
             let row_size =
@@ -56,6 +56,7 @@ impl DedicatedLoadedImage {
                     format,
                     Tiling::Optimal,
                     usage,
+                    memory::SparseFlags::empty(),
                     ViewCapabilities::empty(),
                 )
             }
@@ -96,7 +97,14 @@ impl DedicatedLoadedImage {
 
         // Create ImageView and sampler
         let image_view = unsafe {
-            device.create_image_view(&image_ref, ViewKind::D2, format, Swizzle::NO, resources)
+            device.create_image_view(
+                &image_ref,
+                ViewKind::D2,
+                format,
+                Swizzle::NO,
+                ImgUsage::DEPTH_STENCIL_ATTACHMENT,
+                resources,
+            )
         }
         .map_err(|_| "Couldn't create the image view!")?;
 
@@ -111,13 +119,13 @@ impl DedicatedLoadedImage {
     pub fn load<T: LoadableImage>(
         &mut self,
         img: T,
-        device: &mut Device,
+        device: &mut DeviceT,
         adapter: &Adapter,
-        command_queue: &mut CommandQueue,
-        command_pool: &mut CommandPool,
+        command_queue: &mut QueueT,
+        command_pool: &mut CommandPoolT,
     ) -> Result<(), &'static str> {
         let initial_row_size = PIXEL_SIZE * img.width() as usize;
-        let limits = adapter.physical_device.limits();
+        let limits = adapter.physical_device.properties().limits;
         let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
 
         let row_size =
@@ -126,7 +134,7 @@ impl DedicatedLoadedImage {
         debug_assert!(row_size as usize >= initial_row_size);
 
         // Make a staging buffer
-        let (staging_buffer, staging_memory) = create_buffer(
+        let (staging_buffer, mut staging_memory) = create_buffer(
             device,
             adapter,
             BufUsage::TRANSFER_SRC,
@@ -139,7 +147,13 @@ impl DedicatedLoadedImage {
         unsafe {
             let mapped_memory: *mut u8 = std::mem::transmute(
                 device
-                    .map_memory(&staging_memory, 0..total_size)
+                    .map_memory(
+                        &mut staging_memory,
+                        Segment {
+                            offset: 0,
+                            size: None,
+                        },
+                    )
                     .map_err(|_| "Couldn't map buffer memory")?,
             );
 
@@ -148,7 +162,7 @@ impl DedicatedLoadedImage {
                 img.copy_row(y as u32, mapped_memory.offset(dest_base));
             }
 
-            device.unmap_memory(&staging_memory);
+            device.unmap_memory(&mut staging_memory);
         }
 
         // Copy from staging to image memory
@@ -170,14 +184,16 @@ impl DedicatedLoadedImage {
                 families: None,
                 range: SubresourceRange {
                     aspects: Aspects::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
+                    level_start: 0,
+                    level_count: Some(1),
+                    layer_start: 0,
+                    layer_count: Some(1),
                 },
             };
             buf.pipeline_barrier(
                 PipelineStage::TOP_OF_PIPE..PipelineStage::TRANSFER,
                 memory::Dependencies::empty(),
-                &[image_barrier],
+                IntoIter::new([image_barrier]),
             );
 
             // Copy from buffer to image
@@ -185,7 +201,7 @@ impl DedicatedLoadedImage {
                 &staging_buffer,
                 &(*self.image),
                 Layout::TransferDstOptimal,
-                &[BufferImageCopy {
+                IntoIter::new([BufferImageCopy {
                     buffer_offset: 0,
                     buffer_width: (row_size / PIXEL_SIZE) as u32,
                     buffer_height: img.height(),
@@ -200,7 +216,7 @@ impl DedicatedLoadedImage {
                         height: img.height(),
                         depth: 1,
                     },
-                }],
+                }]),
             );
 
             // Setup the layout of our image for shaders
@@ -211,15 +227,17 @@ impl DedicatedLoadedImage {
                 families: None,
                 range: SubresourceRange {
                     aspects: Aspects::COLOR,
-                    levels: 0..1,
-                    layers: 0..1,
+                    level_start: 0,
+                    level_count: Some(1),
+                    layer_start: 0,
+                    layer_count: Some(1),
                 },
             };
 
             buf.pipeline_barrier(
                 PipelineStage::TRANSFER..PipelineStage::FRAGMENT_SHADER,
                 memory::Dependencies::empty(),
-                &[image_barrier],
+                IntoIter::new([image_barrier]),
             );
 
             buf.finish();
@@ -229,14 +247,12 @@ impl DedicatedLoadedImage {
 
         // Submit our commands and wait for them to finish
         unsafe {
-            let setup_finished = device.create_fence(false).unwrap();
-            command_queue.submit::<_, _, Semaphore, _, _>(
-                Submission {
-                    command_buffers: &[&buf],
-                    wait_semaphores: std::iter::empty::<_>(),
-                    signal_semaphores: std::iter::empty::<_>(),
-                },
-                Some(&setup_finished),
+            let mut setup_finished = device.create_fence(false).unwrap();
+            command_queue.submit(
+                IntoIter::new([&buf]),
+                empty(),
+                empty(),
+                Some(&mut setup_finished),
             );
 
             device
@@ -259,10 +275,10 @@ impl DedicatedLoadedImage {
     /// Load the given image into a new buffer
     pub fn load_into_new<T: LoadableImage>(
         img: T,
-        device: &mut Device,
+        device: &mut DeviceT,
         adapter: &Adapter,
-        command_queue: &mut CommandQueue,
-        command_pool: &mut CommandPool,
+        command_queue: &mut QueueT,
+        command_pool: &mut CommandPoolT,
         format: Format,
         usage: Usage,
     ) -> Result<DedicatedLoadedImage, &'static str> {
@@ -273,8 +289,10 @@ impl DedicatedLoadedImage {
             usage | Usage::TRANSFER_DST,
             SubresourceRange {
                 aspects: Aspects::COLOR,
-                levels: 0..1,
-                layers: 0..1,
+                level_start: 0,
+                level_count: Some(1),
+                layer_start: 0,
+                layer_count: Some(1),
             },
             img.width() as usize,
             img.height() as usize,
@@ -286,7 +304,7 @@ impl DedicatedLoadedImage {
 
     /// Properly frees/destroys all the objects in this struct
     /// Dropping without doing this is a bad idea
-    pub fn deactivate(self, device: &mut Device) {
+    pub fn deactivate(self, device: &mut DeviceT) {
         unsafe {
             use core::ptr::read;
 

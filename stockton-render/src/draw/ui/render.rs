@@ -1,18 +1,16 @@
 use crate::draw::texture::TextureRepo;
-use arrayvec::ArrayVec;
-use hal::prelude::*;
 use hal::pso::ShaderStageFlags;
 
 use super::UiPoint;
 use crate::draw::draw_buffers::DrawBuffers;
 use crate::types::*;
 use crate::UiState;
-use std::convert::TryInto;
+use std::{array::IntoIter, convert::TryInto, iter::empty};
 use stockton_types::Vector2;
 
 pub fn do_render(
-    cmd_buffer: &mut CommandBuffer,
-    pipeline_layout: &PipelineLayout,
+    cmd_buffer: &mut CommandBufferT,
+    pipeline_layout: &PipelineLayoutT,
     draw_buffers: &mut DrawBuffers<UiPoint>,
     tex_repo: &mut TextureRepo,
     ui: &mut UiState,
@@ -49,11 +47,13 @@ pub fn do_render(
 
         // TODO: *Properly* deal with textures
         if let Some(ds) = tex_repo.attempt_get_descriptor_set(0) {
-            let mut descriptor_sets: ArrayVec<[_; 1]> = ArrayVec::new();
-            descriptor_sets.push(ds);
-
             unsafe {
-                cmd_buffer.bind_graphics_descriptor_sets(pipeline_layout, 0, descriptor_sets, &[]);
+                cmd_buffer.bind_graphics_descriptor_sets(
+                    pipeline_layout,
+                    0,
+                    IntoIter::new([ds]),
+                    empty(),
+                );
                 // Call draw
                 cmd_buffer.draw_indexed(0..tris.indices.len() as u32, 0, 0..1);
             }

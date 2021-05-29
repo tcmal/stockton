@@ -3,7 +3,7 @@ use hal::{memory::Properties as MemProperties, prelude::*, MemoryTypeId};
 
 pub fn find_memory_type_id(
     adapter: &Adapter,
-    type_mask: u64,
+    type_mask: u32,
     props: MemProperties,
 ) -> Option<MemoryTypeId> {
     adapter

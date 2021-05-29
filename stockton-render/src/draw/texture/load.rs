@@ -2,7 +2,7 @@ use super::{
     block::LoadedImage, block::TexturesBlock, loader::TextureLoader, repo::BLOCK_SIZE,
     resolver::TextureResolver, staging_buffer::StagingBuffer, LoadableImage, PIXEL_SIZE,
 };
-use crate::types::*;
+use crate::{error::LockPoisoned, types::*};
 use stockton_levels::prelude::*;
 
 use anyhow::{Context, Result};
@@ -11,17 +11,22 @@ use hal::{
     command::{BufferImageCopy, CommandBufferFlags},
     format::{Aspects, Format, Swizzle},
     image::{
-        Extent, Filter, Layout, Offset, SamplerDesc, SubresourceLayers, SubresourceRange,
+        Access, Extent, Filter, Layout, Offset, SamplerDesc, SubresourceLayers, SubresourceRange,
         Usage as ImgUsage, ViewKind, WrapMode,
     },
-    memory::{Barrier, Dependencies},
-    prelude::*,
-    pso::{Descriptor, DescriptorSetWrite, PipelineStage, ShaderStageFlags},
-    queue::Submission,
+    memory::{Barrier, Dependencies, SparseFlags},
+    pso::{Descriptor, DescriptorSetWrite, ImageDescriptorType, PipelineStage, ShaderStageFlags},
+    MemoryTypeId,
 };
+use image::{Rgba, RgbaImage};
 use rendy_descriptor::{DescriptorRanges, DescriptorSetLayoutBinding, DescriptorType};
 use rendy_memory::{Allocator, Block};
-use std::mem::ManuallyDrop;
+use std::{
+    array::IntoIter,
+    iter::{empty, once},
+    mem::ManuallyDrop,
+    sync::{Arc, RwLock},
+};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -29,16 +34,27 @@ pub enum TextureLoadError {
     #[error("No available resources")]
     NoResources,
 
-    #[error("Texture is not in map")]
-    NotInMap(usize),
-
     #[error("Texture could not be resolved")]
     ResolveFailed(usize),
 }
 
+const FORMAT: Format = Format::Rgba8Srgb;
+const RESOURCES: SubresourceRange = SubresourceRange {
+    aspects: Aspects::COLOR,
+    level_start: 0,
+    level_count: Some(1),
+    layer_start: 0,
+    layer_count: Some(1),
+};
+const LAYERS: SubresourceLayers = SubresourceLayers {
+    aspects: Aspects::COLOR,
+    level: 0,
+    layers: 0..1,
+};
+
 pub struct QueuedLoad<B: Block<back::Backend>> {
-    pub fence: Fence,
-    pub buf: CommandBuffer,
+    pub fence: FenceT,
+    pub buf: CommandBufferT,
     pub block: TexturesBlock<B>,
     pub staging_bufs: ArrayVec<[StagingBuffer; BLOCK_SIZE]>,
 }
@@ -47,7 +63,7 @@ impl<B: Block<back::Backend>> QueuedLoad<B> {
     pub fn dissolve(
         self,
     ) -> (
-        (Fence, CommandBuffer),
+        (FenceT, CommandBufferT),
         ArrayVec<[StagingBuffer; BLOCK_SIZE]>,
         TexturesBlock<B>,
     ) {
@@ -56,18 +72,6 @@ impl<B: Block<back::Backend>> QueuedLoad<B> {
 }
 
 impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R, I> {
-    const FORMAT: Format = Format::Rgba8Srgb;
-    const RESOURCES: SubresourceRange = SubresourceRange {
-        aspects: Aspects::COLOR,
-        levels: 0..1,
-        layers: 0..1,
-    };
-    const LAYERS: SubresourceLayers = SubresourceLayers {
-        aspects: Aspects::COLOR,
-        level: 0,
-        layers: 0..1,
-    };
-
     pub(crate) unsafe fn attempt_queue_load(
         &mut self,
         block_ref: usize,
@@ -78,17 +82,21 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             .map_err(|_| LockPoisoned::Device)
             .context("Error getting device lock")?;
 
-        let textures = self.textures.read().unwrap();
+        let textures = self
+            .textures
+            .read()
+            .map_err(|_| LockPoisoned::Map)
+            .context("Error getting map lock")?;
 
         // Get assets to use
-        let (fence, mut buf) = self
+        let (mut fence, mut buf) = self
             .buffers
             .pop_front()
             .ok_or(TextureLoadError::NoResources)
             .context("Error getting resources to use")?;
 
         // Create descriptor set
-        let descriptor_set = {
+        let mut descriptor_set = {
             let mut v: ArrayVec<[RDescriptorSet; 1]> = ArrayVec::new();
             self.descriptor_allocator
                 .allocate(
@@ -97,7 +105,11 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                     DescriptorRanges::from_bindings(&[
                         DescriptorSetLayoutBinding {
                             binding: 0,
-                            ty: DescriptorType::SampledImage,
+                            ty: DescriptorType::Image {
+                                ty: ImageDescriptorType::Sampled {
+                                    with_sampler: false,
+                                },
+                            },
                             count: BLOCK_SIZE,
                             stage_flags: ShaderStageFlags::FRAGMENT,
                             immutable_samplers: false,
@@ -113,7 +125,6 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                     1,
                     &mut v,
                 )
-                .map_err::<HalErrorWrapper, _>(|e| e.into())
                 .context("Error creating descriptor set")?;
 
             v.pop().unwrap()
@@ -122,7 +133,6 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
         // Get a command buffer
         buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
 
-        let mut copy_cmds: ArrayVec<[_; BLOCK_SIZE]> = ArrayVec::new();
         let mut imgs: ArrayVec<[_; BLOCK_SIZE]> = ArrayVec::new();
         let mut staging_bufs: ArrayVec<[_; BLOCK_SIZE]> = ArrayVec::new();
 
@@ -131,135 +141,85 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
             // Get texture and Resolve image
             let tex = textures.get_texture(tex_idx as u32);
             if tex.is_none() {
-                break; // Past the end
-                       // TODO: We should actually write blank descriptors
+                // Write a blank descriptor
+                device.write_descriptor_set(DescriptorSetWrite {
+                    set: descriptor_set.raw_mut(),
+                    binding: 0,
+                    array_offset: tex_idx % BLOCK_SIZE,
+                    descriptors: once(Descriptor::Image(
+                        &*self.blank_image.img_view,
+                        Layout::ShaderReadOnlyOptimal,
+                    )),
+                });
+                device.write_descriptor_set(DescriptorSetWrite {
+                    set: descriptor_set.raw_mut(),
+                    binding: 1,
+                    array_offset: tex_idx % BLOCK_SIZE,
+                    descriptors: once(Descriptor::Sampler(&*self.blank_image.sampler)),
+                });
+
+                continue;
             }
-            let tex = tex.ok_or(TextureLoadError::NotInMap(tex_idx))?;
+
+            let tex = tex.unwrap();
 
             let img_data = self
                 .resolver
                 .resolve(tex)
                 .ok_or(TextureLoadError::ResolveFailed(tex_idx))?;
+            let array_offset = tex_idx % BLOCK_SIZE;
 
-            // Calculate buffer size
-            let (row_size, total_size) =
-                tex_size_info(&img_data, self.optimal_buffer_copy_pitch_alignment);
-
-            // Create staging buffer
-            let mut staging_buffer = StagingBuffer::new(
+            let (staging_buffer, img) = load_image(
                 &mut device,
                 &mut self.staging_allocator,
-                total_size as u64,
+                &mut self.tex_allocator,
                 self.staging_memory_type,
-            )
-            .context("Error creating staging buffer")?;
-
-            // Write to staging buffer
-            let mapped_memory = staging_buffer
-                .map_memory(&mut device)
-                .map_err::<HalErrorWrapper, _>(|e| e.into())
-                .context("Error mapping staged memory")?;
-
-            img_data.copy_into(mapped_memory, row_size);
-
-            staging_buffer.unmap_memory(&mut device);
-
-            // Create image
-            let (img_mem, img) = create_image_view(
-                &mut device,
-                &mut *self.tex_allocator,
-                Self::FORMAT,
-                ImgUsage::SAMPLED,
-                &img_data,
-            )
-            .context("Error creating image")?;
-
-            // Create image view
-            let img_view = device
-                .create_image_view(
-                    &img,
-                    ViewKind::D2,
-                    Self::FORMAT,
-                    Swizzle::NO,
-                    Self::RESOURCES,
-                )
-                .map_err::<HalErrorWrapper, _>(|e| e.into())
-                .context("Error creating image view")?;
-
-            // Queue copy from buffer to image
-            copy_cmds.push(BufferImageCopy {
-                buffer_offset: 0,
-                buffer_width: (row_size / super::PIXEL_SIZE) as u32,
-                buffer_height: img_data.height(),
-                image_layers: Self::LAYERS,
-                image_offset: Offset { x: 0, y: 0, z: 0 },
-                image_extent: Extent {
-                    width: img_data.width(),
-                    height: img_data.height(),
-                    depth: 1,
-                },
-            });
-
-            // Create sampler
-            let sampler = device
-                .create_sampler(&SamplerDesc::new(Filter::Nearest, WrapMode::Tile))
-                .map_err::<HalErrorWrapper, _>(|e| e.into())
-                .context("Error creating sampler")?;
+                self.optimal_buffer_copy_pitch_alignment,
+                img_data,
+            )?;
 
             // Write to descriptor set
             {
-                device.write_descriptor_sets(vec![
-                    DescriptorSetWrite {
-                        set: descriptor_set.raw(),
-                        binding: 0,
-                        array_offset: tex_idx % BLOCK_SIZE,
-                        descriptors: Some(Descriptor::Image(
-                            &img_view,
-                            Layout::ShaderReadOnlyOptimal,
-                        )),
-                    },
-                    DescriptorSetWrite {
-                        set: descriptor_set.raw(),
-                        binding: 1,
-                        array_offset: tex_idx % BLOCK_SIZE,
-                        descriptors: Some(Descriptor::Sampler(&sampler)),
-                    },
-                ]);
+                device.write_descriptor_set(DescriptorSetWrite {
+                    set: descriptor_set.raw_mut(),
+                    binding: 0,
+                    array_offset,
+                    descriptors: once(Descriptor::Image(
+                        &*img.img_view,
+                        Layout::ShaderReadOnlyOptimal,
+                    )),
+                });
+                device.write_descriptor_set(DescriptorSetWrite {
+                    set: descriptor_set.raw_mut(),
+                    binding: 1,
+                    array_offset,
+                    descriptors: once(Descriptor::Sampler(&*img.sampler)),
+                });
             }
 
-            imgs.push(LoadedImage {
-                mem: ManuallyDrop::new(img_mem),
-                img: ManuallyDrop::new(img),
-                img_view: ManuallyDrop::new(img_view),
-                sampler: ManuallyDrop::new(sampler),
-                row_size,
-                height: img_data.height(),
-                width: img_data.width(),
-            });
+            imgs.push(img);
 
             staging_bufs.push(staging_buffer);
         }
 
-        // Add start pipeline barriers
-        for li in imgs.iter() {
-            use hal::image::Access;
-
-            buf.pipeline_barrier(
-                PipelineStage::TOP_OF_PIPE..PipelineStage::TRANSFER,
-                Dependencies::empty(),
-                &[Barrier::Image {
-                    states: (Access::empty(), Layout::Undefined)
-                        ..(Access::TRANSFER_WRITE, Layout::TransferDstOptimal),
-                    target: &*li.img,
-                    families: None,
-                    range: SubresourceRange {
-                        aspects: Aspects::COLOR,
-                        levels: 0..1,
-                        layers: 0..1,
-                    },
-                }],
-            );
-        }
+        // Add start pipeline barrier
+        buf.pipeline_barrier(
+            PipelineStage::TOP_OF_PIPE..PipelineStage::TRANSFER,
+            Dependencies::empty(),
+            imgs.iter().map(|li| Barrier::Image {
+                states: (Access::empty(), Layout::Undefined)
+                    ..(Access::TRANSFER_WRITE, Layout::TransferDstOptimal),
+                target: &*li.img,
+                families: None,
+                range: SubresourceRange {
+                    aspects: Aspects::COLOR,
+                    level_start: 0,
+                    level_count: None,
+                    layer_start: 0,
+                    layer_count: None,
+                },
+            }),
+        );
 
         // Record copy commands
         for (li, sb) in imgs.iter().zip(staging_bufs.iter()) {
@@ -267,7 +227,7 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 &*sb.buf,
                 &*li.img,
                 Layout::TransferDstOptimal,
-                &[BufferImageCopy {
+                once(BufferImageCopy {
                     buffer_offset: 0,
                     buffer_width: (li.row_size / super::PIXEL_SIZE) as u32,
                     buffer_height: li.height,
@@ -282,36 +242,29 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                         height: li.height,
                         depth: 1,
                     },
-                }],
+                }),
             );
         }
-        for li in imgs.iter() {
-            use hal::image::Access;
-
-            buf.pipeline_barrier(
-                PipelineStage::TOP_OF_PIPE..PipelineStage::TRANSFER,
-                Dependencies::empty(),
-                &[Barrier::Image {
-                    states: (Access::TRANSFER_WRITE, Layout::TransferDstOptimal)
-                        ..(Access::SHADER_READ, Layout::ShaderReadOnlyOptimal),
-                    target: &*li.img,
-                    families: None,
-                    range: Self::RESOURCES,
-                }],
-            );
-        }
+        buf.pipeline_barrier(
+            PipelineStage::TRANSFER..PipelineStage::BOTTOM_OF_PIPE,
+            Dependencies::empty(),
+            imgs.iter().map(|li| Barrier::Image {
+                states: (Access::TRANSFER_WRITE, Layout::TransferDstOptimal)
+                    ..(Access::empty(), Layout::ShaderReadOnlyOptimal),
+                target: &*li.img,
+                families: None,
+                range: RESOURCES,
+            }),
+        );
 
         buf.finish();
 
         // Submit command buffer
-        self.gpu.queue_groups[self.cmd_queue_idx].queues[0].submit::<_, _, Semaphore, _, _>(
-            Submission {
-                command_buffers: &[&buf],
-                signal_semaphores: std::iter::empty(),
-                wait_semaphores: std::iter::empty(),
-            },
-            Some(&fence),
-        );
+        {
+            let mut queue = self.queue.write().map_err(|_| LockPoisoned::Queue)?;
+
+            queue.submit(IntoIter::new([&buf]), empty(), empty(), Some(&mut fence));
+        }
 
         Ok(QueuedLoad {
             staging_bufs,
@@ -323,6 +276,107 @@ impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<
                 descriptor_set: ManuallyDrop::new(descriptor_set),
             },
         })
+    }
+
+    pub(crate) unsafe fn get_blank_image(
+        device: &mut DeviceT,
+        buf: &mut CommandBufferT,
+        queue_lock: &Arc<RwLock<QueueT>>,
+        staging_allocator: &mut DynamicAllocator,
+        tex_allocator: &mut DynamicAllocator,
+        staging_memory_type: MemoryTypeId,
+        obcpa: u64,
+    ) -> Result<LoadedImage<DynamicBlock>> {
+        let img_data = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]));
+
+        let height = img_data.height();
+        let width = img_data.width();
+        let row_alignment_mask = obcpa as u32 - 1;
+        let initial_row_size = PIXEL_SIZE * img_data.width() as usize;
+        let row_size =
+            ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
+
+        let (staging_buffer, img) = load_image(
+            device,
+            staging_allocator,
+            tex_allocator,
+            staging_memory_type,
+            obcpa,
+            img_data,
+        )?;
+
+        buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
+
+        buf.pipeline_barrier(
+            PipelineStage::TOP_OF_PIPE..PipelineStage::TRANSFER,
+            Dependencies::empty(),
+            once(Barrier::Image {
+                states: (Access::empty(), Layout::Undefined)
+                    ..(Access::TRANSFER_WRITE, Layout::TransferDstOptimal),
+                target: &*img.img,
+                families: None,
+                range: SubresourceRange {
+                    aspects: Aspects::COLOR,
+                    level_start: 0,
+                    level_count: None,
+                    layer_start: 0,
+                    layer_count: None,
+                },
+            }),
+        );
+        buf.copy_buffer_to_image(
+            &*staging_buffer.buf,
+            &*img.img,
+            Layout::TransferDstOptimal,
+            once(BufferImageCopy {
+                buffer_offset: 0,
+                buffer_width: (row_size / super::PIXEL_SIZE) as u32,
+                buffer_height: height,
+                image_layers: LAYERS,
+                image_offset: Offset { x: 0, y: 0, z: 0 },
+                image_extent: Extent {
+                    width: width,
+                    height: height,
+                    depth: 1,
+                },
+            }),
+        );
+
+        buf.pipeline_barrier(
+            PipelineStage::TRANSFER..PipelineStage::BOTTOM_OF_PIPE,
+            Dependencies::empty(),
+            once(Barrier::Image {
+                states: (Access::TRANSFER_WRITE, Layout::TransferDstOptimal)
+                    ..(Access::empty(), Layout::ShaderReadOnlyOptimal),
+                target: &*img.img,
+                families: None,
+                range: RESOURCES,
+            }),
+        );
+        buf.finish();
+
+        let mut fence = device.create_fence(false).context("Error creating fence")?;
+
+        {
+            let mut queue = queue_lock.write().map_err(|_| LockPoisoned::Queue)?;
+
+            queue.submit(
+                IntoIter::new([buf as &CommandBufferT]),
+                empty(),
+                empty(),
+                Some(&mut fence),
+            );
+        }
+
+        device
+            .wait_for_fence(&fence, std::u64::MAX)
+            .context("Error waiting for copy")?;
+
+        device.destroy_fence(fence);
+
+        staging_buffer.deactivate(device, staging_allocator);
+
+        Ok(img)
     }
 }
 
@@ -338,12 +392,12 @@ pub fn tex_size_info<T: LoadableImage>(img: &T, obcpa: hal::buffer::Offset) -> (
 }
 
 fn create_image_view<T, I>(
-    device: &mut Device,
+    device: &mut DeviceT,
     allocator: &mut T,
     format: Format,
     usage: ImgUsage,
     img: &I,
-) -> Result<(T::Block, Image)>
+) -> Result<(T::Block, ImageT)>
 where
     T: Allocator<back::Backend>,
     I: LoadableImage,
@@ -358,10 +412,10 @@ where
             format,
             Tiling::Optimal,
             usage,
+            SparseFlags::empty(),
             ViewCapabilities::empty(),
         )
     }
-    .map_err::<HalErrorWrapper, _>(|e| e.into())
     .context("Error creating image")?;
 
     // Allocate memory
@@ -370,15 +424,83 @@ where
 
         allocator.alloc(device, requirements.size, requirements.alignment)
     }
-    .map_err::<HalErrorWrapper, _>(|e| e.into())
     .context("Error allocating memory")?;
 
     unsafe {
         device
             .bind_image_memory(&block.memory(), block.range().start, &mut image_ref)
-            .map_err::<HalErrorWrapper, _>(|e| e.into())
             .context("Error binding memory to image")?;
     }
 
     Ok((block, image_ref))
+}
+
+unsafe fn load_image<I: LoadableImage>(
+    device: &mut DeviceT,
+    staging_allocator: &mut DynamicAllocator,
+    tex_allocator: &mut DynamicAllocator,
+    staging_memory_type: MemoryTypeId,
+    obcpa: u64,
+    img_data: I,
+) -> Result<(StagingBuffer, LoadedImage<DynamicBlock>)> {
+    // Calculate buffer size
+    let (row_size, total_size) = tex_size_info(&img_data, obcpa);
+
+    // Create staging buffer
+    let mut staging_buffer = StagingBuffer::new(
+        device,
+        staging_allocator,
+        total_size as u64,
+        staging_memory_type,
+    )
+    .context("Error creating staging buffer")?;
+
+    // Write to staging buffer
+    let mapped_memory = staging_buffer
+        .map_memory(device)
+        .context("Error mapping staged memory")?;
+
+    img_data.copy_into(mapped_memory, row_size);
+
+    staging_buffer.unmap_memory(device);
+
+    // Create image
+    let (img_mem, img) = create_image_view(
+        device,
+        tex_allocator,
+        FORMAT,
+        ImgUsage::SAMPLED | ImgUsage::TRANSFER_DST,
+        &img_data,
+    )
+    .context("Error creating image")?;
+
+    // Create image view
+    let img_view = device
+        .create_image_view(
+            &img,
+            ViewKind::D2,
+            FORMAT,
+            Swizzle::NO,
+            ImgUsage::SAMPLED | ImgUsage::TRANSFER_DST,
+            RESOURCES,
+        )
+        .context("Error creating image view")?;
+
+    // Create sampler
+    let sampler = device
+        .create_sampler(&SamplerDesc::new(Filter::Nearest, WrapMode::Tile))
+        .context("Error creating sampler")?;
+
+    Ok((
+        staging_buffer,
+        LoadedImage {
+            mem: ManuallyDrop::new(img_mem),
+            img: ManuallyDrop::new(img),
+            img_view: ManuallyDrop::new(img_view),
+            sampler: ManuallyDrop::new(sampler),
+            row_size,
+            height: img_data.height(),
+            width: img_data.width(),
+        },
+    ))
 }

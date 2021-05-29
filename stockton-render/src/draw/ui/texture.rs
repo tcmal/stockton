@@ -46,11 +46,11 @@ impl LoadableImage for &Texture {
 pub fn ensure_textures(
     _tex_repo: &mut TextureRepo,
     ui: &mut UiState,
-    _device: &mut Device,
+    _device: &mut DeviceT,
     _adapter: &mut Adapter,
     _allocator: &mut DynamicAllocator,
-    _command_queue: &mut CommandQueue,
-    _command_pool: &mut CommandPool,
+    _command_queue: &mut QueueT,
+    _command_pool: &mut CommandPoolT,
 ) {
     let tex = ui.ctx.texture();
 
