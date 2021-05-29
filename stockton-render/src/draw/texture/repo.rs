@@ -116,7 +116,7 @@ impl<'a> TextureRepo<'a> {
                 resolver,
             )?;
 
-            std::thread::spawn(move || loader.loop_forever())
+            std::thread::spawn(move || loader.loop_until_exit())
         };
 
         Ok(TextureRepo {
