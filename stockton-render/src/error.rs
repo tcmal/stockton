@@ -1,40 +1,7 @@
 //! Error types
 
-use super::draw::target::TargetChainCreationError;
+use anyhow;
 use thiserror::Error;
-
-/// An error encountered creating a rendering context.
-#[derive(Debug)]
-pub enum CreationError {
-    TargetChainCreationError(TargetChainCreationError),
-    WindowError,
-    BadSurface,
-
-    DeviceError(hal::device::CreationError),
-
-    OutOfMemoryError,
-
-    SyncObjectError,
-
-    NoShaderC,
-    ShaderCError(shaderc::Error),
-    ShaderModuleFailed(hal::device::ShaderError),
-    RenderPassError,
-    PipelineError(hal::pso::CreationError),
-    BufferError(hal::buffer::CreationError),
-    BufferNoMemory,
-
-    SwapchainError,
-    ImageViewError,
-
-    BadDataError,
-}
-
-/// An error encountered when rendering.
-/// Usually this is out of memory or something happened to the device/surface.
-/// You'll likely need to exit or create a new context.
-#[derive(Debug, Clone)]
-pub enum FrameError {}
 
 #[derive(Error, Debug)]
 pub enum LockPoisoned {
@@ -46,4 +13,46 @@ pub enum LockPoisoned {
 
     #[error("Queue lock poisoned")]
     Queue,
+
+    #[error("Other lock poisoned")]
+    Other,
+}
+
+/// Indicates the given property has no acceptable values
+#[derive(Debug, Error)]
+pub enum EnvironmentError {
+    #[error("No supported color format")]
+    ColorFormat,
+
+    #[error("No supported depth format")]
+    DepthFormat,
+
+    #[error("No supported present mode")]
+    PresentMode,
+
+    #[error("No supported composite alpha mode")]
+    CompositeAlphaMode,
+
+    #[error("No suitable queue families found")]
+    NoSuitableFamilies,
+
+    #[error("No suitable memory types found")]
+    NoMemoryTypes,
+
+    #[error("Couldn't use shaderc")]
+    NoShaderC,
+
+    #[error("No suitable queues")]
+    NoQueues,
+}
+
+pub fn full_error_display(err: anyhow::Error) -> String {
+    let cont = err
+        .chain()
+        .skip(1)
+        .map(|cause| format!("    caused by: {}", cause))
+        .collect::<Vec<String>>()
+        .join("\n");
+
+    format!("Error: {}\n{}", err, cont)
 }

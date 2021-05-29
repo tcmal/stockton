@@ -11,7 +11,7 @@ use arrayvec::ArrayVec;
 use hal::{
     buffer::SubRange,
     command::RenderAttachmentInfo,
-    format::{ChannelType, Format},
+    format::{ChannelType, Format, ImageFeature},
     image::{Extent, FramebufferAttachment, Usage as ImgUsage, ViewCapabilities},
     pso::Viewport,
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
@@ -25,7 +25,8 @@ use super::{
     pipeline::CompletePipeline,
     ui::{UiPipeline, UiPoint},
 };
-use crate::types::*;
+use crate::{error::EnvironmentError, types::*};
+use anyhow::{Context, Result};
 
 #[derive(Debug, Clone)]
 pub struct SwapchainProperties {
@@ -37,29 +38,23 @@ pub struct SwapchainProperties {
     pub extent: Extent,
 }
 
-/// Indicates the given property has no acceptable values
-pub enum NoSupportedValuesError {
-    DepthFormat,
-    PresentMode,
-    CompositeAlphaMode,
-}
-
 impl SwapchainProperties {
     pub fn find_best(
         adapter: &Adapter,
         surface: &SurfaceT,
-    ) -> Result<SwapchainProperties, NoSupportedValuesError> {
+    ) -> Result<SwapchainProperties, EnvironmentError> {
         let caps = surface.capabilities(&adapter.physical_device);
         let formats = surface.supported_formats(&adapter.physical_device);
 
         // Find which settings we'll actually use based on preset preferences
-        let format = formats.map_or(Format::Rgba8Srgb, |formats| {
-            formats
+        let format = match formats {
+            Some(formats) => formats
                 .iter()
                 .find(|format| format.base_format().1 == ChannelType::Srgb)
                 .copied()
-                .unwrap_or(formats[0])
-        });
+                .ok_or(EnvironmentError::ColorFormat),
+            None => Ok(Format::Rgba8Srgb),
+        }?;
 
         let depth_format = *[
             Format::D32SfloatS8Uint,
@@ -68,8 +63,6 @@ impl SwapchainProperties {
         ]
         .iter()
         .find(|format| {
-            use hal::format::ImageFeature;
-
             format.is_depth()
                 && adapter
                     .physical_device
@@ -77,32 +70,29 @@ impl SwapchainProperties {
                     .optimal_tiling
                     .contains(ImageFeature::DEPTH_STENCIL_ATTACHMENT)
         })
-        .ok_or(NoSupportedValuesError::DepthFormat)?;
+        .ok_or(EnvironmentError::DepthFormat)?;
 
-        let present_mode = {
-            [
-                PresentMode::MAILBOX,
-                PresentMode::FIFO,
-                PresentMode::RELAXED,
-                PresentMode::IMMEDIATE,
-            ]
-            .iter()
-            .cloned()
-            .find(|pm| caps.present_modes.contains(*pm))
-            .ok_or(NoSupportedValuesError::PresentMode)?
-        };
-        let composite_alpha_mode = {
-            [
-                CompositeAlphaMode::OPAQUE,
-                CompositeAlphaMode::INHERIT,
-                CompositeAlphaMode::PREMULTIPLIED,
-                CompositeAlphaMode::POSTMULTIPLIED,
-            ]
-            .iter()
-            .cloned()
-            .find(|ca| caps.composite_alpha_modes.contains(*ca))
-            .ok_or(NoSupportedValuesError::CompositeAlphaMode)?
-        };
+        let present_mode = [
+            PresentMode::MAILBOX,
+            PresentMode::FIFO,
+            PresentMode::RELAXED,
+            PresentMode::IMMEDIATE,
+        ]
+        .iter()
+        .cloned()
+        .find(|pm| caps.present_modes.contains(*pm))
+        .ok_or(EnvironmentError::PresentMode)?;
+
+        let composite_alpha_mode = [
+            CompositeAlphaMode::OPAQUE,
+            CompositeAlphaMode::INHERIT,
+            CompositeAlphaMode::PREMULTIPLIED,
+            CompositeAlphaMode::POSTMULTIPLIED,
+        ]
+        .iter()
+        .cloned()
+        .find(|ca| caps.composite_alpha_modes.contains(*ca))
+        .ok_or(EnvironmentError::CompositeAlphaMode)?;
 
         let extent = caps.extents.end().to_extent(); // Size
         let viewport = Viewport {
@@ -153,7 +143,7 @@ impl TargetChain {
         ui_pipeline: &UiPipeline,
         cmd_pool: &mut CommandPoolT,
         properties: SwapchainProperties,
-    ) -> Result<TargetChain, TargetChainCreationError> {
+    ) -> Result<TargetChain> {
         let caps = surface.capabilities(&adapter.physical_device);
 
         // Number of frames to pre-render
@@ -196,14 +186,15 @@ impl TargetChain {
                 properties.extent.width as usize,
                 properties.extent.height as usize,
             )
-            .map_err(|_| TargetChainCreationError::Todo)
-        }?;
+            .context("Error creating depth buffer")?
+        };
 
         let fat = swap_config.framebuffer_attachment();
         let mut targets: Vec<TargetResources> =
             Vec::with_capacity(swap_config.image_count as usize);
         let mut sync_objects: Vec<SyncObjects> =
             Vec::with_capacity(swap_config.image_count as usize);
+
         for _ in 0..swap_config.image_count {
             targets.push(
                 TargetResources::new(
@@ -219,18 +210,17 @@ impl TargetChain {
                     },
                     &properties,
                 )
-                .map_err(|_| TargetChainCreationError::Todo)?,
+                .context("Error creating target resources")?,
             );
 
-            sync_objects
-                .push(SyncObjects::new(device).map_err(|_| TargetChainCreationError::Todo)?);
+            sync_objects.push(SyncObjects::new(device).context("Error creating sync objects")?);
         }
 
         // Configure Swapchain
         unsafe {
             surface
                 .configure_swapchain(device, swap_config)
-                .map_err(|_| TargetChainCreationError::Todo)?;
+                .context("Error configuring swapchain")?;
         }
 
         Ok(TargetChain {
@@ -286,36 +276,31 @@ impl TargetChain {
         draw_buffers: &mut DrawBuffers<UvPoint>,
         pipeline: &CompletePipeline,
         vp: &Mat4,
-    ) -> Result<
-        (
-            &'a mut crate::types::CommandBufferT,
-            <SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
-        ),
-        &'static str,
-    > {
+    ) -> Result<(
+        &'a mut crate::types::CommandBufferT,
+        <SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
+    )> {
         self.last_syncs = (self.last_syncs + 1) % self.sync_objects.len();
-
-        let syncs = &mut self.sync_objects[self.last_syncs];
-
         self.last_image = (self.last_image + 1) % self.targets.len() as u32;
 
+        let syncs = &mut self.sync_objects[self.last_syncs];
         let target = &mut self.targets[self.last_image as usize];
 
         // Get the image
         let (img, _) = unsafe {
             self.surface
                 .acquire_image(core::u64::MAX)
-                .map_err(|_| "FrameError::AcquireError")?
+                .context("Error getting image from swapchain")?
         };
 
         // Make sure whatever was last using this has finished
         unsafe {
             device
                 .wait_for_fence(&syncs.present_complete, core::u64::MAX)
-                .map_err(|_| "FrameError::SyncObjectError")?;
+                .context("Error waiting for present_complete")?;
             device
                 .reset_fence(&mut syncs.present_complete)
-                .map_err(|_| "FrameError::SyncObjectError")?;
+                .context("Error resetting present_complete fence")?;
         };
 
         // Record commands
@@ -403,7 +388,7 @@ impl TargetChain {
         draw_buffers: &mut DrawBuffers<UiPoint>,
         img: &<SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
         pipeline: &UiPipeline,
-    ) -> Result<&'a mut CommandBufferT, &'static str> {
+    ) -> Result<&'a mut CommandBufferT> {
         let target = &mut self.targets[self.last_image as usize];
 
         unsafe {
@@ -476,7 +461,7 @@ impl TargetChain {
         &mut self,
         img: <SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
         command_queue: &mut QueueT,
-    ) -> Result<(), &'static str> {
+    ) -> Result<()> {
         let syncs = &mut self.sync_objects[self.last_syncs];
         let target = &mut self.targets[self.last_image as usize];
 
@@ -495,7 +480,7 @@ impl TargetChain {
             );
             command_queue
                 .present(&mut self.surface, img, Some(&mut *syncs.render_complete))
-                .map_err(|_| "FrameError::PresentError")?;
+                .context("Error presenting to surface")?;
         };
 
         Ok(())
@@ -523,7 +508,7 @@ impl TargetResources {
         fat: FramebufferAttachment,
         dat: FramebufferAttachment,
         properties: &SwapchainProperties,
-    ) -> Result<TargetResources, TargetResourcesCreationError> {
+    ) -> Result<TargetResources> {
         // Command Buffer
         let cmd_buffer = unsafe { cmd_pool.allocate_one(hal::command::Level::Primary) };
 
@@ -535,14 +520,14 @@ impl TargetResources {
                     IntoIter::new([fat.clone(), dat]),
                     properties.extent,
                 )
-                .map_err(|_| TargetResourcesCreationError::FrameBufferNoMemory)?
+                .context("Error creating colour framebuffer")?
         };
 
         // 2D framebuffer just needs the imageview, not the depth pass
         let framebuffer_2d = unsafe {
             device
                 .create_framebuffer(&renderpass_2d, once(fat), properties.extent)
-                .map_err(|_| TargetResourcesCreationError::FrameBufferNoMemory)?
+                .context("Error creating depth framebuffer")?
         };
 
         Ok(TargetResources {
@@ -572,14 +557,14 @@ pub struct SyncObjects {
 }
 
 impl SyncObjects {
-    pub fn new(device: &mut DeviceT) -> Result<Self, TargetResourcesCreationError> {
+    pub fn new(device: &mut DeviceT) -> Result<Self> {
         // Sync objects
         let render_complete = device
             .create_semaphore()
-            .map_err(|_| TargetResourcesCreationError::SyncObjectsNoMemory)?;
+            .context("Error creating render_complete semaphore")?;
         let present_complete = device
             .create_fence(true)
-            .map_err(|_| TargetResourcesCreationError::SyncObjectsNoMemory)?;
+            .context("Error creating present_complete fence")?;
 
         Ok(SyncObjects {
             render_complete: ManuallyDrop::new(render_complete),
@@ -595,16 +580,4 @@ impl SyncObjects {
             device.destroy_fence(ManuallyDrop::into_inner(read(&self.present_complete)));
         }
     }
-}
-
-#[derive(Debug)]
-pub enum TargetChainCreationError {
-    Todo,
-}
-
-#[derive(Debug)]
-pub enum TargetResourcesCreationError {
-    ImageViewError,
-    FrameBufferNoMemory,
-    SyncObjectsNoMemory,
 }

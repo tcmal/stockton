@@ -17,3 +17,4 @@ simple_logger = "^1.11"
 image = "0.23.2"
 egui = "^0.2"
 legion = { version = "^0.3" }
+anyhow = "1.0.40"

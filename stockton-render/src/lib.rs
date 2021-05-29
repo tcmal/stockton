@@ -10,13 +10,15 @@ extern crate legion;
 
 mod culling;
 pub mod draw;
-mod error;
+pub mod error;
 pub mod systems;
 mod types;
 pub mod window;
 
 use culling::get_visible_faces;
 use draw::RenderingContext;
+use error::full_error_display;
+use error::LockPoisoned;
 use legion::world::SubWorld;
 use legion::IntoQuery;
 use std::sync::mpsc::{Receiver, Sender};
@@ -24,6 +26,8 @@ use std::sync::Arc;
 use std::sync::RwLock;
 pub use window::{UiState, WindowEvent};
 
+use anyhow::{Context, Result};
+use log::error;
 use stockton_levels::prelude::*;
 use stockton_types::components::{CameraSettings, Transform};
 use stockton_types::Vector3;
@@ -47,36 +51,46 @@ pub struct Renderer<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
 
 impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
     /// Create a new Renderer.
-    pub fn new(window: &Window, file: M) -> (Self, Sender<WindowEvent>) {
+    pub fn new(window: &Window, file: M) -> Result<(Self, Sender<WindowEvent>)> {
         let (tx, rx) = channel();
         let update_control_flow = Arc::new(RwLock::new(ControlFlow::Poll));
 
-        (
+        Ok((
             Renderer {
-                context: RenderingContext::new(window, file).unwrap(),
+                context: RenderingContext::new(window, file)?,
                 window_events: rx,
                 update_control_flow,
             },
             tx,
-        )
+        ))
     }
 
     /// Render a single frame of the given map.
-    fn render(&mut self, ui: &mut UiState, pos: Vector3) {
+    fn render(&mut self, ui: &mut UiState, pos: Vector3) -> Result<()> {
         // Get visible faces
-        let faces = get_visible_faces(pos, &*self.context.map.read().unwrap());
+        let faces = get_visible_faces(
+            pos,
+            &*self
+                .context
+                .map
+                .read()
+                .map_err(|_| LockPoisoned::Map)
+                .context("Error getting read lock on map")?,
+        );
 
         // Then draw them
         if self.context.draw_vertices(ui, &faces).is_err() {
-            unsafe { self.context.handle_surface_change().unwrap() };
+            unsafe { self.context.handle_surface_change()? };
 
             // If it fails twice, then error
-            self.context.draw_vertices(ui, &faces).unwrap();
+            self.context.draw_vertices(ui, &faces)?;
         }
+
+        Ok(())
     }
 
-    fn resize(&mut self) {
-        unsafe { self.context.handle_surface_change().unwrap() };
+    fn resize(&mut self) -> Result<()> {
+        unsafe { self.context.handle_surface_change() }
     }
 }
 
@@ -91,6 +105,8 @@ pub fn do_render<T: 'static + MinBspFeatures<VulkanSystem>>(
 ) {
     let mut query = <(&Transform, &CameraSettings)>::query();
     for (transform, _) in query.iter(world) {
-        renderer.render(ui, transform.position);
+        if let Err(err) = renderer.render(ui, transform.position) {
+            error!("{}", full_error_display(err));
+        }
     }
 }

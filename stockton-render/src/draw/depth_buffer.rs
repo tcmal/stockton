@@ -10,7 +10,9 @@ use hal::{
 use std::{array::IntoIter, convert::TryInto, iter::empty};
 
 use crate::types::*;
+use anyhow::{Context, Result};
 use std::mem::ManuallyDrop;
+use thiserror::Error;
 
 use super::texture::{LoadableImage, PIXEL_SIZE};
 
@@ -26,6 +28,12 @@ pub struct DedicatedLoadedImage {
     memory: ManuallyDrop<MemoryT>,
 }
 
+#[derive(Debug, Error)]
+pub enum ImageLoadError {
+    #[error("No suitable memory type for image memory")]
+    NoMemoryTypes,
+}
+
 impl DedicatedLoadedImage {
     pub fn new(
         device: &mut DeviceT,
@@ -35,7 +43,7 @@ impl DedicatedLoadedImage {
         resources: SubresourceRange,
         width: usize,
         height: usize,
-    ) -> Result<DedicatedLoadedImage, &'static str> {
+    ) -> Result<DedicatedLoadedImage> {
         let (memory, image_ref) = {
             // Round up the size to align properly
             let initial_row_size = PIXEL_SIZE * width;
@@ -60,9 +68,7 @@ impl DedicatedLoadedImage {
                     ViewCapabilities::empty(),
                 )
             }
-            .map_err(|_| "Couldn't create image")?;
-
-            // Allocate memory
+            .context("Error creating image")?;
 
             // Allocate memory
             let memory = unsafe {
@@ -79,21 +85,21 @@ impl DedicatedLoadedImage {
                             && memory_type.properties.contains(Properties::DEVICE_LOCAL)
                     })
                     .map(|(id, _)| MemoryTypeId(id))
-                    .ok_or("Couldn't find a memory type for image memory")?;
+                    .ok_or(ImageLoadError::NoMemoryTypes)?;
 
                 let memory = device
                     .allocate_memory(memory_type_id, requirements.size)
-                    .map_err(|_| "Couldn't allocate image memory")?;
+                    .context("Error allocating memory for image")?;
 
                 device
                     .bind_image_memory(&memory, 0, &mut image_ref)
-                    .map_err(|_| "Couldn't bind memory to image")?;
+                    .context("Error binding memory to image")?;
 
-                Ok(memory)
-            }?;
+                memory
+            };
 
-            Ok((memory, image_ref))
-        }?;
+            (memory, image_ref)
+        };
 
         // Create ImageView and sampler
         let image_view = unsafe {
@@ -106,7 +112,7 @@ impl DedicatedLoadedImage {
                 resources,
             )
         }
-        .map_err(|_| "Couldn't create the image view!")?;
+        .context("Error creating image view")?;
 
         Ok(DedicatedLoadedImage {
             image: ManuallyDrop::new(image_ref),
@@ -123,7 +129,7 @@ impl DedicatedLoadedImage {
         adapter: &Adapter,
         command_queue: &mut QueueT,
         command_pool: &mut CommandPoolT,
-    ) -> Result<(), &'static str> {
+    ) -> Result<()> {
         let initial_row_size = PIXEL_SIZE * img.width() as usize;
         let limits = adapter.physical_device.properties().limits;
         let row_alignment_mask = limits.optimal_buffer_copy_pitch_alignment as u32 - 1;
@@ -141,7 +147,7 @@ impl DedicatedLoadedImage {
             memory::Properties::CPU_VISIBLE | memory::Properties::COHERENT,
             total_size,
         )
-        .map_err(|_| "Couldn't create staging buffer")?;
+        .context("Error creating staging buffer")?;
 
         // Copy everything into it
         unsafe {
@@ -154,11 +160,11 @@ impl DedicatedLoadedImage {
                             size: None,
                         },
                     )
-                    .map_err(|_| "Couldn't map buffer memory")?,
+                    .context("Error mapping staging memory")?,
             );
 
             for y in 0..img.height() as usize {
-                let dest_base: isize = (y * row_size).try_into().unwrap();
+                let dest_base: isize = (y * row_size).try_into()?;
                 img.copy_row(y as u32, mapped_memory.offset(dest_base));
             }
 
@@ -247,7 +253,9 @@ impl DedicatedLoadedImage {
 
         // Submit our commands and wait for them to finish
         unsafe {
-            let mut setup_finished = device.create_fence(false).unwrap();
+            let mut setup_finished = device
+                .create_fence(false)
+                .context("Error creating setup_finished fence")?;
             command_queue.submit(
                 IntoIter::new([&buf]),
                 empty(),
@@ -257,7 +265,7 @@ impl DedicatedLoadedImage {
 
             device
                 .wait_for_fence(&setup_finished, core::u64::MAX)
-                .unwrap();
+                .context("Error waiting for image load to finish")?;
             device.destroy_fence(setup_finished);
         };
 
@@ -281,7 +289,7 @@ impl DedicatedLoadedImage {
         command_pool: &mut CommandPoolT,
         format: Format,
         usage: Usage,
-    ) -> Result<DedicatedLoadedImage, &'static str> {
+    ) -> Result<DedicatedLoadedImage> {
         let mut loaded_image = Self::new(
             device,
             adapter,

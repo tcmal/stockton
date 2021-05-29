@@ -1,8 +1,7 @@
-use crate::types::*;
+use crate::{error::EnvironmentError, types::*};
 use anyhow::Result;
 use hal::queue::family::QueueFamilyId;
 use std::sync::{Arc, RwLock};
-use thiserror::Error;
 
 pub struct QueueNegotiator {
     family_id: QueueFamilyId,
@@ -16,7 +15,7 @@ impl QueueNegotiator {
             .queue_families
             .iter()
             .find(filter)
-            .ok_or(QueueNegotiatorError::NoSuitableFamilies)?;
+            .ok_or(EnvironmentError::NoSuitableFamilies)?;
 
         Ok(QueueNegotiator {
             family_id: family.id(),
@@ -63,10 +62,4 @@ impl QueueNegotiator {
             }
         }
     }
-}
-
-#[derive(Error, Debug)]
-pub enum QueueNegotiatorError {
-    #[error("No suitable queue families found")]
-    NoSuitableFamilies,
 }

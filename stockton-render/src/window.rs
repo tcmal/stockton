@@ -1,4 +1,4 @@
-use crate::Renderer;
+use crate::{error::full_error_display, Renderer};
 use egui::Context;
 use legion::systems::Runnable;
 use log::debug;
@@ -6,7 +6,7 @@ use std::sync::Arc;
 use stockton_levels::prelude::{MinBspFeatures, VulkanSystem};
 
 use egui::{Output, PaintJobs, Pos2, RawInput, Ui};
-
+use log::error;
 use stockton_input::{Action as KBAction, InputManager, Mouse};
 
 use winit::event::{
@@ -162,7 +162,9 @@ pub fn _process_window_events<
     while let Ok(event) = renderer.window_events.try_recv() {
         match event {
             WindowEvent::SizeChanged(w, h) => {
-                renderer.resize();
+                if let Err(err) = renderer.resize() {
+                    error!("{}", full_error_display(err));
+                };
                 ui_state.set_dimensions(w, h);
             }
             WindowEvent::CloseRequested => {

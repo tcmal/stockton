@@ -3,14 +3,14 @@ use std::convert::TryInto;
 use std::iter::{empty, once};
 use std::ops::{Index, IndexMut};
 
+use anyhow::{Context, Result};
 use hal::{
     buffer::Usage,
     memory::{Properties, Segment, SparseFlags},
     MemoryTypeId,
 };
 
-use crate::error::CreationError;
-use crate::types::*;
+use crate::{error::EnvironmentError, types::*};
 
 /// Create a buffer of the given specifications, allocating more device memory.
 // TODO: Use a different memory allocator?
@@ -20,9 +20,9 @@ pub(crate) fn create_buffer(
     usage: Usage,
     properties: Properties,
     size: u64,
-) -> Result<(BufferT, MemoryT), CreationError> {
+) -> Result<(BufferT, MemoryT)> {
     let mut buffer = unsafe { device.create_buffer(size, usage, SparseFlags::empty()) }
-        .map_err(CreationError::BufferError)?;
+        .context("Error creating buffer")?;
 
     let requirements = unsafe { device.get_buffer_requirements(&buffer) };
     let memory_type_id = adapter
@@ -35,13 +35,13 @@ pub(crate) fn create_buffer(
             requirements.type_mask & (1 << id) != 0 && memory_type.properties.contains(properties)
         })
         .map(|(id, _)| MemoryTypeId(id))
-        .ok_or(CreationError::BufferNoMemory)?;
+        .ok_or(EnvironmentError::NoMemoryTypes)?;
 
     let memory = unsafe { device.allocate_memory(memory_type_id, requirements.size) }
-        .map_err(|_| CreationError::OutOfMemoryError)?;
+        .context("Error allocating memory")?;
 
     unsafe { device.bind_buffer_memory(&memory, 0, &mut buffer) }
-        .map_err(|_| CreationError::BufferNoMemory)?;
+        .context("Error binding memory to buffer")?;
 
     Ok((buffer, memory))
 }
@@ -57,7 +57,7 @@ pub trait ModifiableBuffer: IndexMut<usize> {
         device: &DeviceT,
         command_queue: &mut QueueT,
         command_pool: &mut CommandPoolT,
-    ) -> &'a BufferT;
+    ) -> Result<&'a BufferT>;
 }
 
 /// A GPU buffer that is written to using a staging buffer
@@ -86,12 +86,7 @@ pub struct StagedBuffer<'a, T: Sized> {
 
 impl<'a, T: Sized> StagedBuffer<'a, T> {
     /// size is the size in T
-    pub fn new(
-        device: &mut DeviceT,
-        adapter: &Adapter,
-        usage: Usage,
-        size: u64,
-    ) -> Result<Self, CreationError> {
+    pub fn new(device: &mut DeviceT, adapter: &Adapter, usage: Usage, size: u64) -> Result<Self> {
         // Convert size to bytes
         let size_bytes = size * size_of::<T>() as u64;
 
@@ -102,7 +97,8 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
             Usage::TRANSFER_SRC,
             Properties::CPU_VISIBLE,
             size_bytes,
-        )?;
+        )
+        .context("Error creating staging buffer")?;
 
         // Get GPU Buffer
         let (buffer, memory) = create_buffer(
@@ -111,7 +107,8 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
             Usage::TRANSFER_DST | usage,
             Properties::DEVICE_LOCAL | Properties::COHERENT,
             size_bytes,
-        )?;
+        )
+        .context("Error creating GPU buffer")?;
 
         // Map it somewhere and get a slice to that memory
         let staged_mapped_memory = unsafe {
@@ -123,9 +120,9 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
                         size: Some(size_bytes),
                     },
                 )
-                .unwrap(); // TODO
+                .context("Error mapping staged memory")?;
 
-            std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into().unwrap())
+            std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into()?)
         };
 
         Ok(StagedBuffer {
@@ -163,7 +160,7 @@ impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
         device: &DeviceT,
         command_queue: &mut QueueT,
         command_pool: &mut CommandPoolT,
-    ) -> &'b BufferT {
+    ) -> Result<&'b BufferT> {
         // Only commit if there's changes to commit.
         if self.staged_is_dirty {
             // Copy from staged to buffer
@@ -189,21 +186,19 @@ impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
             };
 
             // Submit it and wait for completion
-            // TODO: We could use more semaphores or something?
-            // TODO: Better error handling
+            // TODO: Proper management of transfer operations
             unsafe {
-                let mut copy_finished = device.create_fence(false).unwrap();
-                command_queue
-                    .submit::<std::iter::Once<_>, std::iter::Empty<_>, std::iter::Empty<_>>(
-                        once(&buf),
-                        empty::<(&SemaphoreT, hal::pso::PipelineStage)>(),
-                        empty::<&SemaphoreT>(),
-                        Some(&mut copy_finished),
-                    );
+                let mut copy_finished = device.create_fence(false)?;
+                command_queue.submit(
+                    once(&buf),
+                    empty::<(&SemaphoreT, hal::pso::PipelineStage)>(),
+                    empty::<&SemaphoreT>(),
+                    Some(&mut copy_finished),
+                );
 
                 device
                     .wait_for_fence(&copy_finished, core::u64::MAX)
-                    .unwrap();
+                    .context("Error waiting for fence")?;
 
                 // Destroy temporary resources
                 device.destroy_fence(copy_finished);
@@ -213,7 +208,7 @@ impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
             self.staged_is_dirty = false;
         }
 
-        &self.buffer
+        Ok(&self.buffer)
     }
 }
 

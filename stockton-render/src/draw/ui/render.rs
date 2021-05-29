@@ -5,6 +5,7 @@ use super::UiPoint;
 use crate::draw::draw_buffers::DrawBuffers;
 use crate::types::*;
 use crate::UiState;
+use anyhow::Result;
 use std::{array::IntoIter, convert::TryInto, iter::empty};
 use stockton_types::Vector2;
 
@@ -14,7 +15,7 @@ pub fn do_render(
     draw_buffers: &mut DrawBuffers<UiPoint>,
     tex_repo: &mut TextureRepo,
     ui: &mut UiState,
-) {
+) -> Result<()> {
     // TODO: Actual UI Rendering
     let (_out, paint) = ui.end_frame();
     let screen = ui.dimensions();
@@ -32,9 +33,9 @@ pub fn do_render(
         // Copy triangles/indicies
         for i in (0..tris.indices.len()).step_by(3) {
             draw_buffers.index_buffer[i / 3] = (
-                tris.indices[i].try_into().unwrap(),
-                tris.indices[i + 1].try_into().unwrap(),
-                tris.indices[i + 2].try_into().unwrap(),
+                tris.indices[i].try_into()?,
+                tris.indices[i + 1].try_into()?,
+                tris.indices[i + 2].try_into()?,
             );
         }
         for (i, vertex) in tris.vertices.iter().enumerate() {
@@ -61,4 +62,6 @@ pub fn do_render(
             // tex_repo.queue_load(0);
         }
     }
+
+    Ok(())
 }

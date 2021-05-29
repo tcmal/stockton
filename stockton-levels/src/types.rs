@@ -1,6 +1,7 @@
 //! Various types used in parsed BSP files.
 
 use std::convert::TryInto;
+use thiserror::Error;
 
 /// RGBA Colour (0-255)
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -65,10 +66,13 @@ impl Rgb {
     }
 }
 
-#[derive(Debug)]
+#[derive(Error, Debug)]
 /// An error encountered while parsing.
 pub enum ParseError {
+    #[error("Unsupported format")]
     Unsupported,
+
+    #[error("Invalid file")]
     Invalid,
 }
 

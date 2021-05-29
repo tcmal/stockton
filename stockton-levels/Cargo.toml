@@ -10,4 +10,5 @@ edition = "2018"
 [dependencies]
 nalgebra = "^0.20"
 bitflags = "^1.2"
+thiserror = "1.0.25"
 bitvec = "0.17"

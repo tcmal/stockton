@@ -129,8 +129,11 @@ impl<'a> TextureRepo<'a> {
         })
     }
 
-    pub fn get_ds_layout(&self) -> RwLockReadGuard<DescriptorSetLayoutT> {
-        self.ds_layout.read().unwrap()
+    pub fn get_ds_layout(&self) -> Result<RwLockReadGuard<DescriptorSetLayoutT>> {
+        self.ds_layout
+            .read()
+            .map_err(|_| LockPoisoned::Other)
+            .context("Error locking descriptor set layout")
     }
 
     pub fn queue_load(&mut self, block_id: BlockRef) -> Result<()> {

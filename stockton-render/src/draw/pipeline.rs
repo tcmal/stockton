@@ -16,8 +16,8 @@ use std::{
 };
 
 use super::target::SwapchainProperties;
-use crate::error;
-use crate::types::*;
+use crate::{error::EnvironmentError, types::*};
+use anyhow::{Context, Result};
 
 // TODO: Generalise so we can use for UI also
 /// A complete graphics pipeline and associated resources
@@ -44,7 +44,7 @@ impl CompletePipeline {
         extent: hal::image::Extent,
         swapchain_properties: &SwapchainProperties,
         set_layouts: T,
-    ) -> Result<Self, error::CreationError> {
+    ) -> Result<Self> {
         use hal::format::Format;
         use hal::pso::*;
 
@@ -89,7 +89,7 @@ impl CompletePipeline {
                     empty(),
                 )
             }
-            .map_err(|_| error::CreationError::OutOfMemoryError)?
+            .context("Error creating render pass")?
         };
 
         // Subpass
@@ -100,7 +100,7 @@ impl CompletePipeline {
 
         // Shader modules
         let (vs_module, fs_module) = {
-            let mut compiler = shaderc::Compiler::new().ok_or(error::CreationError::NoShaderC)?;
+            let mut compiler = shaderc::Compiler::new().ok_or(EnvironmentError::NoShaderC)?;
 
             let vertex_compile_artifact = compiler
                 .compile_into_spirv(
@@ -110,7 +110,7 @@ impl CompletePipeline {
                     ENTRY_NAME,
                     None,
                 )
-                .map_err(error::CreationError::ShaderCError)?;
+                .context("Error compiling vertex shader")?;
 
             let fragment_compile_artifact = compiler
                 .compile_into_spirv(
@@ -120,17 +120,17 @@ impl CompletePipeline {
                     ENTRY_NAME,
                     None,
                 )
-                .map_err(error::CreationError::ShaderCError)?;
+                .context("Error compiling fragment shader")?;
 
             // Make into shader module
             unsafe {
                 (
                     device
                         .create_shader_module(vertex_compile_artifact.as_binary())
-                        .map_err(error::CreationError::ShaderModuleFailed)?,
+                        .context("Error creating vertex shader module")?,
                     device
                         .create_shader_module(fragment_compile_artifact.as_binary())
-                        .map_err(error::CreationError::ShaderModuleFailed)?,
+                        .context("Error creating fragment shader module")?,
                 )
             }
         };
@@ -178,7 +178,7 @@ impl CompletePipeline {
                 IntoIter::new([(ShaderStageFlags::VERTEX, 0..64)]),
             )
         }
-        .map_err(|_| error::CreationError::OutOfMemoryError)?;
+        .context("Error creating pipeline layout")?;
 
         // Colour blending
         let blender = {
@@ -270,7 +270,7 @@ impl CompletePipeline {
 
         // Pipeline
         let pipeline = unsafe { device.create_graphics_pipeline(&pipeline_desc, None) }
-            .map_err(error::CreationError::PipelineError)?;
+            .context("Error creating graphics pipeline")?;
 
         Ok(CompletePipeline {
             renderpass: ManuallyDrop::new(renderpass),

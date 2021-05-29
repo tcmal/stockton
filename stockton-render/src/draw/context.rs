@@ -8,11 +8,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use anyhow::{Context, Result};
 use arrayvec::ArrayVec;
-use hal::{memory::SparseFlags, pool::CommandPoolCreateFlags};
+use hal::pool::CommandPoolCreateFlags;
 use log::debug;
 use na::Mat4;
-use rendy_memory::DynamicConfig;
 use winit::window::Window;
 
 use super::{
@@ -27,9 +27,12 @@ use super::{
         do_render as do_render_ui, ensure_textures as ensure_textures_ui, UiPipeline, UiPoint,
         UiTextures,
     },
-    utils::find_memory_type_id,
 };
-use crate::{error, types::*, window::UiState};
+use crate::{
+    error::{EnvironmentError, LockPoisoned},
+    types::*,
+    window::UiState,
+};
 use stockton_levels::prelude::*;
 
 /// Contains all the hal related stuff.
@@ -76,10 +79,6 @@ pub struct RenderingContext<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
     /// Buffers used for drawing the UI
     ui_draw_buffers: ManuallyDrop<DrawBuffers<'a, UiPoint>>,
 
-    /// Memory allocator used for any sort of textures / maps
-    /// Guaranteed suitable for 2D RGBA images with `Optimal` tiling and `Usage::Sampled`
-    texture_allocator: ManuallyDrop<DynamicAllocator>,
-
     /// View projection matrix
     pub(crate) vp_matrix: Mat4,
 
@@ -88,15 +87,15 @@ pub struct RenderingContext<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
 
 impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
     /// Create a new RenderingContext for the given window.
-    pub fn new(window: &Window, map: M) -> Result<Self, error::CreationError> {
+    pub fn new(window: &Window, map: M) -> Result<Self> {
         let map = Arc::new(RwLock::new(map));
         // Create surface
         let (instance, surface, mut adapters) = unsafe {
-            let instance = back::Instance::create("stockton", 1)
-                .map_err(|_| error::CreationError::WindowError)?;
+            let instance =
+                back::Instance::create("stockton", 1).context("Error creating vulkan instance")?;
             let surface = instance
                 .create_surface(window)
-                .map_err(|_| error::CreationError::WindowError)?;
+                .context("Error creating surface")?;
             let adapters = instance.enumerate_adapters();
 
             (instance, surface, adapters)
@@ -108,21 +107,22 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         let mut draw_queue_negotiator = QueueNegotiator::find(&adapter, |family| {
             surface.supports_queue_family(family) && family.queue_type().supports_graphics()
         })
-        .unwrap();
+        .context("Error creating draw queue negotiator")?;
 
         let mut tex_queue_negotiator =
-            QueueNegotiator::find(&adapter, TextureRepo::queue_family_filter).unwrap();
-        // Device & Queue group
-        let (device_lock, mut queue_groups) = {
-            debug!(
-                "Using draw queue family {:?}",
-                draw_queue_negotiator.family_id()
-            );
-            debug!(
-                "Using tex queue family {:?}",
-                tex_queue_negotiator.family_id()
-            );
+            QueueNegotiator::find(&adapter, TextureRepo::queue_family_filter)
+                .context("Error creating texture queue negotiator")?;
+        debug!(
+            "Using draw queue family {:?}",
+            draw_queue_negotiator.family_id()
+        );
+        debug!(
+            "Using tex queue family {:?}",
+            tex_queue_negotiator.family_id()
+        );
 
+        // Device & Queue groups
+        let (device_lock, mut queue_groups) = {
             let gpu = unsafe {
                 adapter
                     .physical_device
@@ -133,24 +133,22 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                         ],
                         hal::Features::empty(),
                     )
-                    .unwrap()
+                    .context("Error opening logical device")?
             };
 
             (Arc::new(RwLock::new(gpu.device)), gpu.queue_groups)
         };
 
-        let mut device = device_lock.write().unwrap();
-
-        let device_props = adapter.physical_device.properties();
+        let mut device = device_lock
+            .write()
+            .map_err(|_| LockPoisoned::Device)
+            .context("Error getting device lock")?;
 
         // Figure out what our swapchain will look like
         let swapchain_properties = SwapchainProperties::find_best(&adapter, &surface)
-            .map_err(|_| error::CreationError::BadSurface)?;
+            .context("Error getting properties for swapchain")?;
 
-        debug!(
-            "Detected following swapchain properties: {:?}",
-            swapchain_properties
-        );
+        debug!("Detected swapchain properties: {:?}", swapchain_properties);
 
         // Command pool
         let mut cmd_pool = unsafe {
@@ -159,62 +157,17 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                 CommandPoolCreateFlags::RESET_INDIVIDUAL,
             )
         }
-        .map_err(|_| error::CreationError::OutOfMemoryError)?;
+        .context("Error creating draw command pool")?;
 
         // Vertex and index buffers
-        let draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
+        let draw_buffers =
+            DrawBuffers::new(&mut device, &adapter).context("Error creating 3D draw buffers")?;
 
         // UI Vertex and index buffers
-        let ui_draw_buffers = DrawBuffers::new(&mut device, &adapter)?;
+        let ui_draw_buffers =
+            DrawBuffers::new(&mut device, &adapter).context("Error creating UI draw buffers")?;
 
-        // Memory allocators
-        let texture_allocator = unsafe {
-            use hal::{
-                format::Format,
-                image::{Kind, Tiling, Usage, ViewCapabilities},
-                memory::Properties,
-            };
-
-            // We create an empty image with the same format as used for textures
-            // this is to get the type_mask required, which will stay the same for
-            // all colour images of the same tiling. (certain memory flags excluded).
-
-            // Size and alignment don't necessarily stay the same, so we're forced to
-            // guess at the alignment for our allocator.
-
-            // TODO: Way to tune these options
-
-            let img = device
-                .create_image(
-                    Kind::D2(16, 16, 1, 1),
-                    1,
-                    Format::Rgba8Srgb,
-                    Tiling::Optimal,
-                    Usage::SAMPLED,
-                    SparseFlags::empty(),
-                    ViewCapabilities::empty(),
-                )
-                .map_err(|_| error::CreationError::OutOfMemoryError)?;
-
-            let type_mask = device.get_image_requirements(&img).type_mask;
-
-            device.destroy_image(img);
-
-            let props = Properties::DEVICE_LOCAL;
-
-            DynamicAllocator::new(
-                find_memory_type_id(&adapter, type_mask, props)
-                    .ok_or(error::CreationError::OutOfMemoryError)?,
-                props,
-                DynamicConfig {
-                    block_size_granularity: 4 * 32 * 32, // 32x32 image
-                    max_chunk_size: u64::pow(2, 63),
-                    min_device_allocation: 4 * 32 * 32,
-                },
-                device_props.limits.non_coherent_atom_size as u64,
-            )
-        };
-
+        //  We have to unlock device for creating texture repos
         drop(device);
 
         // Texture repos
@@ -222,28 +175,34 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         let tex_repo = TextureRepo::new(
             device_lock.clone(),
             tex_queue_negotiator.family_id(),
-            tex_queue_negotiator.get_queue(&mut queue_groups).unwrap(),
+            tex_queue_negotiator
+                .get_queue(&mut queue_groups)
+                .ok_or(EnvironmentError::NoQueues)
+                .context("Error getting 3D texture loader queue")?,
             &adapter,
             map.clone(),
             BasicFsResolver::new(std::path::Path::new(".")),
         )
-        .unwrap(); // TODO
+        .context("Error creating 3D Texture repo")?; // TODO
 
         debug!("Creating UI Texture Repo");
         let ui_tex_repo = TextureRepo::new(
             device_lock.clone(),
             tex_queue_negotiator.family_id(),
-            tex_queue_negotiator.get_queue(&mut queue_groups).unwrap(),
+            tex_queue_negotiator
+                .get_queue(&mut queue_groups)
+                .ok_or(EnvironmentError::NoQueues)
+                .context("Error getting UI texture loader queue")?,
             &adapter,
             Arc::new(RwLock::new(UiTextures)),
             BasicFsResolver::new(std::path::Path::new(".")),
         )
-        .unwrap(); // TODO
+        .context("Error creating UI texture repo")?; // TODO
 
-        let mut device = device_lock.write().unwrap();
+        let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
 
-        let ds_layout_lock = tex_repo.get_ds_layout();
-        let ui_ds_layout_lock = ui_tex_repo.get_ds_layout();
+        let ds_layout_lock = tex_repo.get_ds_layout()?;
+        let ui_ds_layout_lock = ui_tex_repo.get_ds_layout()?;
 
         // Graphics pipeline
         let pipeline = CompletePipeline::new(
@@ -271,7 +230,7 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
             &mut cmd_pool,
             swapchain_properties,
         )
-        .map_err(error::CreationError::TargetChainCreationError)?;
+        .context("Error creating target chain")?;
 
         drop(device);
         drop(ds_layout_lock);
@@ -284,7 +243,10 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
             device: device_lock,
             adapter,
 
-            queue: draw_queue_negotiator.get_queue(&mut queue_groups).unwrap(),
+            queue: draw_queue_negotiator
+                .get_queue(&mut queue_groups)
+                .ok_or(EnvironmentError::NoQueues)
+                .context("Error getting draw queue")?,
 
             target_chain: ManuallyDrop::new(target_chain),
             cmd_pool: ManuallyDrop::new(cmd_pool),
@@ -298,8 +260,6 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
             draw_buffers: ManuallyDrop::new(draw_buffers),
             ui_draw_buffers: ManuallyDrop::new(ui_draw_buffers),
 
-            texture_allocator: ManuallyDrop::new(texture_allocator),
-
             vp_matrix: Mat4::identity(),
 
             pixels_per_point: window.scale_factor() as f32,
@@ -309,23 +269,29 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
     /// If this function fails the whole context is probably dead
     /// # Safety
     /// The context must not be used while this is being called
-    pub unsafe fn handle_surface_change(&mut self) -> Result<(), error::CreationError> {
-        let mut device = self.device.write().unwrap();
+    pub unsafe fn handle_surface_change(&mut self) -> Result<()> {
+        let mut device = self
+            .device
+            .write()
+            .map_err(|_| LockPoisoned::Device)
+            .context("Error getting device lock")?;
 
-        device.wait_idle().unwrap();
+        device
+            .wait_idle()
+            .context("Error waiting for device to become idle")?;
 
         let surface = ManuallyDrop::into_inner(read(&self.target_chain))
             .deactivate_with_recyling(&mut device, &mut self.cmd_pool);
 
         let properties = SwapchainProperties::find_best(&self.adapter, &surface)
-            .map_err(|_| error::CreationError::BadSurface)?;
+            .context("Error finding best swapchain properties")?;
 
         use core::ptr::read;
 
         // Graphics pipeline
         // TODO: Recycle
-        let ds_layout_handle = self.tex_repo.get_ds_layout();
-        let ui_ds_layout_handle = self.tex_repo.get_ds_layout();
+        let ds_layout_handle = self.tex_repo.get_ds_layout()?;
+        let ui_ds_layout_handle = self.tex_repo.get_ds_layout()?;
 
         ManuallyDrop::into_inner(read(&self.pipeline)).deactivate(&mut device);
         self.pipeline = ManuallyDrop::new({
@@ -334,7 +300,8 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                 properties.extent,
                 &properties,
                 once(&*ds_layout_handle),
-            )?
+            )
+            .context("Error creating 3D Pipeline")?
         });
 
         // 2D Graphics pipeline
@@ -349,7 +316,8 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                 properties.extent,
                 &properties,
                 once(&*ui_ds_layout_handle),
-            )?
+            )
+            .context("Error creating UI Pipeline")?
         });
 
         self.target_chain = ManuallyDrop::new(
@@ -362,78 +330,89 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                 &mut self.cmd_pool,
                 properties,
             )
-            .map_err(error::CreationError::TargetChainCreationError)?,
+            .context("Error creating target chain")?,
         );
         Ok(())
     }
 
     /// Draw all vertices in the buffer
-    pub fn draw_vertices(&mut self, ui: &mut UiState, faces: &[u32]) -> Result<(), &'static str> {
-        let mut device = self.device.write().unwrap();
-        let mut queue = self.queue.write().unwrap();
+    pub fn draw_vertices(&mut self, ui: &mut UiState, faces: &[u32]) -> Result<()> {
+        let mut device = self
+            .device
+            .write()
+            .map_err(|_| LockPoisoned::Device)
+            .context("Error getting device lock")?;
+        let mut queue = self
+            .queue
+            .write()
+            .map_err(|_| LockPoisoned::Map)
+            .context("Error getting map lock")?;
 
         // Ensure UI texture(s) are loaded
-        ensure_textures_ui(
-            &mut self.ui_tex_repo,
-            ui,
-            &mut device,
-            &mut self.adapter,
-            &mut self.texture_allocator,
-            &mut queue,
-            &mut self.cmd_pool,
-        );
+        ensure_textures_ui(&mut self.ui_tex_repo, ui)?;
 
         // Get any textures that just finished loading
         self.tex_repo.process_responses();
 
         // 3D Pass
-        let (cmd_buffer, img) = self.target_chain.prep_next_target(
-            &mut device,
-            &mut self.draw_buffers,
-            &self.pipeline,
-            &self.vp_matrix,
-        )?;
+        let (cmd_buffer, img) = self
+            .target_chain
+            .prep_next_target(
+                &mut device,
+                &mut self.draw_buffers,
+                &self.pipeline,
+                &self.vp_matrix,
+            )
+            .context("Error preparing next target")?;
+
         do_render(
             cmd_buffer,
             &mut self.draw_buffers,
             &mut self.tex_repo,
             &self.pipeline.pipeline_layout,
-            &*self.map.read().unwrap(),
+            &*self
+                .map
+                .read()
+                .map_err(|_| LockPoisoned::Map)
+                .context("Error getting map read lock")?,
             faces,
-        );
+        )?;
 
         // 2D Pass
-        let cmd_buffer =
-            self.target_chain
-                .target_2d_pass(&mut self.ui_draw_buffers, &img, &self.ui_pipeline)?;
+        let cmd_buffer = self
+            .target_chain
+            .target_2d_pass(&mut self.ui_draw_buffers, &img, &self.ui_pipeline)
+            .context("Error switching to 2D pass")?;
+
         do_render_ui(
             cmd_buffer,
             &self.ui_pipeline.pipeline_layout,
             &mut self.ui_draw_buffers,
             &mut self.ui_tex_repo,
             ui,
-        );
+        )?;
 
         // Update our buffers before we actually start drawing
         self.draw_buffers
             .vertex_buffer
-            .commit(&device, &mut queue, &mut self.cmd_pool);
+            .commit(&device, &mut queue, &mut self.cmd_pool)?;
 
         self.draw_buffers
             .index_buffer
-            .commit(&device, &mut queue, &mut self.cmd_pool);
+            .commit(&device, &mut queue, &mut self.cmd_pool)?;
 
         self.ui_draw_buffers
             .vertex_buffer
-            .commit(&device, &mut queue, &mut self.cmd_pool);
+            .commit(&device, &mut queue, &mut self.cmd_pool)?;
 
         self.ui_draw_buffers
             .index_buffer
-            .commit(&device, &mut queue, &mut self.cmd_pool);
+            .commit(&device, &mut queue, &mut self.cmd_pool)?;
 
         // Send commands off to GPU
         self.target_chain
-            .finish_and_submit_target(img, &mut queue)?;
+            .finish_and_submit_target(img, &mut queue)
+            .context("Error finishing and submitting target")?;
 
         Ok(())
     }
@@ -455,8 +434,6 @@ impl<'a, M: MinBspFeatures<VulkanSystem>> core::ops::Drop for RenderingContext<'
 
             ManuallyDrop::into_inner(read(&self.draw_buffers)).deactivate(&mut device);
             ManuallyDrop::into_inner(read(&self.ui_draw_buffers)).deactivate(&mut device);
-
-            ManuallyDrop::into_inner(read(&self.texture_allocator)).dispose();
 
             ManuallyDrop::into_inner(read(&self.target_chain)).deactivate(
                 &mut self.instance,

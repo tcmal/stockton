@@ -1,4 +1,5 @@
-use crate::{draw::buffer::StagedBuffer, error::CreationError, types::*};
+use crate::{draw::buffer::StagedBuffer, types::*};
+use anyhow::{Context, Result};
 use hal::buffer::Usage;
 use std::mem::ManuallyDrop;
 use stockton_types::{Vector2, Vector3};
@@ -20,12 +21,11 @@ pub struct DrawBuffers<'a, T: Sized> {
 }
 
 impl<'a, T> DrawBuffers<'a, T> {
-    pub fn new(
-        device: &mut DeviceT,
-        adapter: &Adapter,
-    ) -> Result<DrawBuffers<'a, T>, CreationError> {
-        let vert = StagedBuffer::new(device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)?;
-        let index = StagedBuffer::new(device, &adapter, Usage::INDEX, INITIAL_INDEX_SIZE)?;
+    pub fn new(device: &mut DeviceT, adapter: &Adapter) -> Result<DrawBuffers<'a, T>> {
+        let vert = StagedBuffer::new(device, &adapter, Usage::VERTEX, INITIAL_VERT_SIZE)
+            .context("Error creating vertex buffer")?;
+        let index = StagedBuffer::new(device, &adapter, Usage::INDEX, INITIAL_INDEX_SIZE)
+            .context("Error creating index buffer")?;
 
         Ok(DrawBuffers {
             vertex_buffer: ManuallyDrop::new(vert),

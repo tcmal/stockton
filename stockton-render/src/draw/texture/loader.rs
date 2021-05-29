@@ -147,13 +147,14 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                 debug!("Load finished for texture block {:?}", block.id);
 
                 // Destroy staging buffers
-                while staging_bufs.len() > 0 {
-                    let buf = staging_bufs.pop().unwrap();
+                for buf in staging_bufs.drain(..) {
                     buf.deactivate(&mut device, &mut self.staging_allocator);
                 }
 
                 self.buffers.push_back(assets);
-                self.return_channel.send(block).unwrap();
+                self.return_channel
+                    .send(block)
+                    .context("Error returning texture block")?;
             } else {
                 i += 1;
             }
@@ -365,7 +366,11 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
             self.descriptor_allocator
                 .allocate(
                     &device,
-                    &*self.ds_layout.read().unwrap(),
+                    &*self
+                        .ds_layout
+                        .read()
+                        .map_err(|_| LockPoisoned::Other)
+                        .context("Error reading descriptor set layout")?,
                     DescriptorRanges::from_bindings(&[
                         DescriptorSetLayoutBinding {
                             binding: 0,
@@ -668,8 +673,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                         device.destroy_fence(assets.0);
                         // Command buffer will be freed when we reset the command pool
                         // Destroy staging buffers
-                        while staging_bufs.len() > 0 {
-                            let buf = staging_bufs.pop().unwrap();
+                        for buf in staging_bufs.drain(..) {
                             buf.deactivate(&mut device, &mut self.staging_allocator);
                         }
 

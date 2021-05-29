@@ -1,6 +1,6 @@
 use crate::draw::texture::{LoadableImage, TextureRepo};
-use crate::types::*;
 use crate::UiState;
+use anyhow::Result;
 use egui::Texture;
 use stockton_levels::{prelude::HasTextures, traits::textures::Texture as LTexture};
 
@@ -43,19 +43,13 @@ impl LoadableImage for &Texture {
     }
 }
 
-pub fn ensure_textures(
-    _tex_repo: &mut TextureRepo,
-    ui: &mut UiState,
-    _device: &mut DeviceT,
-    _adapter: &mut Adapter,
-    _allocator: &mut DynamicAllocator,
-    _command_queue: &mut QueueT,
-    _command_pool: &mut CommandPoolT,
-) {
+pub fn ensure_textures(tex_repo: &mut TextureRepo, ui: &mut UiState) -> Result<()> {
     let tex = ui.ctx.texture();
 
     if tex.version != ui.last_tex_ver {
-        // tex_repo.force_queue_load(0).unwrap(); // TODO
+        tex_repo.force_queue_load(0)?;
         ui.last_tex_ver = tex.version;
     }
+
+    Ok(())
 }

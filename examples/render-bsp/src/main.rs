@@ -6,6 +6,8 @@ extern crate stockton_input_codegen;
 #[macro_use]
 extern crate legion;
 
+use anyhow::{Context, Result};
+use log::warn;
 use std::collections::BTreeMap;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
@@ -15,6 +17,7 @@ use stockton_contrib::flycam::*;
 use stockton_input::{Axis, InputManager, Mouse};
 use stockton_levels::{prelude::*, q3::Q3BspFile};
 
+use stockton_render::error::full_error_display;
 use stockton_render::systems::*;
 use stockton_render::{Renderer, UiState, WindowEvent};
 
@@ -52,18 +55,26 @@ fn hello_world(#[resource] ui: &mut UiState) {
 }
 
 fn main() {
+    if let Err(err) = try_main() {
+        eprintln!("{}", full_error_display(err));
+    }
+}
+
+fn try_main() -> Result<()> {
     // Initialise logger
     simple_logger::SimpleLogger::new()
         .with_level(log::LevelFilter::Debug)
         .init()
-        .unwrap();
+        .context("Error initialising logger")?;
 
     // Make a window
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new().build(&event_loop).unwrap();
+    let window = WindowBuilder::new()
+        .build(&event_loop)
+        .context("Error creating window")?;
 
     if window.set_cursor_grab(true).is_err() {
-        println!("warning: cursor not grabbed");
+        warn!("warning: cursor not grabbed");
     }
     window.set_cursor_visible(false);
 
@@ -73,11 +84,11 @@ fn main() {
         .into_boxed_slice();
     let bsp: Result<Q3BspFile<Q3System>, stockton_levels::types::ParseError> =
         Q3BspFile::parse_file(&data);
-    let bsp: Q3BspFile<Q3System> = bsp.unwrap();
+    let bsp: Q3BspFile<Q3System> = bsp.context("Error loading bsp")?;
     let bsp: Q3BspFile<VulkanSystem> = bsp.swizzle_to();
 
     // Create the renderer
-    let (renderer, tx) = Renderer::new(&window, bsp);
+    let (renderer, tx) = Renderer::new(&window, bsp)?;
     let new_control_flow = renderer.update_control_flow.clone();
 
     // Create the input manager
@@ -146,7 +157,7 @@ fn main() {
             Event::RedrawRequested(_) => session.do_update(),
             _ => {
                 if let Some(we) = WindowEvent::from(&event) {
-                    tx.send(we).unwrap();
+                    tx.send(we).unwrap()
                 }
             }
         }
