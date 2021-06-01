@@ -22,7 +22,7 @@ use super::{
     queue_negotiator::QueueNegotiator,
     render::do_render,
     target::{SwapchainProperties, TargetChain},
-    texture::{resolver::BasicFsResolver, TextureRepo},
+    texture::{resolver::FsResolver, TextureLoadConfig, TextureRepo},
     ui::{
         do_render as do_render_ui, ensure_textures as ensure_textures_ui, UiPipeline, UiPoint,
         UiTextures,
@@ -87,7 +87,7 @@ pub struct RenderingContext<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
 
 impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
     /// Create a new RenderingContext for the given window.
-    pub fn new(window: &Window, map: M) -> Result<Self> {
+    pub fn new(window: &Window, ui: &mut UiState, map: M) -> Result<Self> {
         let map = Arc::new(RwLock::new(map));
         // Create surface
         let (instance, surface, mut adapters) = unsafe {
@@ -180,8 +180,11 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error getting 3D texture loader queue")?,
             &adapter,
-            map.clone(),
-            BasicFsResolver::new(std::path::Path::new(".")),
+            TextureLoadConfig {
+                resolver: FsResolver::new(std::path::Path::new("."), map.clone()),
+                filter: hal::image::Filter::Linear,
+                wrap_mode: hal::image::WrapMode::Tile,
+            },
         )
         .context("Error creating 3D Texture repo")?; // TODO
 
@@ -194,8 +197,11 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error getting UI texture loader queue")?,
             &adapter,
-            Arc::new(RwLock::new(UiTextures)),
-            BasicFsResolver::new(std::path::Path::new(".")),
+            TextureLoadConfig {
+                resolver: UiTextures::new(ui.ctx().clone()),
+                filter: hal::image::Filter::Linear,
+                wrap_mode: hal::image::WrapMode::Clamp,
+            },
         )
         .context("Error creating UI texture repo")?; // TODO
 
@@ -262,6 +268,7 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
 
             vp_matrix: Mat4::identity(),
 
+            // pixels_per_point: window.scale_factor() as f32,
             pixels_per_point: window.scale_factor() as f32,
         })
     }
@@ -352,6 +359,7 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         ensure_textures_ui(&mut self.ui_tex_repo, ui)?;
 
         // Get any textures that just finished loading
+        self.ui_tex_repo.process_responses();
         self.tex_repo.process_responses();
 
         // 3D Pass

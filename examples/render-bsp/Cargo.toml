@@ -13,8 +13,8 @@ stockton-levels = { path = "../../stockton-levels" }
 stockton-contrib = { path = "../../stockton-contrib", features = ["delta_time", "flycam"] }
 winit = "^0.21"
 log = "0.4.0"
-simple_logger = "^1.11"
+simplelog = "^0.10"
 image = "0.23.2"
-egui = "^0.2"
+egui = "^0.12"
 legion = { version = "^0.3" }
 anyhow = "1.0.40"

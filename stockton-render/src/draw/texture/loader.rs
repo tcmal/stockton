@@ -2,10 +2,10 @@
 
 use super::{
     block::{LoadedImage, TexturesBlock},
-    load::{load_image, QueuedLoad, TextureLoadError, LAYERS, RESOURCES},
+    load::{load_image, QueuedLoad, TextureLoadConfig, TextureLoadError, LAYERS, RESOURCES},
     repo::BLOCK_SIZE,
     resolver::TextureResolver,
-    LoadableImage, PIXEL_SIZE,
+    PIXEL_SIZE,
 };
 use crate::{draw::utils::find_memory_type_id, error::LockPoisoned, types::*};
 
@@ -13,7 +13,6 @@ use std::{
     array::IntoIter,
     collections::VecDeque,
     iter::{empty, once},
-    marker::PhantomData,
     mem::{drop, ManuallyDrop},
     sync::{
         mpsc::{Receiver, Sender},
@@ -38,7 +37,6 @@ use image::{Rgba, RgbaImage};
 use log::*;
 use rendy_descriptor::{DescriptorRanges, DescriptorSetLayoutBinding, DescriptorType};
 use rendy_memory::DynamicConfig;
-use stockton_levels::prelude::HasTextures;
 use thiserror::Error;
 
 /// The number of command buffers to have in flight simultaneously.
@@ -49,7 +47,7 @@ pub type BlockRef = usize;
 
 /// Manages the loading/unloading of textures
 /// This is expected to load the textures, then send the loaded blocks back
-pub struct TextureLoader<T, R, I> {
+pub struct TextureLoader<R: TextureResolver> {
     /// Blocks for which commands have been queued and are done loading once the fence is triggered.
     commands_queued: ArrayVec<[QueuedLoad<DynamicBlock>; NUM_SIMULTANEOUS_CMDS]>,
 
@@ -82,11 +80,8 @@ pub struct TextureLoader<T, R, I> {
     /// From adapter, used for determining alignment
     optimal_buffer_copy_pitch_alignment: hal::buffer::Offset,
 
-    /// The textures lump to get info from
-    textures: Arc<RwLock<T>>,
-
-    /// The resolver which gets image data for a given texture.
-    resolver: R,
+    /// Configuration for how to find and load textures
+    config: TextureLoadConfig<R>,
 
     /// The channel requests come in.
     /// Requests should reference a texture **block**, for example textures 8..16 is block 1.
@@ -97,8 +92,6 @@ pub struct TextureLoader<T, R, I> {
 
     /// A filler image for descriptors that aren't needed but still need to be written to
     blank_image: ManuallyDrop<LoadedImage<DynamicBlock>>,
-
-    _li: PhantomData<I>,
 }
 
 #[derive(Error, Debug)]
@@ -107,7 +100,7 @@ pub enum TextureLoaderError {
     NoMemoryTypes,
 }
 
-impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R, I> {
+impl<R: TextureResolver> TextureLoader<R> {
     pub fn loop_until_exit(mut self) -> Result<TextureLoaderRemains> {
         debug!("TextureLoader starting main loop");
         let mut res = Ok(false);
@@ -196,8 +189,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
         ds_layout: Arc<RwLock<DescriptorSetLayoutT>>,
         request_channel: Receiver<LoaderRequest>,
         return_channel: Sender<TexturesBlock<DynamicBlock>>,
-        texs: Arc<RwLock<T>>,
-        resolver: R,
+        config: TextureLoadConfig<R>,
     ) -> Result<Self> {
         let mut device = device_lock
             .write()
@@ -310,6 +302,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                 &mut tex_allocator,
                 staging_memory_type,
                 optimal_buffer_copy_pitch_alignment,
+                &config,
             )
         }
         .context("Error creating blank image")?;
@@ -333,10 +326,8 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
 
             request_channel,
             return_channel,
-            textures: texs,
-            resolver,
+            config,
             blank_image: ManuallyDrop::new(blank_image),
-            _li: PhantomData::default(),
         })
     }
 
@@ -346,12 +337,6 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
             .write()
             .map_err(|_| LockPoisoned::Device)
             .context("Error getting device lock")?;
-
-        let textures = self
-            .textures
-            .read()
-            .map_err(|_| LockPoisoned::Map)
-            .context("Error getting map lock")?;
 
         // Get assets to use
         let (mut fence, mut buf) = self
@@ -407,9 +392,9 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
 
         // For each texture in block
         for tex_idx in (block_ref * BLOCK_SIZE)..(block_ref + 1) * BLOCK_SIZE {
-            // Get texture and Resolve image
-            let tex = textures.get_texture(tex_idx as u32);
-            if tex.is_none() {
+            // Resolve texture
+            let img_data = self.config.resolver.resolve(tex_idx as u32);
+            if img_data.is_none() {
                 // Write a blank descriptor
                 device.write_descriptor_set(DescriptorSetWrite {
                     set: descriptor_set.raw_mut(),
@@ -430,12 +415,8 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                 continue;
             }
 
-            let tex = tex.unwrap();
+            let img_data = img_data.unwrap();
 
-            let img_data = self
-                .resolver
-                .resolve(tex)
-                .ok_or(TextureLoadError::ResolveFailed(tex_idx))?;
             let array_offset = tex_idx % BLOCK_SIZE;
 
             let (staging_buffer, img) = load_image(
@@ -445,6 +426,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
                 self.staging_memory_type,
                 self.optimal_buffer_copy_pitch_alignment,
                 img_data,
+                &self.config,
             )?;
 
             // Write to descriptor set
@@ -555,6 +537,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
         tex_allocator: &mut DynamicAllocator,
         staging_memory_type: MemoryTypeId,
         obcpa: u64,
+        config: &TextureLoadConfig<R>,
     ) -> Result<LoadedImage<DynamicBlock>> {
         let img_data = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]));
 
@@ -572,6 +555,7 @@ impl<T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R
             staging_memory_type,
             obcpa,
             img_data,
+            &config,
         )?;
 
         buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);

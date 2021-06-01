@@ -10,6 +10,7 @@ mod staging_buffer;
 
 pub use self::block::TexturesBlock;
 pub use self::image::LoadableImage;
+pub use self::load::TextureLoadConfig;
 pub use self::loader::BlockRef;
 pub use self::repo::TextureRepo;
 

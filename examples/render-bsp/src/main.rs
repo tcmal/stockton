@@ -11,6 +11,7 @@ use log::warn;
 use std::collections::BTreeMap;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
+use egui::{containers::CentralPanel, Frame};
 use stockton_contrib::delta_time::*;
 use stockton_contrib::flycam::*;
 
@@ -50,8 +51,11 @@ impl FlycamInput for MovementInputs {
 
 #[system]
 fn hello_world(#[resource] ui: &mut UiState) {
-    let ui = ui.ui();
-    ui.heading("ABCDEFGHIJKLMNOPQRSTUVWXYZ");
+    CentralPanel::default()
+        .frame(Frame::none())
+        .show(ui.ctx(), |ui| {
+            ui.heading("Hello, World!");
+        });
 }
 
 fn main() {
@@ -62,10 +66,16 @@ fn main() {
 
 fn try_main() -> Result<()> {
     // Initialise logger
-    simple_logger::SimpleLogger::new()
-        .with_level(log::LevelFilter::Debug)
-        .init()
-        .context("Error initialising logger")?;
+    simplelog::TermLogger::init(
+        log::LevelFilter::Debug,
+        simplelog::ConfigBuilder::new()
+            .set_max_level(log::LevelFilter::Debug)
+            .set_thread_mode(simplelog::ThreadLogMode::Names)
+            .build(),
+        simplelog::TerminalMode::Stderr,
+        simplelog::ColorChoice::Auto,
+    )
+    .context("Error initialising logger")?;
 
     // Make a window
     let event_loop = EventLoop::new();
@@ -87,9 +97,15 @@ fn try_main() -> Result<()> {
     let bsp: Q3BspFile<Q3System> = bsp.context("Error loading bsp")?;
     let bsp: Q3BspFile<VulkanSystem> = bsp.swizzle_to();
 
+    // Create the UI State
+    let mut ui = UiState::new();
+
     // Create the renderer
-    let (renderer, tx) = Renderer::new(&window, bsp)?;
+    let (renderer, tx) = Renderer::new(&window, &mut ui, bsp)?;
     let new_control_flow = renderer.update_control_flow.clone();
+
+    // Populate the initial UI state
+    ui.populate_initial_state(&renderer);
 
     // Create the input manager
     let manager = {
@@ -111,7 +127,7 @@ fn try_main() -> Result<()> {
     // Load everything into the session
     let mut session = Session::new(
         move |resources| {
-            resources.insert(UiState::new(&renderer));
+            resources.insert(ui);
             resources.insert(renderer);
             resources.insert(manager);
             resources.insert(Timing::default());

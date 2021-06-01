@@ -183,8 +183,8 @@ impl UiPipeline {
                     dst: Factor::OneMinusSrcAlpha,
                 },
                 alpha: BlendOp::Add {
-                    src: Factor::OneMinusSrcAlpha,
-                    dst: Factor::Zero,
+                    src: Factor::SrcAlpha,
+                    dst: Factor::OneMinusSrcAlpha,
                 },
             };
 
@@ -203,7 +203,7 @@ impl UiPipeline {
                 rect: extent.rect(),
                 depth: (0.0..1.0),
             }),
-            scissor: Some(extent.rect()),
+            scissor: None,
             blend_constants: None,
             depth_bounds: None,
         };
@@ -212,7 +212,7 @@ impl UiPipeline {
         let primitive_assembler = PrimitiveAssemblerDesc::Vertex {
             buffers: &[VertexBufferDesc {
                 binding: 0,
-                stride: (size_of::<f32>() * 6) as u32,
+                stride: (size_of::<f32>() * 8) as u32,
                 rate: VertexInputRate::Vertex,
             }],
             attributes: &[
@@ -236,7 +236,7 @@ impl UiPipeline {
                     location: 2,
                     binding: 0,
                     element: Element {
-                        format: Format::R32Uint,
+                        format: Format::Rgba32Sfloat,
                         offset: (size_of::<f32>() * 4) as u32,
                     },
                 },

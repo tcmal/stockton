@@ -1,5 +1,3 @@
-use egui::paint::color::Srgba;
-
 pub mod pipeline;
 pub mod render;
 pub mod texture;
@@ -10,4 +8,4 @@ use stockton_types::Vector2;
 pub use texture::{ensure_textures, UiTextures};
 
 #[derive(Debug)]
-pub struct UiPoint(pub Vector2, pub Vector2, pub Srgba);
+pub struct UiPoint(pub Vector2, pub Vector2, pub [f32; 4]);

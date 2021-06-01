@@ -51,13 +51,13 @@ pub struct Renderer<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
 
 impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
     /// Create a new Renderer.
-    pub fn new(window: &Window, file: M) -> Result<(Self, Sender<WindowEvent>)> {
+    pub fn new(window: &Window, ui: &mut UiState, file: M) -> Result<(Self, Sender<WindowEvent>)> {
         let (tx, rx) = channel();
         let update_control_flow = Arc::new(RwLock::new(ControlFlow::Poll));
 
         Ok((
             Renderer {
-                context: RenderingContext::new(window, file)?,
+                context: RenderingContext::new(window, ui, file)?,
                 window_events: rx,
                 update_control_flow,
             },

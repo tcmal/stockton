@@ -1,9 +1,8 @@
 use super::{
-    block::LoadedImage, block::TexturesBlock, loader::TextureLoader, repo::BLOCK_SIZE,
-    resolver::TextureResolver, staging_buffer::StagingBuffer, LoadableImage, PIXEL_SIZE,
+    block::LoadedImage, block::TexturesBlock, repo::BLOCK_SIZE, resolver::TextureResolver,
+    staging_buffer::StagingBuffer, LoadableImage, PIXEL_SIZE,
 };
 use crate::types::*;
-use stockton_levels::prelude::*;
 
 use anyhow::{Context, Result};
 use arrayvec::ArrayVec;
@@ -24,9 +23,6 @@ use thiserror::Error;
 pub enum TextureLoadError {
     #[error("No available resources")]
     NoResources,
-
-    #[error("Texture could not be resolved")]
-    ResolveFailed(usize),
 }
 
 pub const FORMAT: Format = Format::Rgba8Srgb;
@@ -42,6 +38,12 @@ pub const LAYERS: SubresourceLayers = SubresourceLayers {
     level: 0,
     layers: 0..1,
 };
+
+pub struct TextureLoadConfig<R: TextureResolver> {
+    pub resolver: R,
+    pub filter: Filter,
+    pub wrap_mode: WrapMode,
+}
 
 pub struct QueuedLoad<B: Block<back::Backend>> {
     pub fence: FenceT,
@@ -61,8 +63,6 @@ impl<B: Block<back::Backend>> QueuedLoad<B> {
         ((self.fence, self.buf), self.staging_bufs, self.block)
     }
 }
-
-impl<'a, T: HasTextures, R: TextureResolver<I>, I: LoadableImage> TextureLoader<T, R, I> {}
 
 pub fn tex_size_info<T: LoadableImage>(img: &T, obcpa: hal::buffer::Offset) -> (usize, usize) {
     let initial_row_size = PIXEL_SIZE * img.width() as usize;
@@ -119,13 +119,14 @@ where
     Ok((block, image_ref))
 }
 
-pub unsafe fn load_image<I: LoadableImage>(
+pub unsafe fn load_image<I: LoadableImage, R: TextureResolver>(
     device: &mut DeviceT,
     staging_allocator: &mut DynamicAllocator,
     tex_allocator: &mut DynamicAllocator,
     staging_memory_type: MemoryTypeId,
     obcpa: u64,
     img_data: I,
+    config: &TextureLoadConfig<R>,
 ) -> Result<(StagingBuffer, LoadedImage<DynamicBlock>)> {
     // Calculate buffer size
     let (row_size, total_size) = tex_size_info(&img_data, obcpa);
@@ -172,7 +173,7 @@ pub unsafe fn load_image<I: LoadableImage>(
 
     // Create sampler
     let sampler = device
-        .create_sampler(&SamplerDesc::new(Filter::Nearest, WrapMode::Tile))
+        .create_sampler(&SamplerDesc::new(config.filter, config.wrap_mode))
         .context("Error creating sampler")?;
 
     Ok((

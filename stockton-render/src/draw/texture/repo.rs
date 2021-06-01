@@ -1,10 +1,8 @@
-use stockton_levels::prelude::HasTextures;
-
 use super::{
     block::TexturesBlock,
+    load::TextureLoadConfig,
     loader::{BlockRef, LoaderRequest, TextureLoader, TextureLoaderRemains, NUM_SIMULTANEOUS_CMDS},
     resolver::TextureResolver,
-    LoadableImage,
 };
 use crate::error::LockPoisoned;
 use crate::types::*;
@@ -49,17 +47,12 @@ impl<'a> TextureRepo<'a> {
         family.queue_type().supports_transfer() && family.max_queues() >= NUM_SIMULTANEOUS_CMDS
     }
 
-    pub fn new<
-        T: 'static + HasTextures + Send + Sync,
-        R: 'static + TextureResolver<I> + Send + Sync,
-        I: 'static + LoadableImage + Send,
-    >(
+    pub fn new<R: 'static + TextureResolver + Send + Sync>(
         device_lock: Arc<RwLock<DeviceT>>,
         family: QueueFamilyId,
         queue: Arc<RwLock<QueueT>>,
         adapter: &Adapter,
-        texs_lock: Arc<RwLock<T>>,
-        resolver: R,
+        config: TextureLoadConfig<R>,
     ) -> Result<Self> {
         // Create Channels
         let (req_send, req_recv) = channel();
@@ -112,8 +105,7 @@ impl<'a> TextureRepo<'a> {
                 ds_lock.clone(),
                 req_recv,
                 resp_send,
-                texs_lock,
-                resolver,
+                config,
             )?;
 
             std::thread::spawn(move || loader.loop_until_exit())

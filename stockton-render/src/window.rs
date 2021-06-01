@@ -1,11 +1,11 @@
 use crate::{error::full_error_display, Renderer};
-use egui::Context;
+use egui::{Modifiers, Rect, Vec2};
 use legion::systems::Runnable;
 use log::debug;
-use std::sync::Arc;
 use stockton_levels::prelude::{MinBspFeatures, VulkanSystem};
 
-use egui::{Output, PaintJobs, Pos2, RawInput, Ui};
+use egui::{CtxRef, Event, Output, Pos2, RawInput};
+use epaint::ClippedShape;
 use log::error;
 use stockton_input::{Action as KBAction, InputManager, Mouse};
 
@@ -71,76 +71,110 @@ impl WindowEvent {
 }
 
 pub struct UiState {
-    pub(crate) ctx: Arc<Context>,
-    pub(crate) raw_input: RawInput,
-    ui: Option<Ui>,
-
+    ctx: CtxRef,
+    raw_input: RawInput,
     pub(crate) last_tex_ver: u64,
+
+    frame_active: bool,
+
+    modifiers: Modifiers,
+    pointer_pos: Pos2,
 }
 
 impl UiState {
-    pub fn ui(&mut self) -> &mut Ui {
-        if self.ui.is_none() {
-            self.ui = Some(self.begin_frame());
+    pub fn new() -> Self {
+        UiState {
+            ctx: CtxRef::default(),
+            raw_input: RawInput::default(),
+            last_tex_ver: 0,
+            frame_active: false,
+            modifiers: Default::default(),
+            pointer_pos: Pos2::new(0.0, 0.0),
         }
-        self.ui.as_mut().unwrap()
-    }
-    fn begin_frame(&mut self) -> Ui {
-        self.ctx.begin_frame(self.raw_input.take())
     }
 
-    pub fn end_frame(&mut self) -> (Output, PaintJobs) {
-        self.ui = None;
+    pub fn populate_initial_state<T: MinBspFeatures<VulkanSystem>>(
+        &mut self,
+        renderer: &Renderer<T>,
+    ) {
+        let props = &renderer.context.target_chain.properties;
+        self.set_dimensions(props.extent.width, props.extent.height);
+        self.set_pixels_per_point(Some(renderer.context.pixels_per_point));
+        debug!("{:?}", self.raw_input);
+    }
+
+    #[inline]
+    pub fn ctx(&mut self) -> &CtxRef {
+        if !self.frame_active {
+            self.begin_frame()
+        }
+        &self.ctx
+    }
+
+    #[inline]
+    fn begin_frame(&mut self) -> () {
+        #[allow(deprecated)]
+        let new_raw_input = RawInput {
+            scroll_delta: Vec2::new(0.0, 0.0),
+            zoom_delta: 0.0,
+            screen_size: self.raw_input.screen_size,
+            screen_rect: self.raw_input.screen_rect.clone(),
+            pixels_per_point: self.raw_input.pixels_per_point.clone(),
+            time: self.raw_input.time.clone(),
+            predicted_dt: self.raw_input.predicted_dt,
+            modifiers: self.modifiers,
+            events: Vec::new(),
+        };
+        self.ctx.begin_frame(self.raw_input.take());
+        self.raw_input = new_raw_input;
+        self.frame_active = true;
+    }
+
+    #[inline]
+    pub(crate) fn end_frame(&mut self) -> (Output, Vec<ClippedShape>) {
+        self.frame_active = false;
         self.ctx.end_frame()
     }
 
+    #[inline]
+    pub fn dimensions(&self) -> Option<egui::math::Vec2> {
+        Some(self.raw_input.screen_rect?.size())
+    }
+
     fn set_mouse_pos(&mut self, x: f32, y: f32) {
-        self.raw_input.mouse_pos = Some(Pos2 { x, y })
+        self.raw_input
+            .events
+            .push(Event::PointerMoved(Pos2::new(x, y)));
+
+        self.pointer_pos = Pos2::new(x, y);
     }
 
     fn set_mouse_left(&mut self) {
-        self.raw_input.mouse_pos = None;
-    }
-    fn set_dimensions(&mut self, w: u32, h: u32) {
-        self.raw_input.screen_size = egui::math::Vec2 {
-            x: w as f32,
-            y: h as f32,
-        }
-    }
-    fn set_pixels_per_point(&mut self, ppp: Option<f32>) {
-        self.raw_input.pixels_per_point = ppp;
+        self.raw_input.events.push(Event::PointerGone);
     }
 
-    pub fn dimensions(&self) -> egui::math::Vec2 {
-        self.raw_input.screen_size
+    fn set_dimensions(&mut self, w: u32, h: u32) {
+        self.raw_input.screen_rect =
+            Some(Rect::from_x_y_ranges(0.0..=(w as f32), 0.0..=(h as f32)));
+    }
+    fn set_pixels_per_point(&mut self, ppp: Option<f32>) {
+        debug!("Using {:?} pixels per point", ppp);
+        self.raw_input.pixels_per_point = ppp;
     }
 
     fn handle_action(&mut self, action: KBAction) {
         // TODO
         match action {
             KBAction::MousePress(stockton_input::MouseButton::Left) => {
-                self.raw_input.mouse_down = true;
-            }
-            KBAction::MouseRelease(stockton_input::MouseButton::Right) => {
-                self.raw_input.mouse_down = false;
+                self.raw_input.events.push(Event::PointerButton {
+                    pos: self.pointer_pos,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: self.modifiers,
+                });
             }
             _ => (),
         }
-    }
-
-    pub fn new<T: MinBspFeatures<VulkanSystem>>(renderer: &Renderer<T>) -> Self {
-        let mut state = UiState {
-            ctx: Context::new(),
-            raw_input: RawInput::default(),
-            ui: None,
-            last_tex_ver: 0,
-        };
-
-        let props = &renderer.context.target_chain.properties;
-        state.set_dimensions(props.extent.width, props.extent.height);
-        state.set_pixels_per_point(Some(renderer.context.pixels_per_point));
-        debug!("{:?}", state.raw_input);
-        state
     }
 }
 
