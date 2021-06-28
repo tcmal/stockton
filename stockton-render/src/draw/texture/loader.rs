@@ -541,7 +541,7 @@ impl<R: TextureResolver> TextureLoader<R> {
         obcpa: u64,
         config: &TextureLoadConfig<R>,
     ) -> Result<LoadedImage<DynamicBlock>> {
-        let img_data = RgbaImage::from_pixel(1, 1, Rgba([0, 0, 0, 0]));
+        let img_data = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 255, 255]));
 
         let height = img_data.height();
         let width = img_data.width();
