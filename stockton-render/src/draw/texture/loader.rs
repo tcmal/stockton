@@ -235,7 +235,8 @@ impl<R: TextureResolver> TextureLoader<R> {
 
             DynamicAllocator::new(
                 find_memory_type_id(&adapter, type_mask, props)
-                    .ok_or(TextureLoaderError::NoMemoryTypes)?,
+                    .ok_or(TextureLoaderError::NoMemoryTypes)
+                    .context("Couldn't create tex memory allocator")?,
                 props,
                 DynamicConfig {
                     block_size_granularity: 4 * 32 * 32, // 32x32 image
@@ -248,8 +249,9 @@ impl<R: TextureResolver> TextureLoader<R> {
 
         let (staging_memory_type, mut staging_allocator) = {
             let props = MemProps::CPU_VISIBLE | MemProps::COHERENT;
-            let t = find_memory_type_id(&adapter, type_mask, props)
-                .ok_or(TextureLoaderError::NoMemoryTypes)?;
+            let t = find_memory_type_id(&adapter, u32::MAX, props)
+                .ok_or(TextureLoaderError::NoMemoryTypes)
+                .context("Couldn't create staging memory allocator")?;
             (
                 t,
                 DynamicAllocator::new(
