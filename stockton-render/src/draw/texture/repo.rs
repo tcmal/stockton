@@ -4,6 +4,7 @@ use super::{
     loader::{BlockRef, LoaderRequest, TextureLoader, TextureLoaderRemains, NUM_SIMULTANEOUS_CMDS},
     resolver::TextureResolver,
 };
+use crate::draw::queue_negotiator::QueueFamilySelector;
 use crate::error::LockPoisoned;
 use crate::types::*;
 
@@ -43,10 +44,6 @@ pub struct TextureRepo<'a> {
 }
 
 impl<'a> TextureRepo<'a> {
-    pub fn queue_family_filter(family: &&QueueFamilyT) -> bool {
-        family.queue_type().supports_transfer() && family.max_queues() >= NUM_SIMULTANEOUS_CMDS
-    }
-
     pub fn new<R: 'static + TextureResolver + Send + Sync>(
         device_lock: Arc<RwLock<DeviceT>>,
         family: QueueFamilyId,
@@ -196,5 +193,13 @@ impl<'a> TextureRepo<'a> {
                 .unwrap();
             device.destroy_descriptor_set_layout(ds_layout);
         }
+    }
+}
+
+pub struct TexLoadQueue;
+
+impl QueueFamilySelector for TexLoadQueue {
+    fn is_suitable(&self, family: &QueueFamilyT) -> bool {
+        family.queue_type().supports_transfer() && family.max_queues() >= NUM_SIMULTANEOUS_CMDS
     }
 }

@@ -12,7 +12,7 @@ pub use self::block::TexturesBlock;
 pub use self::image::LoadableImage;
 pub use self::load::TextureLoadConfig;
 pub use self::loader::BlockRef;
-pub use self::repo::TextureRepo;
+pub use self::repo::{TextureRepo, TexLoadQueue};
 
 /// The size of each pixel in an image
 pub const PIXEL_SIZE: usize = std::mem::size_of::<u8>() * 4;

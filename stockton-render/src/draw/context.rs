@@ -19,10 +19,10 @@ use super::{
     buffer::ModifiableBuffer,
     draw_buffers::{DrawBuffers, UvPoint},
     pipeline::CompletePipeline,
-    queue_negotiator::QueueNegotiator,
+    queue_negotiator::{QueueNegotiator, DrawQueue},
     render::do_render,
     target::{SwapchainProperties, TargetChain},
-    texture::{resolver::FsResolver, TextureLoadConfig, TextureRepo},
+    texture::{resolver::FsResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
     ui::{
         do_render as do_render_ui, ensure_textures as ensure_textures_ui, UiPipeline, UiPoint,
         UiTextures,
@@ -104,32 +104,30 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         // TODO: Properly figure out which adapter to use
         let adapter = adapters.remove(0);
 
-        let mut draw_queue_negotiator = QueueNegotiator::find(&adapter, |family| {
-            surface.supports_queue_family(family) && family.queue_type().supports_graphics()
-        })
-        .context("Error creating draw queue negotiator")?;
+        let (mut queue_negotiator, surface) = {
+            let dq: DrawQueue = DrawQueue { surface };
 
-        let mut tex_queue_negotiator =
-            QueueNegotiator::find(&adapter, TextureRepo::queue_family_filter)
-                .context("Error creating texture queue negotiator")?;
-        debug!(
-            "Using draw queue family {:?}",
-            draw_queue_negotiator.family_id()
-        );
-        debug!(
-            "Using tex queue family {:?}",
-            tex_queue_negotiator.family_id()
-        );
+            let qn = QueueNegotiator::find(&adapter, &[
+                &dq,
+                &TexLoadQueue,
+            ])
+            .context("Error creating draw queue negotiator")?;
+
+            (qn, dq.surface)
+        };
 
         // Device & Queue groups
         let (device_lock, mut queue_groups) = {
+            let (df, dqs) = queue_negotiator.family_spec::<DrawQueue>(&adapter.queue_families, 1).ok_or(EnvironmentError::NoSuitableFamilies)?;
+            let (tf, tqs) = queue_negotiator.family_spec::<TexLoadQueue>(&adapter.queue_families, 2).ok_or(EnvironmentError::NoSuitableFamilies)?;
+
             let gpu = unsafe {
                 adapter
                     .physical_device
                     .open(
                         &[
-                            (draw_queue_negotiator.family(&adapter), &[1.0]),
-                            (tex_queue_negotiator.family(&adapter), &[1.0]),
+                            (df, dqs.as_slice()),
+                            (tf, tqs.as_slice()),
                         ],
                         hal::Features::empty(),
                     )
@@ -153,7 +151,7 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         // Command pool
         let mut cmd_pool = unsafe {
             device.create_command_pool(
-                draw_queue_negotiator.family_id(),
+                queue_negotiator.family::<DrawQueue>().ok_or(EnvironmentError::NoSuitableFamilies)?,
                 CommandPoolCreateFlags::RESET_INDIVIDUAL,
             )
         }
@@ -174,9 +172,9 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         debug!("Creating 3D Texture Repo");
         let tex_repo = TextureRepo::new(
             device_lock.clone(),
-            tex_queue_negotiator.family_id(),
-            tex_queue_negotiator
-                .get_queue(&mut queue_groups)
+            queue_negotiator.family::<TexLoadQueue>().ok_or(EnvironmentError::NoQueues)?,
+            queue_negotiator
+                .get_queue::<TexLoadQueue>(&mut queue_groups)
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error getting 3D texture loader queue")?,
             &adapter,
@@ -191,9 +189,9 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         debug!("Creating UI Texture Repo");
         let ui_tex_repo = TextureRepo::new(
             device_lock.clone(),
-            tex_queue_negotiator.family_id(),
-            tex_queue_negotiator
-                .get_queue(&mut queue_groups)
+            queue_negotiator.family::<TexLoadQueue>().ok_or(EnvironmentError::NoQueues)?,
+            queue_negotiator
+                .get_queue::<TexLoadQueue>(&mut queue_groups)
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error getting UI texture loader queue")?,
             &adapter,
@@ -249,8 +247,8 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
             device: device_lock,
             adapter,
 
-            queue: draw_queue_negotiator
-                .get_queue(&mut queue_groups)
+            queue: queue_negotiator
+                .get_queue::<DrawQueue>(&mut queue_groups)
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error getting draw queue")?,
 
