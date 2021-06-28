@@ -1,9 +1,9 @@
 use crate::{error::EnvironmentError, types::*};
-use anyhow::{Result, Error};
+use anyhow::{Error, Result};
 use hal::queue::family::QueueFamilyId;
-use std::sync::{Arc, RwLock};
-use std::collections::HashMap;
 use std::any::TypeId;
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 pub struct QueueNegotiator {
     family_ids: HashMap<TypeId, QueueFamilyId>,
@@ -12,12 +12,15 @@ pub struct QueueNegotiator {
 
 pub trait QueueFamilySelector: 'static {
     fn is_suitable(&self, family: &QueueFamilyT) -> bool;
-    
-    fn get_type_id_self(&self) -> TypeId{
+
+    fn get_type_id_self(&self) -> TypeId {
         TypeId::of::<Self>()
     }
 
-    fn get_type_id() -> TypeId where Self: Sized {
+    fn get_type_id() -> TypeId
+    where
+        Self: Sized,
+    {
         TypeId::of::<Self>()
     }
 }
@@ -31,15 +34,19 @@ impl QueueNegotiator {
                 .iter()
                 .filter(|x| filter.is_suitable(*x))
                 .collect();
-            
+
             if candidates.len() == 0 {
                 return Err(Error::new(EnvironmentError::NoSuitableFamilies));
             }
 
             // Prefer using unique families
-            let family = match candidates.iter().filter(|x| !families.values().any(|y| *y == x.id())).next() {
+            let family = match candidates
+                .iter()
+                .filter(|x| !families.values().any(|y| *y == x.id()))
+                .next()
+            {
                 Some(x) => *x,
-                None => candidates[0]
+                None => candidates[0],
             };
 
             families.insert(filter.get_type_id_self(), family.id());
@@ -51,7 +58,10 @@ impl QueueNegotiator {
         })
     }
 
-    pub fn get_queue<T: QueueFamilySelector>(&mut self, groups: &mut Vec<QueueGroup>) -> Option<Arc<RwLock<QueueT>>> {
+    pub fn get_queue<T: QueueFamilySelector>(
+        &mut self,
+        groups: &mut Vec<QueueGroup>,
+    ) -> Option<Arc<RwLock<QueueT>>> {
         let tid = T::get_type_id();
         let family_id = self.family_ids.get(&tid)?;
 
@@ -76,8 +86,8 @@ impl QueueNegotiator {
 
                     Some(queue)
                 }
-                None => None
-            }
+                None => None,
+            },
         }
     }
 
@@ -90,14 +100,18 @@ impl QueueNegotiator {
         match self.already_allocated.get_mut(&tid) {
             None => {
                 self.already_allocated.insert(tid, (vec![queue], 0));
-            },
+            }
             Some(x) => {
                 x.0.push(queue);
             }
         }
     }
 
-    pub fn family_spec<'a, T: QueueFamilySelector>(&self, queue_families: &'a Vec<QueueFamilyT>, count: usize) -> Option<(&'a QueueFamilyT, Vec<f32>)> {
+    pub fn family_spec<'a, T: QueueFamilySelector>(
+        &self,
+        queue_families: &'a Vec<QueueFamilyT>,
+        count: usize,
+    ) -> Option<(&'a QueueFamilyT, Vec<f32>)> {
         let qf_id = self.family::<T>()?;
 
         let qf = queue_families.iter().find(|x| x.id() == qf_id)?;
@@ -108,7 +122,7 @@ impl QueueNegotiator {
 }
 
 pub struct DrawQueue {
-    pub surface: SurfaceT
+    pub surface: SurfaceT,
 }
 impl QueueFamilySelector for DrawQueue {
     fn is_suitable(&self, family: &QueueFamilyT) -> bool {

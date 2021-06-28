@@ -19,7 +19,7 @@ use super::{
     buffer::ModifiableBuffer,
     draw_buffers::{DrawBuffers, UvPoint},
     pipeline::CompletePipeline,
-    queue_negotiator::{QueueNegotiator, DrawQueue},
+    queue_negotiator::{DrawQueue, QueueNegotiator},
     render::do_render,
     target::{SwapchainProperties, TargetChain},
     texture::{resolver::FsResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
@@ -107,28 +107,26 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         let (mut queue_negotiator, surface) = {
             let dq: DrawQueue = DrawQueue { surface };
 
-            let qn = QueueNegotiator::find(&adapter, &[
-                &dq,
-                &TexLoadQueue,
-            ])
-            .context("Error creating draw queue negotiator")?;
+            let qn = QueueNegotiator::find(&adapter, &[&dq, &TexLoadQueue])
+                .context("Error creating draw queue negotiator")?;
 
             (qn, dq.surface)
         };
 
         // Device & Queue groups
         let (device_lock, mut queue_groups) = {
-            let (df, dqs) = queue_negotiator.family_spec::<DrawQueue>(&adapter.queue_families, 1).ok_or(EnvironmentError::NoSuitableFamilies)?;
-            let (tf, tqs) = queue_negotiator.family_spec::<TexLoadQueue>(&adapter.queue_families, 2).ok_or(EnvironmentError::NoSuitableFamilies)?;
+            let (df, dqs) = queue_negotiator
+                .family_spec::<DrawQueue>(&adapter.queue_families, 1)
+                .ok_or(EnvironmentError::NoSuitableFamilies)?;
+            let (tf, tqs) = queue_negotiator
+                .family_spec::<TexLoadQueue>(&adapter.queue_families, 2)
+                .ok_or(EnvironmentError::NoSuitableFamilies)?;
 
             let gpu = unsafe {
                 adapter
                     .physical_device
                     .open(
-                        &[
-                            (df, dqs.as_slice()),
-                            (tf, tqs.as_slice()),
-                        ],
+                        &[(df, dqs.as_slice()), (tf, tqs.as_slice())],
                         hal::Features::empty(),
                     )
                     .context("Error opening logical device")?
@@ -151,7 +149,9 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         // Command pool
         let mut cmd_pool = unsafe {
             device.create_command_pool(
-                queue_negotiator.family::<DrawQueue>().ok_or(EnvironmentError::NoSuitableFamilies)?,
+                queue_negotiator
+                    .family::<DrawQueue>()
+                    .ok_or(EnvironmentError::NoSuitableFamilies)?,
                 CommandPoolCreateFlags::RESET_INDIVIDUAL,
             )
         }
@@ -172,7 +172,9 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         debug!("Creating 3D Texture Repo");
         let tex_repo = TextureRepo::new(
             device_lock.clone(),
-            queue_negotiator.family::<TexLoadQueue>().ok_or(EnvironmentError::NoQueues)?,
+            queue_negotiator
+                .family::<TexLoadQueue>()
+                .ok_or(EnvironmentError::NoQueues)?,
             queue_negotiator
                 .get_queue::<TexLoadQueue>(&mut queue_groups)
                 .ok_or(EnvironmentError::NoQueues)
@@ -189,7 +191,9 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> RenderingContext<'a, M> {
         debug!("Creating UI Texture Repo");
         let ui_tex_repo = TextureRepo::new(
             device_lock.clone(),
-            queue_negotiator.family::<TexLoadQueue>().ok_or(EnvironmentError::NoQueues)?,
+            queue_negotiator
+                .family::<TexLoadQueue>()
+                .ok_or(EnvironmentError::NoQueues)?,
             queue_negotiator
                 .get_queue::<TexLoadQueue>(&mut queue_groups)
                 .ok_or(EnvironmentError::NoQueues)
