@@ -9,6 +9,9 @@ extern crate legion;
 use anyhow::{Context, Result};
 use log::warn;
 use std::collections::BTreeMap;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use egui::{containers::CentralPanel, Frame};
@@ -89,11 +92,11 @@ fn try_main() -> Result<()> {
     window.set_cursor_visible(false);
 
     // Parse the map file and swizzle the co-ords
-    let data = include_bytes!("../data/newtest.bsp")
-        .to_vec()
-        .into_boxed_slice();
+    let path = Path::new("./examples/render-bsp/data/newtest.bsp");
+    let mut data = Vec::new();
+    File::open(path)?.read_to_end(&mut data)?;
     let bsp: Result<Q3BspFile<Q3System>, stockton_levels::types::ParseError> =
-        Q3BspFile::parse_file(&data);
+        Q3BspFile::parse_file(data.as_slice());
     let bsp: Q3BspFile<Q3System> = bsp.context("Error loading bsp")?;
     let bsp: Q3BspFile<VulkanSystem> = bsp.swizzle_to();
 
