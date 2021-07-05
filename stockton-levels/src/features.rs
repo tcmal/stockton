@@ -12,8 +12,7 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Marker traits for different feature sets
 
-use crate::coords::CoordSystem;
-use crate::traits::*;
+use crate::parts::*;
 
-pub trait MinBspFeatures<S: CoordSystem>: HasBspTree<S> + Send + Sync {}
-impl<T, S: CoordSystem> MinBspFeatures<S> for T where T: HasBspTree<S> + Send + Sync {}
+pub trait MinRenderFeatures: HasFaces + HasTextures + Send + Sync {}
+impl<T> MinRenderFeatures for T where T: HasFaces + HasTextures + Send + Sync {}

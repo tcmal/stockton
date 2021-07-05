@@ -1,10 +1,10 @@
 //! Various types used in parsed BSP files.
 
+use serde::{Deserialize, Serialize};
 use std::convert::TryInto;
-use thiserror::Error;
 
 /// RGBA Colour (0-255)
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Rgba {
     pub r: u8,
     pub g: u8,
@@ -32,7 +32,7 @@ impl Rgba {
 }
 
 /// RGB Colour (0-255)
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct Rgb {
     pub r: u8,
     pub g: u8,
@@ -65,16 +65,3 @@ impl Rgb {
         Rgb::from_bytes(slice.try_into().unwrap())
     }
 }
-
-#[derive(Error, Debug)]
-/// An error encountered while parsing.
-pub enum ParseError {
-    #[error("Unsupported format")]
-    Unsupported,
-
-    #[error("Invalid file")]
-    Invalid,
-}
-
-/// Standard result type.
-pub type Result<T> = std::result::Result<T, ParseError>;

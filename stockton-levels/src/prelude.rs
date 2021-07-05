@@ -12,6 +12,5 @@
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 //! Common traits, etc.
 
-pub use crate::coords::*;
 pub use crate::features::*;
-pub use crate::traits::*;
+pub use crate::parts::*;

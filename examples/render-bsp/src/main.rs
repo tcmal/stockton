@@ -19,7 +19,7 @@ use stockton_contrib::delta_time::*;
 use stockton_contrib::flycam::*;
 
 use stockton_input::{Axis, InputManager, Mouse};
-use stockton_levels::{prelude::*, q3::Q3BspFile};
+use stockton_levels::prelude::*;
 
 use stockton_render::error::full_error_display;
 use stockton_render::systems::*;
@@ -27,6 +27,8 @@ use stockton_render::{Renderer, UiState, WindowEvent};
 
 use stockton_types::components::{CameraSettings, Transform};
 use stockton_types::{Session, Vector3};
+
+type MapFile = ();
 
 #[derive(InputManager, Default, Clone, Debug)]
 struct MovementInputs {
@@ -91,14 +93,8 @@ fn try_main() -> Result<()> {
     }
     window.set_cursor_visible(false);
 
-    // Parse the map file and swizzle the co-ords
-    let path = Path::new("./examples/render-bsp/data/newtest.bsp");
-    let mut data = Vec::new();
-    File::open(path)?.read_to_end(&mut data)?;
-    let bsp: Result<Q3BspFile<Q3System>, stockton_levels::types::ParseError> =
-        Q3BspFile::parse_file(data.as_slice());
-    let bsp: Q3BspFile<Q3System> = bsp.context("Error loading bsp")?;
-    let bsp: Q3BspFile<VulkanSystem> = bsp.swizzle_to();
+    // TODO: Parse the map file
+    let bsp = todo!();
 
     // Create the UI State
     let mut ui = UiState::new();
@@ -139,16 +135,13 @@ fn try_main() -> Result<()> {
         move |schedule| {
             schedule
                 .add_system(update_deltatime_system())
-                .add_system(process_window_events_system::<
-                    MovementInputsManager,
-                    Q3BspFile<VulkanSystem>,
-                >())
+                .add_system(process_window_events_system::<MovementInputsManager, MapFile>())
                 .flush()
                 .add_system(hello_world_system())
                 .add_system(flycam_move_system::<MovementInputsManager>())
                 .flush()
-                .add_system(calc_vp_matrix_system::<Q3BspFile<VulkanSystem>>())
-                .add_thread_local(do_render_system::<Q3BspFile<VulkanSystem>>());
+                .add_system(calc_vp_matrix_system::<MapFile>())
+                .add_thread_local(do_render_system::<MapFile>());
         },
     );
 

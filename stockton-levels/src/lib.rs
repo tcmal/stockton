@@ -10,18 +10,11 @@
 
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
-//! Parses common features from many BSP file formats.
-#![allow(incomplete_features)]
-#![feature(generic_associated_types)]
+//! Interfaces & Data structures stockton expects when rendering a level.
 
 extern crate nalgebra as na;
-#[macro_use]
-extern crate bitflags;
 
-pub mod coords;
 pub mod features;
-mod helpers;
+pub mod parts;
 pub mod prelude;
-pub mod q3;
-pub mod traits;
 pub mod types;
