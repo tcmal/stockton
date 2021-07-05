@@ -1,4 +1,4 @@
-use crate::{error::full_error_display, Renderer};
+use crate::{error::full_error_display, Renderer, DrawPass};
 use egui::{Modifiers, Rect, Vec2};
 use legion::systems::Runnable;
 use log::debug;
@@ -177,8 +177,8 @@ impl UiState {
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn _process_window_events<T: 'static + InputManager, M: 'static + MinRenderFeatures>(
-    #[resource] renderer: &mut Renderer<M>,
+pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass>(
+    #[resource] renderer: &mut Renderer<DP>,
     #[resource] manager: &mut T,
     #[resource] mouse: &mut Mouse,
     #[resource] ui_state: &mut UiState,
@@ -237,7 +237,7 @@ pub fn _process_window_events<T: 'static + InputManager, M: 'static + MinRenderF
     manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
 }
 
-pub fn process_window_events_system<T: 'static + InputManager, M: 'static + MinRenderFeatures>(
+pub fn process_window_events_system<T: 'static + InputManager, DP: 'static + DrawPass>(
 ) -> impl Runnable {
-    _process_window_events_system::<T, M>(Vec::with_capacity(4))
+    _process_window_events_system::<T, DP>(Vec::with_capacity(4))
 }

@@ -24,13 +24,12 @@ use crate::{
     window::UiState,
 };
 use stockton_levels::prelude::*;
+use stockton_types::Session;
 
 /// Contains all the hal related stuff.
 /// In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 // TODO: Settings for clear colour, buffer sizes, etc
-pub struct RenderingContext<M: 'static + MinRenderFeatures, DP = LevelDrawPass<M>> {
-    pub map: Arc<RwLock<M>>,
-
+pub struct RenderingContext<DP> {
     // Parents for most of these things
     /// Vulkan Instance
     instance: ManuallyDrop<back::Instance>,
@@ -60,19 +59,12 @@ pub struct RenderingContext<M: 'static + MinRenderFeatures, DP = LevelDrawPass<M
     pub(crate) pixels_per_point: f32,
 }
 
-impl<M: 'static + MinRenderFeatures, DP> RenderingContext<M, DP>
-where
-    DP: DrawPass<Input = M>,
-{
-    // TODO: Arbitrary drawpass input
+impl<DP: DrawPass> RenderingContext<DP> {
     /// Create a new RenderingContext for the given window.
     pub fn new<ILDP: IntoDrawPass<DP>>(
         window: &Window,
-        _ui: &mut UiState,
-        map: M,
         idp: ILDP,
     ) -> Result<Self> {
-        let map = Arc::new(RwLock::new(map));
         // Create surface
         let (instance, surface, mut adapters) = unsafe {
             let instance =
@@ -174,7 +166,6 @@ where
         drop(device);
 
         Ok(RenderingContext {
-            map,
             instance: ManuallyDrop::new(instance),
 
             device: device_lock,
@@ -231,8 +222,8 @@ where
         Ok(())
     }
 
-    /// Draw all vertices in the buffer
-    pub fn draw_next_frame(&mut self) -> Result<()> {
+    /// Draw onto the next frame of the swapchain
+    pub fn draw_next_frame(&mut self, session: &Session) -> Result<()> {
         let mut device = self
             .device
             .write()
@@ -241,20 +232,19 @@ where
         let mut queue = self
             .queue
             .write()
-            .map_err(|_| LockPoisoned::Map)
-            .context("Error getting map lock")?;
-        let map = self.map.read().or(Err(LockPoisoned::Map))?;
+            .map_err(|_| LockPoisoned::Queue)
+            .context("Error getting draw queue lock")?;
 
         // Level draw pass
         self.target_chain
-            .do_draw_with(&mut device, &mut queue, &*self.draw_pass, &*map)
+            .do_draw_with(&mut device, &mut queue, &*self.draw_pass, session)
             .context("Error preparing next target")?;
 
         Ok(())
     }
 }
 
-impl<M: 'static + MinRenderFeatures, LDP> core::ops::Drop for RenderingContext<M, LDP> {
+impl<DP> core::ops::Drop for RenderingContext<DP> {
     fn drop(&mut self) {
         {
             self.device.write().unwrap().wait_idle().unwrap();

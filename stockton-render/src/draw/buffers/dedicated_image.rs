@@ -1,20 +1,21 @@
-use crate::draw::buffer::create_buffer;
-use gfx_hal::{format::Aspects, memory::Properties, MemoryTypeId};
+//! A dedicated image. Used for depth buffers.
+
+use super::create_buffer;
+use crate::draw::texture::{LoadableImage, PIXEL_SIZE};
+use crate::types::*;
+
+use std::{array::IntoIter, convert::TryInto, iter::empty, mem::ManuallyDrop};
+
+use anyhow::{Context, Result};
 use hal::{
     buffer::Usage as BufUsage,
-    format::{Format, Swizzle},
+    format::{Aspects, Format, Swizzle},
     image::{SubresourceRange, Usage, Usage as ImgUsage, ViewKind},
     memory,
-    memory::Segment,
+    memory::{Properties, Segment},
+    MemoryTypeId,
 };
-use std::{array::IntoIter, convert::TryInto, iter::empty};
-
-use crate::types::*;
-use anyhow::{Context, Result};
-use std::mem::ManuallyDrop;
 use thiserror::Error;
-
-use super::texture::{LoadableImage, PIXEL_SIZE};
 
 /// Holds an image that's loaded into GPU memory dedicated only to that image, bypassing the memory allocator.
 pub struct DedicatedLoadedImage {

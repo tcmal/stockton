@@ -1,26 +1,23 @@
 //! Traits and common draw passes.
+use super::{queue_negotiator::QueueNegotiator, target::SwapchainProperties};
+use crate::types::*;
+use stockton_types::Session;
+
+use std::sync::{Arc, RwLock};
+
+use anyhow::Result;
 
 mod cons;
 mod level;
-use std::sync::{Arc, RwLock};
 
 pub use level::LevelDrawPass;
-
-use super::{queue_negotiator::QueueNegotiator, target::SwapchainProperties};
-use crate::types::*;
-use anyhow::Result;
-
-/// Type can be used as input to a draw pass. This requires it being available from only the resources at draw time.
-pub trait DrawPassInput {}
+pub use cons::{ConsDrawPass, NilDrawPass};
 
 /// One of several 'passes' that draw on each frame.
 pub trait DrawPass {
-    /// Extra input required for this draw pass.
-    type Input: DrawPassInput;
-
     /// Queue any necessary draw commands to cmd_buffer
     /// This should assume the command buffer isn't in the middle of a renderpass, and should leave it as such.
-    fn queue_draw(&self, input: &Self::Input, cmd_buffer: &mut CommandBufferT) -> Result<()>;
+    fn queue_draw(&self, session: &Session, cmd_buffer: &mut CommandBufferT) -> Result<()>;
 
     /// This function should ask the queue negotatior to find families for any auxilary operations this draw pass needs to perform
     /// For example, .find(&TexLoadQueue)

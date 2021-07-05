@@ -1,22 +1,22 @@
 //! Code for using multiple draw passes in place of just one
 //! Note that this can be extended to an arbitrary amount of draw passes.
 
-use super::{DrawPass, DrawPassInput};
+use super::DrawPass;
 use crate::{draw::queue_negotiator::QueueNegotiator, types::*};
+use stockton_types::Session;
+
 use anyhow::Result;
 
 /// One draw pass, then another.
-struct ConsDrawPass<A: DrawPass, B: DrawPass> {
+pub struct ConsDrawPass<A: DrawPass, B: DrawPass> {
     a: A,
     b: B,
 }
 
 impl<A: DrawPass, B: DrawPass> DrawPass for ConsDrawPass<A, B> {
-    type Input = ConsDrawPassInput<A::Input, B::Input>;
-
-    fn queue_draw(&self, input: &Self::Input, cmd_buffer: &mut CommandBufferT) -> Result<()> {
-        self.a.queue_draw(&input.a, cmd_buffer)?;
-        self.b.queue_draw(&input.b, cmd_buffer)?;
+    fn queue_draw(&self, session: &Session, cmd_buffer: &mut CommandBufferT) -> Result<()> {
+        self.a.queue_draw(&session, cmd_buffer)?;
+        self.b.queue_draw(&session, cmd_buffer)?;
 
         Ok(())
     }
@@ -34,21 +34,12 @@ impl<A: DrawPass, B: DrawPass> DrawPass for ConsDrawPass<A, B> {
     }
 }
 
-/// Input for a ConsDrawPass.
-struct ConsDrawPassInput<A, B> {
-    pub a: A,
-    pub b: B,
-}
-
-impl<A: DrawPassInput, B: DrawPassInput> DrawPassInput for ConsDrawPassInput<A, B> {}
-
 /// A draw pass that does nothing. Can be used at the end of sequences if there's an odd number of draw passes.
-struct NilDrawPass;
+pub struct NilDrawPass;
 
 impl DrawPass for NilDrawPass {
-    type Input = NilDrawPassInput;
 
-    fn queue_draw(&self, _input: &Self::Input, _cmd_buffer: &mut CommandBufferT) -> Result<()> {
+    fn queue_draw(&self, _input: &Session, _cmd_buffer: &mut CommandBufferT) -> Result<()> {
         Ok(())
     }
 
@@ -59,8 +50,3 @@ impl DrawPass for NilDrawPass {
         Ok(vec![])
     }
 }
-
-/// Input for a NilDrawPass.
-struct NilDrawPassInput;
-
-impl DrawPassInput for NilDrawPassInput {}

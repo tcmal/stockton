@@ -6,15 +6,17 @@ use std::{
 };
 
 use hal::{
+    command::CommandBufferFlags,
     format::{ChannelType, Format, ImageFeature},
     image::{Extent, Usage as ImgUsage},
     pso::Viewport,
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
 
-use super::{depth_buffer::DedicatedLoadedImage, draw_passes::DrawPass};
+use super::{buffers::DedicatedLoadedImage, draw_passes::DrawPass};
 use crate::{error::EnvironmentError, types::*};
 use anyhow::{Context, Result};
+use stockton_types::Session;
 
 #[derive(Debug, Clone)]
 pub struct SwapchainProperties {
@@ -249,7 +251,7 @@ impl TargetChain {
         device: &mut DeviceT,
         command_queue: &mut QueueT,
         dp: &DP,
-        dpi: &DP::Input,
+        session: &Session,
     ) -> Result<()> {
         self.last_syncs = (self.last_syncs + 1) % self.sync_objects.len();
         self.last_image = (self.last_image + 1) % self.targets.len() as u32;
@@ -275,9 +277,12 @@ impl TargetChain {
         };
 
         // Record commands
-        dp.queue_draw(dpi, &mut target.cmd_buffer)
-            .context("Error in draw pass")?;
         unsafe {
+            target.cmd_buffer.begin_primary(CommandBufferFlags::empty());
+
+            dp.queue_draw(session, &mut target.cmd_buffer)
+                .context("Error in draw pass")?;
+
             target.cmd_buffer.finish();
         }
 

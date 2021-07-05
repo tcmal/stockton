@@ -1,12 +1,11 @@
-use crate::{draw::buffer::StagedBuffer, types::*};
+//! A vertex and index buffer set for drawing
+
+use super::StagedBuffer;
+use crate::types::*;
+
 use anyhow::{Context, Result};
 use hal::buffer::Usage;
 use std::mem::ManuallyDrop;
-use stockton_types::{Vector2, Vector3};
-
-/// Represents a point of a triangle, including UV and texture information.
-#[derive(Debug, Clone, Copy)]
-pub struct UvPoint(pub Vector3, pub i32, pub Vector2);
 
 /// Initial size of vertex buffer. TODO: Way of overriding this
 pub const INITIAL_VERT_SIZE: u64 = 3 * 3000;

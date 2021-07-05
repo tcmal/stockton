@@ -1,6 +1,6 @@
 //! Minimal code for drawing any level, based on traits from stockton-levels
 
-use super::{DrawPass, DrawPassInput, IntoDrawPass};
+use super::{DrawPass, IntoDrawPass};
 use crate::{
     draw::{queue_negotiator::QueueNegotiator, target::SwapchainProperties, texture::TextureRepo},
     error::EnvironmentError,
@@ -30,16 +30,10 @@ pub struct LevelDrawPass<M: MinRenderFeatures> {
     _d: PhantomData<M>,
 }
 
-/// Any map can be used as draw pass input.
-/// TODO: Restrict this based on the type of the renderer.
-impl<T: MinRenderFeatures> DrawPassInput for T {}
-
 impl<M: MinRenderFeatures> DrawPass for LevelDrawPass<M> {
-    type Input = M;
-
     fn queue_draw(
         &self,
-        _file: &Self::Input,
+        _input: &Session,
         _cmd_buffer: &mut crate::types::CommandBufferT,
     ) -> anyhow::Result<()> {
         todo!()

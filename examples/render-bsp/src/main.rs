@@ -94,13 +94,13 @@ fn try_main() -> Result<()> {
     window.set_cursor_visible(false);
 
     // TODO: Parse the map file
-    let bsp = todo!();
+    let map = todo!();
 
     // Create the UI State
     let mut ui = UiState::new();
 
     // Create the renderer
-    let (renderer, tx) = Renderer::new(&window, &mut ui, bsp)?;
+    let (renderer, tx) = Renderer::new(&window)?;
     let new_control_flow = renderer.update_control_flow.clone();
 
     // Populate the initial UI state
@@ -127,7 +127,7 @@ fn try_main() -> Result<()> {
     let mut session = Session::new(
         move |resources| {
             resources.insert(ui);
-            resources.insert(renderer);
+            resources.insert(map);
             resources.insert(manager);
             resources.insert(Timing::default());
             resources.insert(Mouse::default());
@@ -139,9 +139,7 @@ fn try_main() -> Result<()> {
                 .flush()
                 .add_system(hello_world_system())
                 .add_system(flycam_move_system::<MovementInputsManager>())
-                .flush()
-                .add_system(calc_vp_matrix_system::<MapFile>())
-                .add_thread_local(do_render_system::<MapFile>());
+                .flush();
         },
     );
 

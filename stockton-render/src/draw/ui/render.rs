@@ -2,7 +2,7 @@ use crate::draw::texture::TextureRepo;
 use hal::pso::{Rect, ShaderStageFlags};
 
 use super::UiPoint;
-use crate::draw::draw_buffers::DrawBuffers;
+use crate::draw::buffers::DrawBuffers;
 use crate::types::*;
 use crate::UiState;
 use anyhow::{anyhow, Result};
