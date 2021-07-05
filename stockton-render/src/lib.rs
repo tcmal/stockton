@@ -8,17 +8,14 @@ extern crate nalgebra_glm as na;
 #[macro_use]
 extern crate legion;
 
-mod culling;
 pub mod draw;
 pub mod error;
 pub mod systems;
 mod types;
 pub mod window;
 
-use culling::get_visible_faces;
 use draw::RenderingContext;
 use error::full_error_display;
-use error::LockPoisoned;
 use legion::world::SubWorld;
 use legion::IntoQuery;
 use std::sync::mpsc::{Receiver, Sender};
@@ -26,7 +23,7 @@ use std::sync::Arc;
 use std::sync::RwLock;
 pub use window::{UiState, WindowEvent};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use log::error;
 use stockton_levels::prelude::*;
 use stockton_types::components::{CameraSettings, Transform};
@@ -38,9 +35,9 @@ use std::sync::mpsc::channel;
 
 /// Renders a world to a window when you tell it to.
 /// Also takes ownership of the window and channels window events to be processed outside winit's event loop.
-pub struct Renderer<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
+pub struct Renderer<M: 'static + MinRenderFeatures> {
     /// All the vulkan stuff
-    pub(crate) context: RenderingContext<'a, M>,
+    pub(crate) context: RenderingContext<M>,
 
     /// For getting events from the winit event loop
     pub window_events: Receiver<WindowEvent>,
@@ -49,7 +46,7 @@ pub struct Renderer<'a, M: 'static + MinBspFeatures<VulkanSystem>> {
     pub update_control_flow: Arc<RwLock<ControlFlow>>,
 }
 
-impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
+impl<M: 'static + MinRenderFeatures> Renderer<M> {
     /// Create a new Renderer.
     pub fn new(window: &Window, ui: &mut UiState, file: M) -> Result<(Self, Sender<WindowEvent>)> {
         let (tx, rx) = channel();
@@ -57,7 +54,7 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
 
         Ok((
             Renderer {
-                context: RenderingContext::new(window, ui, file)?,
+                context: RenderingContext::new(window, ui, file, ())?,
                 window_events: rx,
                 update_control_flow,
             },
@@ -66,24 +63,14 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
     }
 
     /// Render a single frame of the given map.
-    fn render(&mut self, ui: &mut UiState, pos: Vector3) -> Result<()> {
-        // Get visible faces
-        let faces = get_visible_faces(
-            pos,
-            &*self
-                .context
-                .map
-                .read()
-                .map_err(|_| LockPoisoned::Map)
-                .context("Error getting read lock on map")?,
-        );
-
-        // Then draw them
-        if self.context.draw_vertices(ui, &faces).is_err() {
+    fn render(&mut self, _ui: &mut UiState, _pos: Vector3) -> Result<()> {
+        // Try to draw
+        if self.context.draw_next_frame().is_err() {
+            // Probably the surface changed
             unsafe { self.context.handle_surface_change()? };
 
             // If it fails twice, then error
-            self.context.draw_vertices(ui, &faces)?;
+            self.context.draw_next_frame()?;
         }
 
         Ok(())
@@ -98,8 +85,8 @@ impl<'a, M: 'static + MinBspFeatures<VulkanSystem>> Renderer<'a, M> {
 #[system]
 #[read_component(Transform)]
 #[read_component(CameraSettings)]
-pub fn do_render<T: 'static + MinBspFeatures<VulkanSystem>>(
-    #[resource] renderer: &mut Renderer<'static, T>,
+pub fn do_render<T: 'static + MinRenderFeatures>(
+    #[resource] renderer: &mut Renderer<T>,
     #[resource] ui: &mut UiState,
     world: &SubWorld,
 ) {

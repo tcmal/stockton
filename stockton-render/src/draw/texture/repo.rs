@@ -12,7 +12,6 @@ use std::{
     array::IntoIter,
     collections::HashMap,
     iter::empty,
-    marker::PhantomData,
     mem::ManuallyDrop,
     sync::{
         mpsc::{channel, Receiver, Sender},
@@ -33,17 +32,15 @@ use log::debug;
 /// Whenever a texture is needed, the whole block its in is loaded.
 pub const BLOCK_SIZE: usize = 8;
 
-pub struct TextureRepo<'a> {
+pub struct TextureRepo {
     joiner: ManuallyDrop<JoinHandle<Result<TextureLoaderRemains>>>,
     ds_layout: Arc<RwLock<DescriptorSetLayoutT>>,
     req_send: Sender<LoaderRequest>,
     resp_recv: Receiver<TexturesBlock<DynamicBlock>>,
     blocks: HashMap<BlockRef, Option<TexturesBlock<DynamicBlock>>>,
-
-    _a: PhantomData<&'a ()>,
 }
 
-impl<'a> TextureRepo<'a> {
+impl TextureRepo {
     pub fn new<R: 'static + TextureResolver + Send + Sync>(
         device_lock: Arc<RwLock<DeviceT>>,
         family: QueueFamilyId,
@@ -114,7 +111,6 @@ impl<'a> TextureRepo<'a> {
             blocks: HashMap::new(),
             req_send,
             resp_recv,
-            _a: PhantomData::default(),
         })
     }
 

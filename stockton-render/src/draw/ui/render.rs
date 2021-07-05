@@ -64,7 +64,7 @@ pub fn do_render(
         if let Some(ds) = tex_repo.attempt_get_descriptor_set(0) {
             unsafe {
                 cmd_buffer.push_graphics_constants(
-                    &pipeline_layout,
+                    pipeline_layout,
                     ShaderStageFlags::VERTEX,
                     0,
                     &[screen.x.to_bits(), screen.y.to_bits()],

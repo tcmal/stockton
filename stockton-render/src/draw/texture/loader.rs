@@ -234,7 +234,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             let props = MemProps::DEVICE_LOCAL;
 
             DynamicAllocator::new(
-                find_memory_type_id(&adapter, type_mask, props)
+                find_memory_type_id(adapter, type_mask, props)
                     .ok_or(TextureLoaderError::NoMemoryTypes)
                     .context("Couldn't create tex memory allocator")?,
                 props,
@@ -249,7 +249,7 @@ impl<R: TextureResolver> TextureLoader<R> {
 
         let (staging_memory_type, mut staging_allocator) = {
             let props = MemProps::CPU_VISIBLE | MemProps::COHERENT;
-            let t = find_memory_type_id(&adapter, u32::MAX, props)
+            let t = find_memory_type_id(adapter, u32::MAX, props)
                 .ok_or(TextureLoaderError::NoMemoryTypes)
                 .context("Couldn't create staging memory allocator")?;
             (
@@ -557,7 +557,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             staging_memory_type,
             obcpa,
             img_data,
-            &config,
+            config,
         )?;
 
         buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
@@ -590,8 +590,8 @@ impl<R: TextureResolver> TextureLoader<R> {
                 image_layers: LAYERS,
                 image_offset: Offset { x: 0, y: 0, z: 0 },
                 image_extent: Extent {
-                    width: width,
-                    height: height,
+                    width,
+                    height,
                     depth: 1,
                 },
             }),
@@ -678,9 +678,9 @@ impl<R: TextureResolver> TextureLoader<R> {
             read(&*self.blank_image).deactivate(&mut device, &mut *self.tex_allocator);
 
             // Destroy fences
-            let vec: Vec<_> = self.buffers.drain(..).collect();
 
-            vec.into_iter()
+            self.buffers
+                .drain(..)
                 .map(|(f, _)| device.destroy_fence(f))
                 .for_each(|_| {});
 

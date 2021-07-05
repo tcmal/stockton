@@ -1,30 +1,18 @@
 //! Resources needed for drawing on the screen, including sync objects
 
 use std::{
-    array::IntoIter,
-    borrow::Borrow,
     iter::{empty, once},
     mem::ManuallyDrop,
 };
 
-use arrayvec::ArrayVec;
 use hal::{
-    buffer::SubRange,
-    command::RenderAttachmentInfo,
     format::{ChannelType, Format, ImageFeature},
-    image::{Extent, FramebufferAttachment, Usage as ImgUsage, ViewCapabilities},
+    image::{Extent, Usage as ImgUsage},
     pso::Viewport,
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
-use na::Mat4;
 
-use super::{
-    buffer::ModifiableBuffer,
-    depth_buffer::DedicatedLoadedImage,
-    draw_buffers::{DrawBuffers, UvPoint},
-    pipeline::CompletePipeline,
-    ui::{UiPipeline, UiPoint},
-};
+use super::{depth_buffer::DedicatedLoadedImage, draw_passes::DrawPass};
 use crate::{error::EnvironmentError, types::*};
 use anyhow::{Context, Result};
 
@@ -139,8 +127,6 @@ impl TargetChain {
         device: &mut DeviceT,
         adapter: &Adapter,
         mut surface: SurfaceT,
-        pipeline: &CompletePipeline,
-        ui_pipeline: &UiPipeline,
         cmd_pool: &mut CommandPoolT,
         properties: SwapchainProperties,
     ) -> Result<TargetChain> {
@@ -189,7 +175,7 @@ impl TargetChain {
             .context("Error creating depth buffer")?
         };
 
-        let fat = swap_config.framebuffer_attachment();
+        let _fat = swap_config.framebuffer_attachment();
         let mut targets: Vec<TargetResources> =
             Vec::with_capacity(swap_config.image_count as usize);
         let mut sync_objects: Vec<SyncObjects> =
@@ -197,20 +183,8 @@ impl TargetChain {
 
         for _ in 0..swap_config.image_count {
             targets.push(
-                TargetResources::new(
-                    device,
-                    cmd_pool,
-                    &pipeline.renderpass,
-                    &ui_pipeline.renderpass,
-                    fat.clone(),
-                    FramebufferAttachment {
-                        usage: ImgUsage::DEPTH_STENCIL_ATTACHMENT,
-                        view_caps: ViewCapabilities::empty(),
-                        format: properties.depth_format,
-                    },
-                    &properties,
-                )
-                .context("Error creating target resources")?,
+                TargetResources::new(device, cmd_pool, &properties)
+                    .context("Error creating target resources")?,
             );
 
             sync_objects.push(SyncObjects::new(device).context("Error creating sync objects")?);
@@ -270,16 +244,13 @@ impl TargetChain {
         unsafe { ManuallyDrop::into_inner(read(&self.surface)) }
     }
 
-    pub fn prep_next_target<'a>(
+    pub fn do_draw_with<'a, DP: DrawPass>(
         &'a mut self,
         device: &mut DeviceT,
-        draw_buffers: &mut DrawBuffers<UvPoint>,
-        pipeline: &CompletePipeline,
-        vp: &Mat4,
-    ) -> Result<(
-        &'a mut crate::types::CommandBufferT,
-        <SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
-    )> {
+        command_queue: &mut QueueT,
+        dp: &DP,
+        dpi: &DP::Input,
+    ) -> Result<()> {
         self.last_syncs = (self.last_syncs + 1) % self.sync_objects.len();
         self.last_image = (self.last_image + 1) % self.targets.len() as u32;
 
@@ -304,169 +275,9 @@ impl TargetChain {
         };
 
         // Record commands
+        dp.queue_draw(dpi, &mut target.cmd_buffer)
+            .context("Error in draw pass")?;
         unsafe {
-            use hal::command::{
-                ClearColor, ClearDepthStencil, ClearValue, CommandBufferFlags, SubpassContents,
-            };
-            use hal::pso::ShaderStageFlags;
-
-            // Get references to our buffers
-            let (vbufs, ibuf) = {
-                let vbufref: &<back::Backend as hal::Backend>::Buffer =
-                    draw_buffers.vertex_buffer.get_buffer();
-
-                let vbufs: ArrayVec<[_; 1]> = [(
-                    vbufref,
-                    SubRange {
-                        offset: 0,
-                        size: None,
-                    },
-                )]
-                .into();
-                let ibuf = draw_buffers.index_buffer.get_buffer();
-
-                (vbufs, ibuf)
-            };
-
-            target.cmd_buffer.begin_primary(CommandBufferFlags::empty());
-            // Main render pass / pipeline
-            target.cmd_buffer.begin_render_pass(
-                &pipeline.renderpass,
-                &target.framebuffer,
-                self.properties.viewport.rect,
-                vec![
-                    RenderAttachmentInfo {
-                        image_view: img.borrow(),
-                        clear_value: ClearValue {
-                            color: ClearColor {
-                                float32: [0.0, 0.0, 0.0, 1.0],
-                            },
-                        },
-                    },
-                    RenderAttachmentInfo {
-                        image_view: &*self.depth_buffer.image_view,
-                        clear_value: ClearValue {
-                            depth_stencil: ClearDepthStencil {
-                                depth: 1.0,
-                                stencil: 0,
-                            },
-                        },
-                    },
-                ]
-                .into_iter(),
-                SubpassContents::Inline,
-            );
-            target.cmd_buffer.bind_graphics_pipeline(&pipeline.pipeline);
-
-            // VP Matrix
-            let vp = &*(vp.data.as_slice() as *const [f32] as *const [u32]);
-
-            target.cmd_buffer.push_graphics_constants(
-                &pipeline.pipeline_layout,
-                ShaderStageFlags::VERTEX,
-                0,
-                vp,
-            );
-
-            // Bind buffers
-            target.cmd_buffer.bind_vertex_buffers(0, vbufs.into_iter());
-            target.cmd_buffer.bind_index_buffer(
-                &ibuf,
-                SubRange {
-                    offset: 0,
-                    size: None,
-                },
-                hal::IndexType::U16,
-            );
-        };
-
-        Ok((&mut target.cmd_buffer, img))
-    }
-
-    pub fn target_2d_pass<'a>(
-        &'a mut self,
-        draw_buffers: &mut DrawBuffers<UiPoint>,
-        img: &<SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
-        pipeline: &UiPipeline,
-    ) -> Result<&'a mut CommandBufferT> {
-        let target = &mut self.targets[self.last_image as usize];
-
-        unsafe {
-            use hal::pso::PipelineStage;
-            target.cmd_buffer.end_render_pass();
-
-            target.cmd_buffer.pipeline_barrier(
-                PipelineStage::BOTTOM_OF_PIPE..PipelineStage::TOP_OF_PIPE,
-                hal::memory::Dependencies::empty(),
-                std::iter::empty(),
-            );
-        }
-
-        // Record commands
-        unsafe {
-            use hal::command::{ClearColor, ClearValue, SubpassContents};
-
-            // Get references to our buffers
-            let (vbufs, ibuf) = {
-                let vbufref: &<back::Backend as hal::Backend>::Buffer =
-                    draw_buffers.vertex_buffer.get_buffer();
-
-                let vbufs: ArrayVec<[_; 1]> = [(
-                    vbufref,
-                    SubRange {
-                        offset: 0,
-                        size: None,
-                    },
-                )]
-                .into();
-                let ibuf = draw_buffers.index_buffer.get_buffer();
-
-                (vbufs, ibuf)
-            };
-
-            // Main render pass / pipeline
-            target.cmd_buffer.begin_render_pass(
-                &pipeline.renderpass,
-                &target.framebuffer_2d,
-                self.properties.viewport.rect,
-                vec![RenderAttachmentInfo {
-                    image_view: img.borrow(),
-                    clear_value: ClearValue {
-                        color: ClearColor {
-                            float32: [0.0, 0.0, 0.0, 1.0],
-                        },
-                    },
-                }]
-                .into_iter(),
-                SubpassContents::Inline,
-            );
-            target.cmd_buffer.bind_graphics_pipeline(&pipeline.pipeline);
-
-            // Bind buffers
-            target.cmd_buffer.bind_vertex_buffers(0, vbufs.into_iter());
-            target.cmd_buffer.bind_index_buffer(
-                &ibuf,
-                SubRange {
-                    offset: 0,
-                    size: None,
-                },
-                hal::IndexType::U16,
-            );
-        };
-
-        Ok(&mut target.cmd_buffer)
-    }
-
-    pub fn finish_and_submit_target(
-        &mut self,
-        img: <SurfaceT as PresentationSurface<back::Backend>>::SwapchainImage,
-        command_queue: &mut QueueT,
-    ) -> Result<()> {
-        let syncs = &mut self.sync_objects[self.last_syncs];
-        let target = &mut self.targets[self.last_image as usize];
-
-        unsafe {
-            target.cmd_buffer.end_render_pass();
             target.cmd_buffer.finish();
         }
 
@@ -491,59 +302,26 @@ impl TargetChain {
 pub struct TargetResources {
     /// Command buffer to use when drawing
     pub cmd_buffer: ManuallyDrop<CommandBufferT>,
-
-    /// Framebuffer for this frame
-    pub framebuffer: ManuallyDrop<FramebufferT>,
-
-    /// Framebuffer for this frame when drawing in 2D
-    pub framebuffer_2d: ManuallyDrop<FramebufferT>,
 }
 
 impl TargetResources {
     pub fn new(
-        device: &mut DeviceT,
+        _device: &mut DeviceT,
         cmd_pool: &mut CommandPoolT,
-        renderpass: &RenderPassT,
-        renderpass_2d: &RenderPassT,
-        fat: FramebufferAttachment,
-        dat: FramebufferAttachment,
-        properties: &SwapchainProperties,
+        _properties: &SwapchainProperties,
     ) -> Result<TargetResources> {
         // Command Buffer
         let cmd_buffer = unsafe { cmd_pool.allocate_one(hal::command::Level::Primary) };
 
-        // Framebuffer
-        let framebuffer = unsafe {
-            device
-                .create_framebuffer(
-                    &renderpass,
-                    IntoIter::new([fat.clone(), dat]),
-                    properties.extent,
-                )
-                .context("Error creating colour framebuffer")?
-        };
-
-        // 2D framebuffer just needs the imageview, not the depth pass
-        let framebuffer_2d = unsafe {
-            device
-                .create_framebuffer(&renderpass_2d, once(fat), properties.extent)
-                .context("Error creating depth framebuffer")?
-        };
-
         Ok(TargetResources {
             cmd_buffer: ManuallyDrop::new(cmd_buffer),
-            framebuffer: ManuallyDrop::new(framebuffer),
-            framebuffer_2d: ManuallyDrop::new(framebuffer_2d),
         })
     }
 
-    pub fn deactivate(self, device: &mut DeviceT, cmd_pool: &mut CommandPoolT) {
+    pub fn deactivate(self, _device: &mut DeviceT, cmd_pool: &mut CommandPoolT) {
         use core::ptr::read;
         unsafe {
             cmd_pool.free(once(ManuallyDrop::into_inner(read(&self.cmd_buffer))));
-
-            device.destroy_framebuffer(ManuallyDrop::into_inner(read(&self.framebuffer)));
-            device.destroy_framebuffer(ManuallyDrop::into_inner(read(&self.framebuffer_2d)));
         }
     }
 }

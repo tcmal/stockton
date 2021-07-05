@@ -112,7 +112,7 @@ where
 
     unsafe {
         device
-            .bind_image_memory(&block.memory(), block.range().start, &mut image_ref)
+            .bind_image_memory(block.memory(), block.range().start, &mut image_ref)
             .context("Error binding memory to image")?;
     }
 

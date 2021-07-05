@@ -46,6 +46,13 @@ pub enum EnvironmentError {
     NoQueues,
 }
 
+/// Indicates an issue with the level object being used
+#[derive(Debug, Error)]
+pub enum LevelError {
+    #[error("Referential Integrity broken")]
+    BadReference,
+}
+
 pub fn full_error_display(err: anyhow::Error) -> String {
     let cont = err
         .chain()

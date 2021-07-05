@@ -1,73 +1,72 @@
 use crate::{error::EnvironmentError, types::*};
+
 use anyhow::{Error, Result};
 use hal::queue::family::QueueFamilyId;
-use std::any::TypeId;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::{
+    any::TypeId,
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
+/// Used to find appropriate queue families and share queues from them as needed.
 pub struct QueueNegotiator {
     family_ids: HashMap<TypeId, QueueFamilyId>,
     already_allocated: HashMap<TypeId, (Vec<Arc<RwLock<QueueT>>>, usize)>,
 }
 
+/// Can be used to select a specific queue family
 pub trait QueueFamilySelector: 'static {
+    /// Check if the given family is suitable
     fn is_suitable(&self, family: &QueueFamilyT) -> bool;
-
-    fn get_type_id_self(&self) -> TypeId {
-        TypeId::of::<Self>()
-    }
-
-    fn get_type_id() -> TypeId
-    where
-        Self: Sized,
-    {
-        TypeId::of::<Self>()
-    }
 }
 
 impl QueueNegotiator {
-    pub fn find(adapter: &Adapter, stacks: &[&dyn QueueFamilySelector]) -> Result<Self> {
-        let mut families = HashMap::new();
-        for filter in stacks {
-            let candidates: Vec<&QueueFamilyT> = adapter
-                .queue_families
-                .iter()
-                .filter(|x| filter.is_suitable(*x))
-                .collect();
+    pub fn new() -> Self {
+        QueueNegotiator {
+            family_ids: HashMap::new(),
+            already_allocated: HashMap::new(),
+        }
+    }
 
-            if candidates.len() == 0 {
-                return Err(Error::new(EnvironmentError::NoSuitableFamilies));
-            }
-
-            // Prefer using unique families
-            let family = match candidates
-                .iter()
-                .filter(|x| !families.values().any(|y| *y == x.id()))
-                .next()
-            {
-                Some(x) => *x,
-                None => candidates[0],
-            };
-
-            families.insert(filter.get_type_id_self(), family.id());
+    pub fn find<T: QueueFamilySelector>(&mut self, adapter: &Adapter, filter: &T) -> Result<()> {
+        if self.family_ids.contains_key(&TypeId::of::<T>()) {
+            return Ok(());
         }
 
-        Ok(QueueNegotiator {
-            family_ids: families,
-            already_allocated: HashMap::new(),
-        })
+        let candidates: Vec<&QueueFamilyT> = adapter
+            .queue_families
+            .iter()
+            .filter(|x| filter.is_suitable(*x))
+            .collect();
+
+        if candidates.is_empty() {
+            return Err(Error::new(EnvironmentError::NoSuitableFamilies));
+        }
+
+        // Prefer using unique families
+        let family = match candidates
+            .iter()
+            .find(|x| !self.family_ids.values().any(|y| *y == x.id()))
+        {
+            Some(x) => *x,
+            None => candidates[0],
+        };
+
+        self.family_ids.insert(TypeId::of::<T>(), family.id());
+
+        Ok(())
     }
 
     pub fn get_queue<T: QueueFamilySelector>(
         &mut self,
         groups: &mut Vec<QueueGroup>,
     ) -> Option<Arc<RwLock<QueueT>>> {
-        let tid = T::get_type_id();
+        let tid = TypeId::of::<T>();
         let family_id = self.family_ids.get(&tid)?;
 
         match groups
             .iter()
-            .position(|x| x.queues.len() > 0 && x.family == *family_id)
+            .position(|x| !x.queues.is_empty() && x.family == *family_id)
         {
             Some(idx) => {
                 // At least one remaining queue
@@ -96,7 +95,7 @@ impl QueueNegotiator {
     }
 
     fn add_to_allocated<T: QueueFamilySelector>(&mut self, queue: Arc<RwLock<QueueT>>) {
-        let tid = T::get_type_id();
+        let tid = TypeId::of::<T>();
         match self.already_allocated.get_mut(&tid) {
             None => {
                 self.already_allocated.insert(tid, (vec![queue], 0));

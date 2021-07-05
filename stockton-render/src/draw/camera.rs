@@ -4,7 +4,7 @@ use legion::maybe_changed;
 
 use nalgebra_glm::look_at_lh;
 use nalgebra_glm::perspective_lh_zo;
-use stockton_levels::prelude::{MinBspFeatures, VulkanSystem};
+use stockton_levels::prelude::MinRenderFeatures;
 
 use crate::Renderer;
 use stockton_types::components::{CameraSettings, Transform};
@@ -24,10 +24,10 @@ fn euler_to_direction(euler: &Vector3) -> Vector3 {
 
 #[system(for_each)]
 #[filter(maybe_changed::<Transform>() | maybe_changed::<CameraSettings>())]
-pub fn calc_vp_matrix<M: 'static + MinBspFeatures<VulkanSystem>>(
+pub fn calc_vp_matrix<M: 'static + MinRenderFeatures>(
     transform: &Transform,
     settings: &CameraSettings,
-    #[resource] renderer: &mut Renderer<'static, M>,
+    #[resource] renderer: &mut Renderer<M>,
 ) {
     let ratio = renderer.context.target_chain.properties.extent.width as f32
         / renderer.context.target_chain.properties.extent.height as f32;

@@ -2,7 +2,7 @@
 #![allow(dead_code)]
 
 use stockton_levels::prelude::*;
-use stockton_levels::traits::tree::{BspNode, BspNodeValue};
+use stockton_levels::parts::tree::{BspNode, BspNodeValue};
 use stockton_types::Vector3;
 
 /// Get the visible faces according to visdata and frustum culling

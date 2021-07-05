@@ -2,7 +2,7 @@ use crate::{error::full_error_display, Renderer};
 use egui::{Modifiers, Rect, Vec2};
 use legion::systems::Runnable;
 use log::debug;
-use stockton_levels::prelude::{MinBspFeatures, VulkanSystem};
+use stockton_levels::prelude::MinRenderFeatures;
 
 use egui::{CtxRef, Event, Output, Pos2, RawInput};
 use epaint::ClippedShape;
@@ -93,10 +93,7 @@ impl UiState {
         }
     }
 
-    pub fn populate_initial_state<T: MinBspFeatures<VulkanSystem>>(
-        &mut self,
-        renderer: &Renderer<T>,
-    ) {
+    pub fn populate_initial_state<T: MinRenderFeatures>(&mut self, renderer: &Renderer<T>) {
         let props = &renderer.context.target_chain.properties;
         self.set_dimensions(props.extent.width, props.extent.height);
         self.set_pixels_per_point(Some(renderer.context.pixels_per_point));
@@ -112,15 +109,15 @@ impl UiState {
     }
 
     #[inline]
-    fn begin_frame(&mut self) -> () {
+    fn begin_frame(&mut self) {
         #[allow(deprecated)]
         let new_raw_input = RawInput {
             scroll_delta: Vec2::new(0.0, 0.0),
             zoom_delta: 0.0,
             screen_size: self.raw_input.screen_size,
-            screen_rect: self.raw_input.screen_rect.clone(),
-            pixels_per_point: self.raw_input.pixels_per_point.clone(),
-            time: self.raw_input.time.clone(),
+            screen_rect: self.raw_input.screen_rect,
+            pixels_per_point: self.raw_input.pixels_per_point,
+            time: self.raw_input.time,
             predicted_dt: self.raw_input.predicted_dt,
             modifiers: self.modifiers,
             events: Vec::new(),
@@ -180,11 +177,8 @@ impl UiState {
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn _process_window_events<
-    T: 'static + InputManager,
-    M: 'static + MinBspFeatures<VulkanSystem>,
->(
-    #[resource] renderer: &mut Renderer<'static, M>,
+pub fn _process_window_events<T: 'static + InputManager, M: 'static + MinRenderFeatures>(
+    #[resource] renderer: &mut Renderer<M>,
     #[resource] manager: &mut T,
     #[resource] mouse: &mut Mouse,
     #[resource] ui_state: &mut UiState,
@@ -243,9 +237,7 @@ pub fn _process_window_events<
     manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
 }
 
-pub fn process_window_events_system<
-    T: 'static + InputManager,
-    M: 'static + MinBspFeatures<VulkanSystem>,
->() -> impl Runnable {
+pub fn process_window_events_system<T: 'static + InputManager, M: 'static + MinRenderFeatures>(
+) -> impl Runnable {
     _process_window_events_system::<T, M>(Vec::with_capacity(4))
 }

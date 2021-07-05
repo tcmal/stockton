@@ -1,7 +1,7 @@
 //! Resolves a texture in a BSP File to an image
 
 use crate::draw::texture::image::LoadableImage;
-use stockton_levels::prelude::HasTextures;
+use stockton_levels::{parts::IsTexture, prelude::HasTextures};
 
 use std::{
     mem::drop,
@@ -37,7 +37,7 @@ impl<'a, T: HasTextures> TextureResolver for FsResolver<'a, T> {
     fn resolve(&mut self, tex: u32) -> Option<Self::Image> {
         let map = self.map_lock.read().unwrap();
         let tex = map.get_texture(tex)?;
-        let path = self.path.join(&tex.name);
+        let path = self.path.join(&tex.name());
 
         drop(tex);
         drop(map);
