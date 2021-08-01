@@ -107,6 +107,11 @@ pub struct PipelineSpec {
 
     push_constants: Vec<(ShaderStageFlags, Range<u32>)>,
 
+    #[builder(default = "false")]
+    dynamic_viewport: bool,
+    #[builder(default = "false")]
+    dynamic_scissor: bool,
+
     renderpass: RenderpassSpec,
 }
 
@@ -176,11 +181,17 @@ impl PipelineSpec {
 
         // Baked states
         let baked_states = BakedStates {
-            viewport: Some(Viewport {
-                rect: extent.rect(),
-                depth: (0.0..1.0),
-            }),
-            scissor: Some(extent.rect()),
+            viewport: match self.dynamic_viewport {
+                true => None,
+                false => Some(Viewport {
+                    rect: extent.rect(),
+                    depth: (0.0..1.0),
+                }),
+            },
+            scissor: match self.dynamic_scissor {
+                true => None,
+                false => Some(extent.rect()),
+            },
             blend_constants: None,
             depth_bounds: None,
         };

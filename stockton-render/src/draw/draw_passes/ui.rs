@@ -276,6 +276,7 @@ impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
                 resolves: vec![],
                 preserves: vec![],
             })
+            .dynamic_scissor(true)
             .build()
             .context("Error building pipeline")?;
 
