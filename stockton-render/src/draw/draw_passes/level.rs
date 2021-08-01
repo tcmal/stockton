@@ -17,7 +17,7 @@ use crate::{
         },
         queue_negotiator::QueueNegotiator,
         target::SwapchainProperties,
-        texture::{resolver::FsResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
+        texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
     },
     error::{EnvironmentError, LevelError, LockPoisoned},
     types::*,
@@ -52,7 +52,6 @@ use std::{
     convert::TryInto,
     iter::{empty, once},
     marker::PhantomData,
-    path::Path,
     sync::{Arc, RwLock},
 };
 
@@ -264,13 +263,19 @@ where
     }
 }
 
-impl<'a, M> IntoDrawPass<LevelDrawPass<'a, M>> for Entity
+pub struct LevelDrawPassConfig<R> {
+    pub active_camera: Entity,
+    pub tex_resolver: R,
+}
+
+impl<'a, M, R> IntoDrawPass<LevelDrawPass<'a, M>> for LevelDrawPassConfig<R>
 where
     M: for<'b> MinRenderFeatures<'b> + 'static,
+    R: TextureResolver + Send + Sync + 'static,
 {
     fn init(
         self,
-        session: &Session,
+        _session: &Session,
         adapter: &Adapter,
         device_lock: Arc<RwLock<DeviceT>>,
         queue_negotiator: &mut QueueNegotiator,
@@ -356,7 +361,6 @@ where
             .build()
             .context("Error building pipeline")?;
 
-        let map_lock: Arc<RwLock<M>> = session.resources.get::<Arc<RwLock<M>>>().unwrap().clone();
         let repo = TextureRepo::new(
             device_lock.clone(),
             queue_negotiator
@@ -369,7 +373,7 @@ where
                 .context("Error finding texture queue")?,
             adapter,
             TextureLoadConfig {
-                resolver: FsResolver::new(Path::new("textures"), map_lock),
+                resolver: self.tex_resolver,
                 filter: Filter::Linear,
                 wrap_mode: WrapMode::Tile,
             },
@@ -434,7 +438,7 @@ where
             pipeline,
             repo,
             draw_buffers,
-            active_camera: self,
+            active_camera: self.active_camera,
             _d: PhantomData,
             framebuffers,
             depth_buffers,

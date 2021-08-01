@@ -10,10 +10,13 @@ use anyhow::{Context, Result};
 use log::warn;
 use std::collections::BTreeMap;
 
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 use stockton_levels::parts::data::{Geometry, Vertex};
 use stockton_levels::types::Rgba;
-use stockton_render::draw::{ConsDrawPass, LevelDrawPass, UiDrawPass};
+use stockton_render::draw::{
+    texture::resolver::FsResolver, ConsDrawPass, LevelDrawPass, LevelDrawPassConfig, UiDrawPass,
+};
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use egui::{containers::CentralPanel, Frame};
@@ -150,8 +153,8 @@ fn try_main<'a>() -> Result<()> {
 
     // Load everything into the session
     let mut session = Session::new(
-        move |resources| {
-            resources.insert(map);
+        |resources| {
+            resources.insert(map.clone());
             resources.insert(manager);
             resources.insert(Timing::default());
             resources.insert(Mouse::default());
@@ -188,8 +191,20 @@ fn try_main<'a>() -> Result<()> {
     ));
 
     // Create the renderer
-    let (renderer, tx): (Renderer<Dp<'static>>, _) =
-        Renderer::new(&window, &session, (player, ()))?;
+    let (renderer, tx): (Renderer<Dp<'static>>, _) = Renderer::new(
+        &window,
+        &session,
+        (
+            LevelDrawPassConfig {
+                active_camera: player,
+                tex_resolver: FsResolver::new(
+                    Path::new("./examples/render-quad/textures"),
+                    map.clone(),
+                ),
+            },
+            (),
+        ),
+    )?;
     let new_control_flow = renderer.update_control_flow.clone();
 
     // Populate the initial UI state

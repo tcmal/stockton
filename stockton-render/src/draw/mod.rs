@@ -8,7 +8,7 @@ pub mod camera;
 mod context;
 pub mod draw_passes;
 mod queue_negotiator;
-mod texture;
+pub mod texture;
 mod ui;
 mod utils;
 
