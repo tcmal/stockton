@@ -26,8 +26,11 @@ pkgs.mkShell rec {
 
         # Optional, but useful for debugging
         renderdoc
+        lldb
     ];
-
+    VK_ICD_FILENAMES = "/run/opengl-driver/share/vulkan/icd.d/radeon_icd.x86_64.json";
+    VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+    
     LD_LIBRARY_PATH = "${lib.makeLibraryPath buildInputs}";
 
     SHADERC_LIB_DIR = "${pkgs.shaderc.lib}/lib/";
