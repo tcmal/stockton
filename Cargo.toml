@@ -5,6 +5,7 @@ members = [
     "stockton-input-codegen",
     "stockton-render",
     "stockton-levels",
+    "stockton-passes",
     "stockton-contrib",
     "rendy-memory",
     "rendy-descriptor",

@@ -1,6 +1,6 @@
 //! Resolves a texture in a BSP File to an image
 
-use crate::draw::texture::image::LoadableImage;
+use crate::texture::image::LoadableImage;
 use stockton_levels::{parts::IsTexture, prelude::HasTextures};
 
 use std::{

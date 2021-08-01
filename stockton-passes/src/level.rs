@@ -1,27 +1,5 @@
 //! Minimal code for drawing any level, based on traits from stockton-levels
 
-use super::{util::TargetSpecificResources, DrawPass, IntoDrawPass};
-use crate::{
-    draw::{
-        buffers::{
-            draw_buffers::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
-            DedicatedLoadedImage, ModifiableBuffer,
-        },
-        builders::{
-            pipeline::{
-                CompletePipeline, PipelineSpecBuilder, VertexBufferSpec,
-                VertexPrimitiveAssemblerSpec,
-            },
-            renderpass::RenderpassSpec,
-            shader::ShaderDesc,
-        },
-        queue_negotiator::QueueNegotiator,
-        target::SwapchainProperties,
-        texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
-    },
-    error::{EnvironmentError, LevelError, LockPoisoned},
-    types::*,
-};
 use hal::{
     buffer::SubRange,
     command::{ClearColor, ClearDepthStencil, ClearValue, RenderAttachmentInfo, SubpassContents},
@@ -41,6 +19,21 @@ use shaderc::ShaderKind;
 use stockton_levels::{
     features::MinRenderFeatures,
     parts::{data::Geometry, IsFace},
+};
+use stockton_render::{
+    buffers::{
+        DedicatedLoadedImage, DrawBuffers, ModifiableBuffer, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE,
+    },
+    builders::{
+        CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
+        VertexPrimitiveAssemblerSpec,
+    },
+    context::RenderingContext,
+    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass},
+    error::{EnvironmentError, LevelError, LockPoisoned},
+    queue_negotiator::QueueNegotiator,
+    texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
+    types::*,
 };
 use stockton_types::{
     components::{CameraSettings, CameraVPMatrix, Transform},
@@ -82,7 +75,7 @@ where
         &mut self,
         session: &Session,
         img_view: &ImageViewT,
-        cmd_buffer: &mut crate::types::CommandBufferT,
+        cmd_buffer: &mut CommandBufferT,
     ) -> anyhow::Result<()> {
         // We might have loaded more textures
         self.repo.process_responses();
@@ -245,9 +238,9 @@ where
         Ok(())
     }
 
-    fn deactivate(self, device_lock: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
+    fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
         unsafe {
-            let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
+            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
             self.pipeline.deactivate(&mut device);
             self.draw_buffers.deactivate(&mut device);
             for fb in self.framebuffers.dissolve() {
@@ -257,9 +250,17 @@ where
                 db.deactivate(&mut device);
             }
         }
-        self.repo.deactivate(device_lock);
+        self.repo.deactivate(context.device());
 
         Ok(())
+    }
+
+    fn handle_surface_change(
+        &mut self,
+        _session: &Session,
+        _context: &mut RenderingContext,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
@@ -275,11 +276,8 @@ where
 {
     fn init(
         self,
-        _session: &Session,
-        adapter: &Adapter,
-        device_lock: Arc<RwLock<DeviceT>>,
-        queue_negotiator: &mut QueueNegotiator,
-        swapchain_properties: &SwapchainProperties,
+        _session: &mut Session,
+        context: &mut RenderingContext,
     ) -> Result<LevelDrawPass<'a, M>> {
         let spec = PipelineSpecBuilder::default()
             .rasterizer(Rasterizer {
@@ -323,19 +321,19 @@ where
                 }],
             ))
             .shader_vertex(ShaderDesc {
-                source: include_str!("../data/stockton.vert").to_string(),
+                source: include_str!("./data/3d.vert").to_string(),
                 entry: "main".to_string(),
                 kind: ShaderKind::Vertex,
             })
             .shader_fragment(ShaderDesc {
-                source: include_str!("../data/stockton.frag").to_string(),
+                source: include_str!("./data/3d.frag").to_string(),
                 entry: "main".to_string(),
                 kind: ShaderKind::Fragment,
             })
             .push_constants(vec![(ShaderStageFlags::VERTEX, 0..64)])
             .renderpass(RenderpassSpec {
                 colors: vec![Attachment {
-                    format: Some(swapchain_properties.format),
+                    format: Some(context.target_chain().properties().format),
                     samples: 1,
                     ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
                     stencil_ops: AttachmentOps::new(
@@ -345,7 +343,7 @@ where
                     layouts: Layout::ColorAttachmentOptimal..Layout::ColorAttachmentOptimal,
                 }],
                 depth: Some(Attachment {
-                    format: Some(swapchain_properties.depth_format),
+                    format: Some(context.target_chain().properties().depth_format),
                     samples: 1,
                     ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
                     stencil_ops: AttachmentOps::new(
@@ -362,16 +360,18 @@ where
             .context("Error building pipeline")?;
 
         let repo = TextureRepo::new(
-            device_lock.clone(),
-            queue_negotiator
+            context.device().clone(),
+            context
+                .queue_negotiator_mut()
                 .family::<TexLoadQueue>()
                 .ok_or(EnvironmentError::NoSuitableFamilies)
                 .context("Error finding texture queue")?,
-            queue_negotiator
+            context
+                .queue_negotiator_mut()
                 .get_queue::<TexLoadQueue>()
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error finding texture queue")?,
-            adapter,
+            context.adapter(),
             TextureLoadConfig {
                 resolver: self.tex_resolver,
                 filter: Filter::Linear,
@@ -381,22 +381,22 @@ where
         .context("Error creating texture repo")?;
 
         let (draw_buffers, pipeline, framebuffers, depth_buffers) = {
-            let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
-            let draw_buffers =
-                DrawBuffers::new(&mut device, adapter).context("Error creating draw buffers")?;
+            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+            let draw_buffers = DrawBuffers::new(&mut device, context.adapter())
+                .context("Error creating draw buffers")?;
             let pipeline = spec
                 .build(
                     &mut device,
-                    swapchain_properties.extent,
-                    swapchain_properties,
+                    context.target_chain().properties().extent,
+                    context.target_chain().properties(),
                     once(&*repo.get_ds_layout()?),
                 )
                 .context("Error building pipeline")?;
 
-            let fat = swapchain_properties.framebuffer_attachment();
+            let fat = context.target_chain().properties().framebuffer_attachment();
             let dat = FramebufferAttachment {
                 usage: Usage::DEPTH_STENCIL_ATTACHMENT,
-                format: swapchain_properties.depth_format,
+                format: context.target_chain().properties().depth_format,
                 view_caps: ViewCapabilities::empty(),
             };
             let framebuffers = TargetSpecificResources::new(
@@ -404,17 +404,17 @@ where
                     Ok(device.create_framebuffer(
                         &pipeline.renderpass,
                         IntoIter::new([fat.clone(), dat.clone()]),
-                        swapchain_properties.extent,
+                        context.target_chain().properties().extent,
                     )?)
                 },
-                swapchain_properties.image_count as usize,
+                context.target_chain().properties().image_count as usize,
             )?;
             let depth_buffers = TargetSpecificResources::new(
                 || {
                     DedicatedLoadedImage::new(
                         &mut device,
-                        adapter,
-                        swapchain_properties.depth_format,
+                        context.adapter(),
+                        context.target_chain().properties().depth_format,
                         Usage::DEPTH_STENCIL_ATTACHMENT,
                         SubresourceRange {
                             aspects: Aspects::DEPTH,
@@ -423,12 +423,12 @@ where
                             layer_start: 0,
                             layer_count: Some(1),
                         },
-                        swapchain_properties.extent.width as usize,
-                        swapchain_properties.extent.height as usize,
+                        context.target_chain().properties().extent.width as usize,
+                        context.target_chain().properties().extent.height as usize,
                     )
                     .context("Error creating depth buffer")
                 },
-                swapchain_properties.image_count as usize,
+                context.target_chain().properties().image_count as usize,
             )?;
 
             (draw_buffers, pipeline, framebuffers, depth_buffers)

@@ -11,13 +11,13 @@ use hal::{
     MemoryTypeId,
 };
 
-pub mod dedicated_image;
-pub mod draw_buffers;
-pub mod staged;
+mod dedicated_image;
+mod draw_buffers;
+mod staged;
 
-pub use dedicated_image::DedicatedLoadedImage;
-pub use draw_buffers::DrawBuffers;
-pub use staged::StagedBuffer;
+pub use dedicated_image::*;
+pub use draw_buffers::*;
+pub use staged::*;
 
 /// Create a buffer of the given specifications, allocating more device memory.
 // TODO: Use a different memory allocator?

@@ -1,6 +1,6 @@
 //! A dedicated image. Used for depth buffers.
 
-use crate::draw::texture::PIXEL_SIZE;
+use crate::texture::PIXEL_SIZE;
 use crate::types::*;
 
 use std::mem::ManuallyDrop;

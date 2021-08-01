@@ -1,26 +1,5 @@
 //! Minimal code for drawing any level, based on traits from stockton-levels
 
-use super::{util::TargetSpecificResources, DrawPass, IntoDrawPass};
-use crate::{
-    draw::{
-        buffers::{draw_buffers::DrawBuffers, ModifiableBuffer},
-        builders::{
-            pipeline::{
-                CompletePipeline, PipelineSpecBuilder, VertexBufferSpec,
-                VertexPrimitiveAssemblerSpec,
-            },
-            renderpass::RenderpassSpec,
-            shader::ShaderDesc,
-        },
-        queue_negotiator::QueueNegotiator,
-        target::SwapchainProperties,
-        texture::{TexLoadQueue, TextureLoadConfig, TextureRepo},
-        ui::UiTextures,
-    },
-    error::{EnvironmentError, LockPoisoned},
-    types::*,
-    UiState,
-};
 use egui::{ClippedMesh, TextureId};
 use hal::{
     buffer::SubRange,
@@ -35,16 +14,33 @@ use hal::{
     },
 };
 use shaderc::ShaderKind;
+use stockton_render::{
+    buffers::{DrawBuffers, ModifiableBuffer},
+    builders::{
+        CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
+        VertexPrimitiveAssemblerSpec,
+    },
+    context::RenderingContext,
+    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass},
+    error::{EnvironmentError, LockPoisoned},
+    queue_negotiator::QueueNegotiator,
+    texture::{TexLoadQueue, TextureLoadConfig, TextureRepo},
+    types::*,
+};
 use stockton_types::{Session, Vector2};
 
 use std::{
     array::IntoIter,
     convert::TryInto,
     iter::{empty, once},
-    sync::{Arc, RwLock},
 };
 
 use anyhow::{anyhow, Context, Result};
+use egui::{CtxRef, Texture};
+use std::sync::Arc;
+use stockton_render::texture::{resolver::TextureResolver, LoadableImage};
+
+use crate::window::UiState;
 
 #[derive(Debug)]
 pub struct UiPoint(pub Vector2, pub Vector2, pub [f32; 4]);
@@ -63,7 +59,7 @@ impl<'a> DrawPass for UiDrawPass<'a> {
         &mut self,
         session: &Session,
         img_view: &ImageViewT,
-        cmd_buffer: &mut crate::types::CommandBufferT,
+        cmd_buffer: &mut CommandBufferT,
     ) -> anyhow::Result<()> {
         // We might have loaded more textures
         self.repo.process_responses();
@@ -187,30 +183,31 @@ impl<'a> DrawPass for UiDrawPass<'a> {
         Ok(())
     }
 
-    fn deactivate(self, device_lock: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
+    fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
         unsafe {
-            let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
+            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
             self.pipeline.deactivate(&mut device);
             self.draw_buffers.deactivate(&mut device);
             for fb in self.framebuffers.dissolve() {
                 device.destroy_framebuffer(fb);
             }
         }
-        self.repo.deactivate(device_lock);
+        self.repo.deactivate(context.device());
 
         Ok(())
+    }
+
+    fn handle_surface_change(
+        &mut self,
+        _session: &Session,
+        _context: &mut RenderingContext,
+    ) -> Result<()> {
+        todo!()
     }
 }
 
 impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
-    fn init(
-        self,
-        session: &Session,
-        adapter: &Adapter,
-        device_lock: Arc<RwLock<DeviceT>>,
-        queue_negotiator: &mut QueueNegotiator,
-        swapchain_properties: &SwapchainProperties,
-    ) -> Result<UiDrawPass<'a>> {
+    fn init(self, session: &mut Session, context: &mut RenderingContext) -> Result<UiDrawPass<'a>> {
         let spec = PipelineSpecBuilder::default()
             .rasterizer(Rasterizer {
                 polygon_mode: PolygonMode::Fill,
@@ -250,19 +247,19 @@ impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
                 }],
             ))
             .shader_vertex(ShaderDesc {
-                source: include_str!("../ui/data/stockton.vert").to_string(),
+                source: include_str!("./data/ui.vert").to_string(),
                 entry: "main".to_string(),
                 kind: ShaderKind::Vertex,
             })
             .shader_fragment(ShaderDesc {
-                source: include_str!("../ui/data/stockton.frag").to_string(),
+                source: include_str!("./data/ui.frag").to_string(),
                 entry: "main".to_string(),
                 kind: ShaderKind::Fragment,
             })
             .push_constants(vec![(ShaderStageFlags::VERTEX, 0..8)])
             .renderpass(RenderpassSpec {
                 colors: vec![Attachment {
-                    format: Some(swapchain_properties.format),
+                    format: Some(context.target_chain().properties().format),
                     samples: 1,
                     ops: AttachmentOps::new(AttachmentLoadOp::Load, AttachmentStoreOp::Store),
                     stencil_ops: AttachmentOps::new(
@@ -282,16 +279,18 @@ impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
 
         let ui: &mut UiState = &mut session.resources.get_mut::<UiState>().unwrap();
         let repo = TextureRepo::new(
-            device_lock.clone(),
-            queue_negotiator
+            context.device().clone(),
+            context
+                .queue_negotiator_mut()
                 .family::<TexLoadQueue>()
                 .ok_or(EnvironmentError::NoSuitableFamilies)
                 .context("Error finding texture queue")?,
-            queue_negotiator
+            context
+                .queue_negotiator_mut()
                 .get_queue::<TexLoadQueue>()
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error finding texture queue")?,
-            adapter,
+            context.adapter(),
             TextureLoadConfig {
                 resolver: UiTextures::new(ui.ctx().clone()),
                 filter: hal::image::Filter::Linear,
@@ -301,28 +300,28 @@ impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
         .context("Error creating texture repo")?;
 
         let (draw_buffers, pipeline, framebuffers) = {
-            let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
-            let draw_buffers =
-                DrawBuffers::new(&mut device, adapter).context("Error creating draw buffers")?;
+            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+            let draw_buffers = DrawBuffers::new(&mut device, context.adapter())
+                .context("Error creating draw buffers")?;
             let pipeline = spec
                 .build(
                     &mut device,
-                    swapchain_properties.extent,
-                    swapchain_properties,
+                    context.target_chain().properties().extent,
+                    context.target_chain().properties(),
                     once(&*repo.get_ds_layout()?),
                 )
                 .context("Error building pipeline")?;
 
-            let fat = swapchain_properties.framebuffer_attachment();
+            let fat = context.target_chain().properties().framebuffer_attachment();
             let framebuffers = TargetSpecificResources::new(
                 || unsafe {
                     Ok(device.create_framebuffer(
                         &pipeline.renderpass,
                         IntoIter::new([fat.clone()]),
-                        swapchain_properties.extent,
+                        context.target_chain().properties().extent,
                     )?)
                 },
-                swapchain_properties.image_count as usize,
+                context.target_chain().properties().image_count as usize,
             )?;
             (draw_buffers, pipeline, framebuffers)
         };
@@ -344,5 +343,56 @@ impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
         Ok(vec![queue_negotiator
             .family_spec::<TexLoadQueue>(&adapter.queue_families, 1)
             .ok_or(EnvironmentError::NoSuitableFamilies)?])
+    }
+}
+
+pub struct UiTexture(Arc<Texture>);
+
+pub struct UiTextures {
+    ctx: CtxRef,
+}
+
+impl TextureResolver for UiTextures {
+    type Image = UiTexture;
+    fn resolve(&mut self, tex: u32) -> Option<Self::Image> {
+        if tex == 0 {
+            Some(UiTexture(self.ctx.texture()))
+        } else {
+            None
+        }
+    }
+}
+
+impl UiTextures {
+    pub fn new(ctx: CtxRef) -> Self {
+        UiTextures { ctx }
+    }
+}
+
+impl LoadableImage for UiTexture {
+    fn width(&self) -> u32 {
+        self.0.width as u32
+    }
+    fn height(&self) -> u32 {
+        self.0.height as u32
+    }
+    fn copy_row(&self, y: u32, ptr: *mut u8) {
+        let row_size = self.0.width as u32;
+        let pixels = &self.0.pixels[(y * row_size) as usize..((y + 1) * row_size) as usize];
+
+        for (i, x) in pixels.iter().enumerate() {
+            unsafe {
+                *ptr.offset(i as isize * 4) = 255;
+                *ptr.offset((i as isize * 4) + 1) = 255;
+                *ptr.offset((i as isize * 4) + 2) = 255;
+                *ptr.offset((i as isize * 4) + 3) = *x;
+            }
+        }
+    }
+
+    unsafe fn copy_into(&self, ptr: *mut u8, row_size: usize) {
+        for y in 0..self.height() {
+            self.copy_row(y, ptr.offset((row_size * y as usize).try_into().unwrap()));
+        }
     }
 }

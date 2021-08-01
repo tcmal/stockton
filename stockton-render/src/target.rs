@@ -122,15 +122,15 @@ impl SwapchainProperties {
 
 pub struct TargetChain {
     /// Surface we're targeting
-    pub surface: ManuallyDrop<SurfaceT>,
-    pub properties: SwapchainProperties,
+    surface: ManuallyDrop<SurfaceT>,
+    properties: SwapchainProperties,
 
     /// Resources tied to each target frame in the swapchain
-    pub targets: Box<[TargetResources]>,
+    targets: Box<[TargetResources]>,
 
     /// Sync objects used in drawing
     /// These are seperated from the targets because we don't necessarily always match up indexes
-    pub sync_objects: Box<[SyncObjects]>,
+    sync_objects: Box<[SyncObjects]>,
 
     /// The last set of sync objects used
     last_syncs: usize,
@@ -326,6 +326,11 @@ impl TargetChain {
         };
 
         Ok(())
+    }
+
+    /// Get a reference to the target chain's properties.
+    pub fn properties(&self) -> &SwapchainProperties {
+        &self.properties
     }
 }
 

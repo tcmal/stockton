@@ -1,20 +1,14 @@
 //! Traits and common draw passes.
-use super::{queue_negotiator::QueueNegotiator, target::SwapchainProperties};
+use super::{queue_negotiator::QueueNegotiator, RenderingContext};
 use crate::types::*;
 use stockton_types::Session;
-
-use std::sync::{Arc, RwLock};
 
 use anyhow::Result;
 
 mod cons;
-mod level;
-mod ui;
 pub mod util;
 
 pub use cons::ConsDrawPass;
-pub use level::{LevelDrawPass, LevelDrawPassConfig};
-pub use ui::UiDrawPass;
 
 /// One of several 'passes' that draw on each frame.
 pub trait DrawPass {
@@ -27,20 +21,21 @@ pub trait DrawPass {
         cmd_buffer: &mut CommandBufferT,
     ) -> Result<()>;
 
-    fn deactivate(self, device: &mut Arc<RwLock<DeviceT>>) -> Result<()>;
+    /// Called just after the surface changes (probably a resize).
+    fn handle_surface_change(
+        &mut self,
+        session: &Session,
+        context: &mut RenderingContext,
+    ) -> Result<()>;
+
+    /// Deactivate any vulkan parts that need to be deactivated
+    fn deactivate(self, context: &mut RenderingContext) -> Result<()>;
 }
 
 /// A type that can be made into a specific draw pass type.
 /// This allows extra data to be used in initialisation without the Renderer needing to worry about it.
-pub trait IntoDrawPass<O: DrawPass> {
-    fn init(
-        self,
-        session: &Session,
-        adapter: &Adapter,
-        device: Arc<RwLock<DeviceT>>,
-        queue_negotiator: &mut QueueNegotiator,
-        swapchain_properties: &SwapchainProperties,
-    ) -> Result<O>;
+pub trait IntoDrawPass<T: DrawPass> {
+    fn init(self, session: &mut Session, context: &mut RenderingContext) -> Result<T>;
 
     /// This function should ask the queue negotatior to find families for any auxilary operations this draw pass needs to perform
     /// For example, .find(&TexLoadQueue)

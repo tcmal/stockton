@@ -1,5 +1,5 @@
 use super::{renderpass::RenderpassSpec, shader::ShaderDesc};
-use crate::{draw::target::SwapchainProperties, error::EnvironmentError, types::*};
+use crate::{error::EnvironmentError, target::SwapchainProperties, types::*};
 
 use std::{mem::ManuallyDrop, ops::Range};
 
@@ -241,23 +241,23 @@ impl PipelineSpec {
 
 pub struct CompletePipeline {
     /// Our main render pass
-    pub(crate) renderpass: ManuallyDrop<RenderPassT>,
+    pub renderpass: ManuallyDrop<RenderPassT>,
 
     /// The layout of our main graphics pipeline
-    pub(crate) pipeline_layout: ManuallyDrop<PipelineLayoutT>,
+    pub pipeline_layout: ManuallyDrop<PipelineLayoutT>,
 
     /// Our main graphics pipeline
-    pub(crate) pipeline: ManuallyDrop<GraphicsPipelineT>,
+    pub pipeline: ManuallyDrop<GraphicsPipelineT>,
 
     /// The vertex shader module
-    pub(crate) vs_module: ManuallyDrop<ShaderModuleT>,
+    pub vs_module: ManuallyDrop<ShaderModuleT>,
 
     /// The fragment shader module
-    pub(crate) fs_module: Option<ShaderModuleT>,
-    pub(crate) gm_module: Option<ShaderModuleT>,
-    pub(crate) ts_module: Option<(ShaderModuleT, ShaderModuleT)>,
+    pub fs_module: Option<ShaderModuleT>,
+    pub gm_module: Option<ShaderModuleT>,
+    pub ts_module: Option<(ShaderModuleT, ShaderModuleT)>,
 
-    pub(crate) render_area: Rect,
+    pub render_area: Rect,
 }
 
 impl CompletePipeline {

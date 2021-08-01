@@ -16,8 +16,6 @@ shaderc = "^0.7"
 log = "0.4.0"
 image = "0.23.11"
 legion = { version = "^0.3" }
-egui = "^0.12"
-epaint = "^0.12"
 rendy-memory = { path = "../rendy-memory" }
 rendy-descriptor = { path = "../rendy-descriptor" }
 anyhow = "1.0.40"

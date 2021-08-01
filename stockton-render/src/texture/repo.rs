@@ -4,8 +4,8 @@ use super::{
     loader::{BlockRef, LoaderRequest, TextureLoader, TextureLoaderRemains, NUM_SIMULTANEOUS_CMDS},
     resolver::TextureResolver,
 };
-use crate::draw::queue_negotiator::QueueFamilySelector;
 use crate::error::LockPoisoned;
+use crate::queue_negotiator::QueueFamilySelector;
 use crate::types::*;
 
 use std::{
@@ -153,7 +153,7 @@ impl TextureRepo {
         }
     }
 
-    pub fn deactivate(mut self, device_lock: &mut Arc<RwLock<DeviceT>>) {
+    pub fn deactivate(mut self, device_lock: &Arc<RwLock<DeviceT>>) {
         unsafe {
             use std::ptr::read;
 

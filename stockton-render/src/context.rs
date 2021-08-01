@@ -28,7 +28,7 @@ use stockton_types::Session;
 /// Contains all the hal related stuff.
 /// In the end, this takes in a depth-sorted list of faces and a map file and renders them.
 // TODO: Settings for clear colour, buffer sizes, etc
-pub struct RenderingContext<DP> {
+pub struct RenderingContext {
     // Parents for most of these things
     /// Vulkan Instance
     instance: ManuallyDrop<back::Instance>,
@@ -40,28 +40,23 @@ pub struct RenderingContext<DP> {
     adapter: Adapter,
 
     /// Swapchain and stuff
-    pub(crate) target_chain: ManuallyDrop<TargetChain>,
+    target_chain: ManuallyDrop<TargetChain>,
 
     // Command pool and buffers
     /// The command pool used for our buffers
     cmd_pool: ManuallyDrop<CommandPoolT>,
 
+    queue_negotiator: QueueNegotiator,
+
     /// The queue to use for drawing
     queue: Arc<RwLock<QueueT>>,
 
-    /// Deals with drawing logic, and holds any data required for drawing.
-    draw_pass: ManuallyDrop<DP>,
-
-    pub(crate) pixels_per_point: f32,
+    pixels_per_point: f32,
 }
 
-impl<DP: DrawPass> RenderingContext<DP> {
+impl RenderingContext {
     /// Create a new RenderingContext for the given window.
-    pub fn new<IDP: IntoDrawPass<DP>>(
-        window: &Window,
-        session: &Session,
-        idp: IDP,
-    ) -> Result<Self> {
+    pub fn new<IDP: IntoDrawPass<DP>, DP: DrawPass>(window: &Window) -> Result<Self> {
         // Create surface
         let (instance, surface, mut adapters) = unsafe {
             let instance =
@@ -125,17 +120,6 @@ impl<DP: DrawPass> RenderingContext<DP> {
         let swapchain_properties = SwapchainProperties::find_best(&adapter, &surface)
             .context("Error getting properties for swapchain")?;
 
-        // Draw pass
-        let dp = idp
-            .init(
-                session,
-                &adapter,
-                device_lock.clone(),
-                &mut queue_negotiator,
-                &swapchain_properties,
-            )
-            .context("Error initialising draw pass")?;
-
         // Lock device
         let mut device = device_lock
             .write()
@@ -168,18 +152,20 @@ impl<DP: DrawPass> RenderingContext<DP> {
         // Unlock device
         drop(device);
 
+        let queue = queue_negotiator
+            .get_queue::<DrawQueue>()
+            .ok_or(EnvironmentError::NoQueues)
+            .context("Error getting draw queue")?;
+
         Ok(RenderingContext {
             instance: ManuallyDrop::new(instance),
 
             device: device_lock,
             adapter,
 
-            queue: queue_negotiator
-                .get_queue::<DrawQueue>()
-                .ok_or(EnvironmentError::NoQueues)
-                .context("Error getting draw queue")?,
+            queue_negotiator,
+            queue,
 
-            draw_pass: ManuallyDrop::new(dp),
             target_chain: ManuallyDrop::new(target_chain),
             cmd_pool: ManuallyDrop::new(cmd_pool),
 
@@ -208,8 +194,6 @@ impl<DP: DrawPass> RenderingContext<DP> {
         let properties = SwapchainProperties::find_best(&self.adapter, &surface)
             .context("Error finding best swapchain properties")?;
 
-        // TODO: Notify draw passes
-
         self.target_chain = ManuallyDrop::new(
             TargetChain::new(
                 &mut device,
@@ -224,7 +208,7 @@ impl<DP: DrawPass> RenderingContext<DP> {
     }
 
     /// Draw onto the next frame of the swapchain
-    pub fn draw_next_frame(&mut self, session: &Session) -> Result<()> {
+    pub fn draw_next_frame<DP: DrawPass>(&mut self, session: &Session, dp: &mut DP) -> Result<()> {
         let mut device = self
             .device
             .write()
@@ -238,14 +222,39 @@ impl<DP: DrawPass> RenderingContext<DP> {
 
         // Level draw pass
         self.target_chain
-            .do_draw_with(&mut device, &mut queue, &mut *self.draw_pass, session)
+            .do_draw_with(&mut device, &mut queue, dp, session)
             .context("Error preparing next target")?;
 
         Ok(())
     }
+
+    /// Get a reference to the rendering context's pixels per point.
+    pub fn pixels_per_point(&self) -> f32 {
+        self.pixels_per_point
+    }
+
+    /// Get a reference to the rendering context's device.
+    pub fn device(&self) -> &Arc<RwLock<DeviceT>> {
+        &self.device
+    }
+
+    /// Get a reference to the rendering context's target chain.
+    pub fn target_chain(&self) -> &TargetChain {
+        &self.target_chain
+    }
+
+    /// Get a reference to the rendering context's adapter.
+    pub fn adapter(&self) -> &Adapter {
+        &self.adapter
+    }
+
+    /// Get a mutable reference to the rendering context's queue negotiator.
+    pub fn queue_negotiator_mut(&mut self) -> &mut QueueNegotiator {
+        &mut self.queue_negotiator
+    }
 }
 
-impl<DP> core::ops::Drop for RenderingContext<DP> {
+impl core::ops::Drop for RenderingContext {
     fn drop(&mut self) {
         {
             self.device.write().unwrap().wait_idle().unwrap();

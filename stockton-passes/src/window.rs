@@ -1,11 +1,16 @@
-use crate::{error::full_error_display, DrawPass, Renderer};
+use std::sync::mpsc::channel;
+use std::sync::mpsc::Receiver;
+use std::sync::mpsc::Sender;
+use std::sync::Arc;
+use std::sync::RwLock;
+
 use egui::{Modifiers, Rect, Vec2};
 use legion::systems::Runnable;
 use log::debug;
+use stockton_render::{draw_passes::DrawPass, Renderer};
 
 use egui::{CtxRef, Event, Output, Pos2, RawInput};
 use epaint::ClippedShape;
-use log::error;
 use stockton_input::{Action as KBAction, InputManager, Mouse};
 
 use winit::event::{
@@ -90,9 +95,9 @@ impl UiState {
     }
 
     pub fn populate_initial_state<'a, T: DrawPass>(&mut self, renderer: &Renderer<T>) {
-        let props = &renderer.context.target_chain.properties;
+        let props = &renderer.context().target_chain().properties();
         self.set_dimensions(props.extent.width, props.extent.height);
-        self.set_pixels_per_point(Some(renderer.context.pixels_per_point));
+        self.set_pixels_per_point(Some(renderer.context().pixels_per_point()));
         debug!("{:?}", self.raw_input);
     }
 
@@ -171,10 +176,28 @@ impl UiState {
     }
 }
 
+pub struct WindowFlow {
+    window_events: Receiver<WindowEvent>,
+    update_control_flow: Arc<RwLock<ControlFlow>>,
+}
+
+impl WindowFlow {
+    pub fn new(update_control_flow: Arc<RwLock<ControlFlow>>) -> (Self, Sender<WindowEvent>) {
+        let (tx, rx) = channel();
+        (
+            Self {
+                window_events: rx,
+                update_control_flow,
+            },
+            tx,
+        )
+    }
+}
+
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
 pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass>(
-    #[resource] renderer: &mut Renderer<DP>,
+    #[resource] window_channel: &mut WindowFlow,
     #[resource] manager: &mut T,
     #[resource] mouse: &mut Mouse,
     #[resource] ui_state: &mut UiState,
@@ -183,16 +206,13 @@ pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass>
     let mut actions_buf_cursor = 0;
     let mut mouse_delta = mouse.abs;
 
-    while let Ok(event) = renderer.window_events.try_recv() {
+    while let Ok(event) = window_channel.window_events.try_recv() {
         match event {
             WindowEvent::SizeChanged(w, h) => {
-                if let Err(err) = renderer.resize() {
-                    error!("{}", full_error_display(err));
-                };
                 ui_state.set_dimensions(w, h);
             }
             WindowEvent::CloseRequested => {
-                let mut flow = renderer.update_control_flow.write().unwrap();
+                let mut flow = window_channel.update_control_flow.write().unwrap();
                 // TODO: Let everything know this is our last frame
                 *flow = ControlFlow::Exit;
             }

@@ -1,10 +1,8 @@
 //! Code for using multiple draw passes in place of just one
 //! Note that this can be extended to an arbitrary amount of draw passes.
 
-use std::sync::{Arc, RwLock};
-
 use super::{DrawPass, IntoDrawPass};
-use crate::types::*;
+use crate::{context::RenderingContext, queue_negotiator::QueueNegotiator, types::*};
 use stockton_types::Session;
 
 use anyhow::Result;
@@ -28,9 +26,18 @@ impl<A: DrawPass, B: DrawPass> DrawPass for ConsDrawPass<A, B> {
         Ok(())
     }
 
-    fn deactivate(self, device: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
-        self.a.deactivate(device)?;
-        self.b.deactivate(device)
+    fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
+        self.a.deactivate(context)?;
+        self.b.deactivate(context)
+    }
+
+    fn handle_surface_change(
+        &mut self,
+        session: &Session,
+        context: &mut RenderingContext,
+    ) -> Result<()> {
+        self.a.handle_surface_change(session, context)?;
+        self.b.handle_surface_change(session, context)
     }
 }
 
@@ -39,33 +46,18 @@ impl<A: DrawPass, B: DrawPass, IA: IntoDrawPass<A>, IB: IntoDrawPass<B>>
 {
     fn init(
         self,
-        session: &Session,
-        adapter: &Adapter,
-        device: Arc<RwLock<DeviceT>>,
-        queue_negotiator: &mut crate::draw::queue_negotiator::QueueNegotiator,
-        swapchain_properties: &crate::draw::target::SwapchainProperties,
+        session: &mut Session,
+        context: &mut RenderingContext,
     ) -> Result<ConsDrawPass<A, B>> {
         Ok(ConsDrawPass {
-            a: self.0.init(
-                session,
-                adapter,
-                device.clone(),
-                queue_negotiator,
-                swapchain_properties,
-            )?,
-            b: self.1.init(
-                session,
-                adapter,
-                device,
-                queue_negotiator,
-                swapchain_properties,
-            )?,
+            a: self.0.init(session, context)?,
+            b: self.1.init(session, context)?,
         })
     }
 
     fn find_aux_queues<'a>(
         adapter: &'a Adapter,
-        queue_negotiator: &mut crate::draw::queue_negotiator::QueueNegotiator,
+        queue_negotiator: &mut QueueNegotiator,
     ) -> Result<Vec<(&'a QueueFamilyT, Vec<f32>)>> {
         let mut v = IA::find_aux_queues(adapter, queue_negotiator)?;
         v.extend(IB::find_aux_queues(adapter, queue_negotiator)?);

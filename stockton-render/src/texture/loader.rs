@@ -7,7 +7,7 @@ use super::{
     resolver::TextureResolver,
     PIXEL_SIZE,
 };
-use crate::{draw::utils::find_memory_type_id, error::LockPoisoned, types::*};
+use crate::{error::LockPoisoned, types::*, utils::find_memory_type_id};
 
 use std::{
     array::IntoIter,

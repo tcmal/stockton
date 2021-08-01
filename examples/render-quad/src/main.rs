@@ -9,14 +9,19 @@ extern crate legion;
 use anyhow::{Context, Result};
 use log::warn;
 use std::collections::BTreeMap;
+use stockton_passes::camera::calc_vp_matrix_system;
+use stockton_passes::window::{process_window_events_system, UiState, WindowEvent, WindowFlow};
+use winit::event_loop::ControlFlow;
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use stockton_levels::parts::data::{Geometry, Vertex};
 use stockton_levels::types::Rgba;
-use stockton_render::draw::{
-    texture::resolver::FsResolver, ConsDrawPass, LevelDrawPass, LevelDrawPassConfig, UiDrawPass,
+use stockton_passes::{
+    level::{LevelDrawPass, LevelDrawPassConfig},
+    ui::UiDrawPass,
 };
+use stockton_render::{draw_passes::ConsDrawPass, texture::resolver::FsResolver};
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use egui::{containers::CentralPanel, Frame};
@@ -26,8 +31,7 @@ use stockton_contrib::flycam::*;
 use stockton_input::{Axis, InputManager, Mouse};
 
 use stockton_render::error::full_error_display;
-use stockton_render::systems::*;
-use stockton_render::{Renderer, UiState, WindowEvent};
+use stockton_render::Renderer;
 
 use stockton_types::components::{CameraSettings, CameraVPMatrix, Transform};
 use stockton_types::{Session, Vector2, Vector3};
@@ -186,9 +190,9 @@ fn try_main<'a>() -> Result<()> {
     ));
 
     // Create the renderer
-    let (renderer, tx): (Renderer<Dp<'static>>, _) = Renderer::new(
+    let renderer = Renderer::<Dp<'static>>::new(
         &window,
-        &session,
+        &mut session,
         (
             LevelDrawPassConfig {
                 active_camera: player,
@@ -200,7 +204,10 @@ fn try_main<'a>() -> Result<()> {
             (),
         ),
     )?;
-    let new_control_flow = renderer.update_control_flow.clone();
+
+    let new_control_flow = Arc::new(RwLock::new(ControlFlow::Poll));
+    let (window_flow, tx) = WindowFlow::new(new_control_flow.clone());
+    session.resources.insert(window_flow);
 
     // Populate the initial UI state
     {

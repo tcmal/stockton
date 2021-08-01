@@ -1,5 +1,5 @@
 use crate::types::*;
-use hal::{memory::Properties as MemProperties, prelude::*, MemoryTypeId};
+use hal::{memory::Properties as MemProperties, MemoryTypeId};
 
 pub fn find_memory_type_id(
     adapter: &Adapter,
