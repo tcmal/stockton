@@ -1,5 +1,3 @@
-#![allow(incomplete_features)]
-#![feature(generic_associated_types)]
 #[cfg(feature = "vulkan")]
 extern crate gfx_backend_vulkan as back;
 extern crate gfx_hal as hal;

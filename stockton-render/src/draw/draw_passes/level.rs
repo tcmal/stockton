@@ -199,7 +199,7 @@ where
 
                 match face.geometry(&map) {
                     Geometry::Vertices(v1, v2, v3) => {
-                        for v in [v1, v2, v3] {
+                        for v in &[v1, v2, v3] {
                             let uvp =
                                 UvPoint(v.position, face.texture_idx(&map).try_into()?, v.tex);
 
