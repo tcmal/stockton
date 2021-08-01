@@ -48,6 +48,7 @@ fn get_size(f: Format) -> u32 {
         Format::Rgb32Sfloat => 4 * 3,
         Format::R32Sint => 4,
         Format::Rg32Sfloat => 4 * 2,
+        Format::Rgba32Sfloat => 4 * 4,
         _ => unimplemented!("dont know size of format {:?}", f),
     }
 }

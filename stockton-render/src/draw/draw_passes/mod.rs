@@ -9,10 +9,12 @@ use anyhow::Result;
 
 mod cons;
 mod level;
+mod ui;
 pub mod util;
 
 pub use cons::ConsDrawPass;
 pub use level::LevelDrawPass;
+pub use ui::UiDrawPass;
 
 /// One of several 'passes' that draw on each frame.
 pub trait DrawPass {

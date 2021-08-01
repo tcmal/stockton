@@ -3,7 +3,6 @@ use egui::{Modifiers, Rect, Vec2};
 use legion::systems::Runnable;
 use log::debug;
 
-
 use egui::{CtxRef, Event, Output, Pos2, RawInput};
 use epaint::ClippedShape;
 use log::error;
@@ -73,8 +72,6 @@ impl WindowEvent {
 pub struct UiState {
     ctx: CtxRef,
     raw_input: RawInput,
-    pub(crate) last_tex_ver: u64,
-
     frame_active: bool,
 
     modifiers: Modifiers,
@@ -86,7 +83,6 @@ impl UiState {
         UiState {
             ctx: CtxRef::default(),
             raw_input: RawInput::default(),
-            last_tex_ver: 0,
             frame_active: false,
             modifiers: Default::default(),
             pointer_pos: Pos2::new(0.0, 0.0),

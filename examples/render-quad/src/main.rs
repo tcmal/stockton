@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 use stockton_levels::parts::data::{Geometry, Vertex};
 use stockton_levels::types::Rgba;
-use stockton_render::draw::LevelDrawPass;
+use stockton_render::draw::{ConsDrawPass, LevelDrawPass, UiDrawPass};
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use egui::{containers::CentralPanel, Frame};
@@ -32,7 +32,7 @@ use stockton_types::{Session, Vector2, Vector3};
 mod level;
 use level::*;
 
-type Dp<'a> = LevelDrawPass<'a, DemoLevel>;
+type Dp<'a> = ConsDrawPass<LevelDrawPass<'a, DemoLevel>, UiDrawPass<'a>>;
 
 #[derive(InputManager, Default, Clone, Debug)]
 struct MovementInputs {
@@ -127,7 +127,7 @@ fn try_main<'a>() -> Result<()> {
     }));
 
     // Create the UI State
-    let mut ui = UiState::new();
+    let ui = UiState::new();
 
     // Create the input manager
     let manager = {
@@ -155,6 +155,7 @@ fn try_main<'a>() -> Result<()> {
             resources.insert(manager);
             resources.insert(Timing::default());
             resources.insert(Mouse::default());
+            resources.insert(ui);
         },
         move |schedule| {
             schedule
@@ -187,14 +188,17 @@ fn try_main<'a>() -> Result<()> {
     ));
 
     // Create the renderer
-    let (renderer, tx): (Renderer<Dp<'static>>, _) = Renderer::new(&window, &session, player)?;
+    let (renderer, tx): (Renderer<Dp<'static>>, _) =
+        Renderer::new(&window, &session, (player, ()))?;
     let new_control_flow = renderer.update_control_flow.clone();
 
     // Populate the initial UI state
-    ui.populate_initial_state(&renderer);
+    {
+        let ui = &mut session.resources.get_mut::<UiState>().unwrap();
+        ui.populate_initial_state(&renderer);
+    }
 
     session.resources.insert(renderer);
-    session.resources.insert(ui);
 
     // Done loading - This is our main loop.
     // It just communicates events to the session and continuously ticks

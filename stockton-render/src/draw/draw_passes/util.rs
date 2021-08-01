@@ -11,7 +11,7 @@ pub struct TargetSpecificResources<T> {
 impl<T> TargetSpecificResources<T> {
     /// Create a new set of resources, given a function to generate them and the count
     /// In most cases, count should be swapchain_properties.image_count
-    pub fn new<F>(generator: F, count: usize) -> Result<Self>
+    pub fn new<F>(mut generator: F, count: usize) -> Result<Self>
     where
         F: FnMut() -> Result<T>,
     {
