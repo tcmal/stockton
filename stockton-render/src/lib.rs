@@ -80,6 +80,11 @@ impl<DP: DrawPass> Renderer<DP> {
         Ok(())
     }
 
+    pub fn get_aspect_ratio(&self) -> f32 {
+        let e = self.context.target_chain.properties.extent;
+        e.width as f32 / e.height as f32
+    }
+
     fn resize(&mut self) -> Result<()> {
         unsafe { self.context.handle_surface_change() }
     }

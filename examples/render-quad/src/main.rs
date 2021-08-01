@@ -149,31 +149,26 @@ fn try_main<'a>() -> Result<()> {
         MovementInputsManager::new(actions)
     };
 
-    let ratio = window.inner_size().width as f32 / window.inner_size().height as f32;
-
     // Load everything into the session
-    let mut session = Session::new(
-        |resources| {
-            resources.insert(map.clone());
-            resources.insert(manager);
-            resources.insert(Timing::default());
-            resources.insert(Mouse::default());
-            resources.insert(ui);
-        },
-        move |schedule| {
-            schedule
-                .add_system(update_deltatime_system())
-                .add_system(process_window_events_system::<
-                    MovementInputsManager,
-                    Dp<'static>,
-                >())
-                .flush()
-                .add_system(hello_world_system())
-                .add_system(flycam_move_system::<MovementInputsManager>())
-                .flush()
-                .add_thread_local(calc_vp_matrix_system(ratio));
-        },
-    );
+    let mut session = Session::new(move |schedule| {
+        schedule
+            .add_system(update_deltatime_system())
+            .add_system(process_window_events_system::<
+                MovementInputsManager,
+                Dp<'static>,
+            >())
+            .flush()
+            .add_system(hello_world_system())
+            .add_system(flycam_move_system::<MovementInputsManager>())
+            .flush()
+            .add_thread_local(calc_vp_matrix_system::<Dp<'static>>());
+    });
+
+    session.resources.insert(map.clone());
+    session.resources.insert(manager);
+    session.resources.insert(Timing::default());
+    session.resources.insert(Mouse::default());
+    session.resources.insert(ui);
 
     // Add our player entity
     let player = session.world.push((

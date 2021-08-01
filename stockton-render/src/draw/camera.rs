@@ -7,9 +7,9 @@ use stockton_types::{
     Vector3,
 };
 
+use crate::Renderer;
 
-
-
+use super::DrawPass;
 
 fn euler_to_direction(euler: &Vector3) -> Vector3 {
     let pitch = euler.x;
@@ -25,11 +25,11 @@ fn euler_to_direction(euler: &Vector3) -> Vector3 {
 
 #[system(for_each)]
 #[filter(maybe_changed::<Transform>() | maybe_changed::<CameraSettings>())]
-pub fn calc_vp_matrix(
+pub fn calc_vp_matrix<DP: DrawPass + 'static>(
     transform: &Transform,
     settings: &CameraSettings,
     matrix: &mut CameraVPMatrix,
-    #[state] ratio: &mut f32,
+    #[resource] renderer: &Renderer<DP>,
 ) {
     // Get look direction from euler angles
     let direction = euler_to_direction(&transform.rotation);
@@ -43,7 +43,12 @@ pub fn calc_vp_matrix(
 
     // Converts camera space to screen space
     let projection_matrix = {
-        let mut temp = perspective_lh_zo(*ratio, settings.fov, settings.near, settings.far);
+        let mut temp = perspective_lh_zo(
+            renderer.get_aspect_ratio(),
+            settings.fov,
+            settings.near,
+            settings.far,
+        );
 
         // Vulkan's co-ord system is different from OpenGLs
         temp[(1, 1)] *= -1.0;

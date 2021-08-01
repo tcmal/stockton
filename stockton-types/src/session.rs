@@ -11,17 +11,11 @@ pub struct Session {
 }
 
 impl Session {
-    /// Create a new world from a level.
     /// The level can be any format, as long as it has the required features of a bsp.
-    pub fn new<R: FnOnce(&mut Resources), S: FnOnce(&mut Builder)>(
-        add_resources: R,
-        add_systems: S,
-    ) -> Session {
+    pub fn new<S: FnOnce(&mut Builder)>(add_systems: S) -> Session {
         let world = World::default();
 
-        let mut resources = Resources::default();
-        add_resources(&mut resources);
-
+        let resources = Resources::default();
         let mut schedule = Schedule::builder();
         add_systems(&mut schedule);
         let schedule = schedule.build();
