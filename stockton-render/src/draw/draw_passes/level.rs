@@ -1,6 +1,6 @@
 //! Minimal code for drawing any level, based on traits from stockton-levels
 
-use super::{DrawPass, IntoDrawPass};
+use super::{util::TargetSpecificResources, DrawPass, IntoDrawPass};
 use crate::{
     draw::{
         buffers::{
@@ -69,9 +69,8 @@ pub struct LevelDrawPass<'a, M> {
     active_camera: Entity,
     draw_buffers: DrawBuffers<'a, UvPoint>,
 
-    framebuffers: Vec<FramebufferT>,
-    depth_buffers: Vec<DedicatedLoadedImage>,
-    next_resources: usize,
+    framebuffers: TargetSpecificResources<FramebufferT>,
+    depth_buffers: TargetSpecificResources<DedicatedLoadedImage>,
 
     _d: PhantomData<M>,
 }
@@ -106,9 +105,8 @@ where
         let map = map_lock.read().map_err(|_| LockPoisoned::Map)?;
 
         // Get framebuffer and depth buffer
-        let fb = &self.framebuffers[self.next_resources];
-        let db = &self.depth_buffers[self.next_resources];
-        self.next_resources = (self.next_resources + 1) % self.framebuffers.len();
+        let fb = self.framebuffers.get_next();
+        let db = self.depth_buffers.get_next();
 
         unsafe {
             cmd_buffer.begin_render_pass(
@@ -253,10 +251,10 @@ where
             let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
             self.pipeline.deactivate(&mut device);
             self.draw_buffers.deactivate(&mut device);
-            for fb in self.framebuffers.into_iter() {
+            for fb in self.framebuffers.dissolve() {
                 device.destroy_framebuffer(fb);
             }
-            for db in self.depth_buffers.into_iter() {
+            for db in self.depth_buffers.dissolve() {
                 db.deactivate(&mut device);
             }
         }
@@ -391,45 +389,43 @@ where
                 )
                 .context("Error building pipeline")?;
 
-            let mut framebuffers = Vec::with_capacity(swapchain_properties.image_count as usize);
-            let mut depth_buffers = Vec::with_capacity(swapchain_properties.image_count as usize);
-            let fat = FramebufferAttachment {
-                usage: Usage::COLOR_ATTACHMENT,
-                format: swapchain_properties.format,
-                view_caps: ViewCapabilities::empty(),
-            };
+            let fat = swapchain_properties.framebuffer_attachment();
             let dat = FramebufferAttachment {
                 usage: Usage::DEPTH_STENCIL_ATTACHMENT,
                 format: swapchain_properties.depth_format,
                 view_caps: ViewCapabilities::empty(),
             };
-            for _i in 0..swapchain_properties.image_count {
-                unsafe {
-                    framebuffers.push(device.create_framebuffer(
+            let framebuffers = TargetSpecificResources::new(
+                || unsafe {
+                    Ok(device.create_framebuffer(
                         &pipeline.renderpass,
                         IntoIter::new([fat.clone(), dat.clone()]),
                         swapchain_properties.extent,
-                    )?);
-                    depth_buffers.push(
-                        DedicatedLoadedImage::new(
-                            &mut device,
-                            adapter,
-                            swapchain_properties.depth_format,
-                            Usage::DEPTH_STENCIL_ATTACHMENT,
-                            SubresourceRange {
-                                aspects: Aspects::DEPTH,
-                                level_start: 0,
-                                level_count: Some(1),
-                                layer_start: 0,
-                                layer_count: Some(1),
-                            },
-                            swapchain_properties.extent.width as usize,
-                            swapchain_properties.extent.height as usize,
-                        )
-                        .context("Error creating depth buffer")?,
+                    )?)
+                },
+                swapchain_properties.image_count as usize,
+            )?;
+            let depth_buffers = TargetSpecificResources::new(
+                || {
+                    DedicatedLoadedImage::new(
+                        &mut device,
+                        adapter,
+                        swapchain_properties.depth_format,
+                        Usage::DEPTH_STENCIL_ATTACHMENT,
+                        SubresourceRange {
+                            aspects: Aspects::DEPTH,
+                            level_start: 0,
+                            level_count: Some(1),
+                            layer_start: 0,
+                            layer_count: Some(1),
+                        },
+                        swapchain_properties.extent.width as usize,
+                        swapchain_properties.extent.height as usize,
                     )
-                }
-            }
+                    .context("Error creating depth buffer")
+                },
+                swapchain_properties.image_count as usize,
+            )?;
 
             (draw_buffers, pipeline, framebuffers, depth_buffers)
         };
@@ -442,7 +438,6 @@ where
             _d: PhantomData,
             framebuffers,
             depth_buffers,
-            next_resources: 0,
         })
     }
 

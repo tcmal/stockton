@@ -33,21 +33,3 @@ impl<A: DrawPass, B: DrawPass> DrawPass for ConsDrawPass<A, B> {
         self.b.deactivate(device)
     }
 }
-
-/// A draw pass that does nothing. Can be used at the end of sequences if there's an odd number of draw passes.
-pub struct NilDrawPass;
-
-impl DrawPass for NilDrawPass {
-    fn queue_draw(
-        &mut self,
-        _input: &Session,
-        _img_view: &ImageViewT,
-        _cmd_buffer: &mut CommandBufferT,
-    ) -> Result<()> {
-        Ok(())
-    }
-
-    fn deactivate(self, _device: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
-        Ok(())
-    }
-}

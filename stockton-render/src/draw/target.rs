@@ -9,13 +9,16 @@ use std::{
 use hal::{
     command::CommandBufferFlags,
     format::{Aspects, ChannelType, Format, ImageFeature},
-    image::{Access, Extent, Layout, SubresourceRange, Usage as ImgUsage},
+    image::{
+        Access, Extent, FramebufferAttachment, Layout, SubresourceRange, Usage as ImgUsage,
+        ViewCapabilities,
+    },
     memory::{Barrier, Dependencies},
     pso::{PipelineStage, Viewport},
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
 
-use super::{draw_passes::DrawPass};
+use super::draw_passes::DrawPass;
 use crate::{error::EnvironmentError, types::*};
 use anyhow::{Context, Result};
 use stockton_types::Session;
@@ -106,6 +109,14 @@ impl SwapchainProperties {
                 ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
             },
         })
+    }
+
+    pub fn framebuffer_attachment(&self) -> FramebufferAttachment {
+        FramebufferAttachment {
+            usage: ImgUsage::COLOR_ATTACHMENT,
+            format: self.format,
+            view_caps: ViewCapabilities::empty(),
+        }
     }
 }
 

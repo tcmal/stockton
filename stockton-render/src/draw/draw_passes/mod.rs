@@ -9,8 +9,9 @@ use anyhow::Result;
 
 mod cons;
 mod level;
+pub mod util;
 
-pub use cons::{ConsDrawPass, NilDrawPass};
+pub use cons::ConsDrawPass;
 pub use level::LevelDrawPass;
 
 /// One of several 'passes' that draw on each frame.
