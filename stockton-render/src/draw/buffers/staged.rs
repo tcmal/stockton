@@ -1,20 +1,19 @@
 //! A buffer that can be written to by the CPU using staging memory
 
 use super::{create_buffer, ModifiableBuffer};
-use crate::{error::EnvironmentError, types::*};
+use crate::types::*;
 
 use core::mem::{size_of, ManuallyDrop};
 use std::{
     convert::TryInto,
-    iter::{empty, once},
     ops::{Index, IndexMut},
 };
 
 use anyhow::{Context, Result};
 use hal::{
     buffer::Usage,
-    memory::{Properties, Segment, SparseFlags},
-    MemoryTypeId,
+    command::BufferCopy,
+    memory::{Properties, Segment},
 };
 
 /// A GPU buffer that is written to using a staging buffer
@@ -33,9 +32,6 @@ pub struct StagedBuffer<'a, T: Sized> {
 
     /// Where staged buffer is mapped in CPU memory
     staged_mapped_memory: &'a mut [T],
-
-    /// If staged memory has been changed since last `commit`
-    staged_is_dirty: bool,
 
     /// The highest index in the buffer that's been written to.
     pub highest_used: usize,
@@ -88,7 +84,6 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
             buffer: ManuallyDrop::new(buffer),
             memory: ManuallyDrop::new(memory),
             staged_mapped_memory,
-            staged_is_dirty: false,
             highest_used: 0,
         })
     }
@@ -112,60 +107,20 @@ impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
         &self.buffer
     }
 
-    fn commit<'b>(
-        &'b mut self,
-        device: &DeviceT,
-        command_queue: &mut QueueT,
-        command_pool: &mut CommandPoolT,
-    ) -> Result<&'b BufferT> {
-        // Only commit if there's changes to commit.
-        if self.staged_is_dirty {
-            // Copy from staged to buffer
-            let buf = unsafe {
-                use hal::command::{BufferCopy, CommandBufferFlags};
-                // Get a command buffer
-                let mut buf = command_pool.allocate_one(hal::command::Level::Primary);
-
-                // Put in our copy command
-                buf.begin_primary(CommandBufferFlags::ONE_TIME_SUBMIT);
-                buf.copy_buffer(
-                    &self.staged_buffer,
-                    &self.buffer,
-                    std::iter::once(BufferCopy {
-                        src: 0,
-                        dst: 0,
-                        size: ((self.highest_used + 1) * size_of::<T>()) as u64,
-                    }),
-                );
-                buf.finish();
-
-                buf
-            };
-
-            // Submit it and wait for completion
-            // TODO: Proper management of transfer operations
-            unsafe {
-                let mut copy_finished = device.create_fence(false)?;
-                command_queue.submit(
-                    once(&buf),
-                    empty::<(&SemaphoreT, hal::pso::PipelineStage)>(),
-                    empty::<&SemaphoreT>(),
-                    Some(&mut copy_finished),
-                );
-
-                device
-                    .wait_for_fence(&copy_finished, core::u64::MAX)
-                    .context("Error waiting for fence")?;
-
-                // Destroy temporary resources
-                device.destroy_fence(copy_finished);
-                command_pool.free(once(buf));
-            }
-
-            self.staged_is_dirty = false;
+    fn record_commit_cmds(&mut self, buf: &mut CommandBufferT) -> Result<()> {
+        unsafe {
+            buf.copy_buffer(
+                &self.staged_buffer,
+                &self.buffer,
+                std::iter::once(BufferCopy {
+                    src: 0,
+                    dst: 0,
+                    size: ((self.highest_used + 1) * size_of::<T>()) as u64,
+                }),
+            );
         }
 
-        Ok(&self.buffer)
+        Ok(())
     }
 }
 
@@ -179,7 +134,6 @@ impl<'a, T: Sized> Index<usize> for StagedBuffer<'a, T> {
 
 impl<'a, T: Sized> IndexMut<usize> for StagedBuffer<'a, T> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        self.staged_is_dirty = true;
         if index > self.highest_used {
             self.highest_used = index;
         }

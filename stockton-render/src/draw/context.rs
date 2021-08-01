@@ -10,20 +10,19 @@ use std::{
 use anyhow::{Context, Result};
 use hal::pool::CommandPoolCreateFlags;
 use log::debug;
-use na::Mat4;
+
 use winit::window::Window;
 
 use super::{
-    draw_passes::{DrawPass, IntoDrawPass, LevelDrawPass},
+    draw_passes::{DrawPass, IntoDrawPass},
     queue_negotiator::{DrawQueue, QueueNegotiator},
     target::{SwapchainProperties, TargetChain},
 };
 use crate::{
     error::{EnvironmentError, LockPoisoned},
     types::*,
-    window::UiState,
 };
-use stockton_levels::prelude::*;
+
 use stockton_types::Session;
 
 /// Contains all the hal related stuff.
@@ -53,17 +52,15 @@ pub struct RenderingContext<DP> {
     /// Deals with drawing logic, and holds any data required for drawing.
     draw_pass: ManuallyDrop<DP>,
 
-    /// View projection matrix
-    pub(crate) vp_matrix: Mat4,
-
     pub(crate) pixels_per_point: f32,
 }
 
 impl<DP: DrawPass> RenderingContext<DP> {
     /// Create a new RenderingContext for the given window.
-    pub fn new<ILDP: IntoDrawPass<DP>>(
+    pub fn new<IDP: IntoDrawPass<DP>>(
         window: &Window,
-        idp: ILDP,
+        session: &Session,
+        idp: IDP,
     ) -> Result<Self> {
         // Create surface
         let (instance, surface, mut adapters) = unsafe {
@@ -97,7 +94,7 @@ impl<DP: DrawPass> RenderingContext<DP> {
 
             // Auxiliary queues for DP
             queue_families_specs.extend(
-                DP::find_aux_queues(&adapter, &mut qn)
+                IDP::find_aux_queues(&adapter, &mut qn)
                     .context("Level pass couldn't populate queue negotiator")?,
             );
 
@@ -105,7 +102,7 @@ impl<DP: DrawPass> RenderingContext<DP> {
         };
 
         // Device & Queue groups
-        let (device_lock, mut queue_groups) = {
+        let (device_lock, queue_groups) = {
             // TODO: This sucks, but hal is restrictive on how we can pass this specific argument.
             let queue_families_specs_real: Vec<_> = queue_families_specs
                 .iter()
@@ -122,16 +119,22 @@ impl<DP: DrawPass> RenderingContext<DP> {
             (Arc::new(RwLock::new(gpu.device)), gpu.queue_groups)
         };
 
+        queue_negotiator.set_queue_groups(queue_groups);
+
         // Figure out what our swapchain will look like
         let swapchain_properties = SwapchainProperties::find_best(&adapter, &surface)
             .context("Error getting properties for swapchain")?;
 
         // Draw pass
-        let dp = idp.init(
-            device_lock.clone(),
-            &mut queue_negotiator,
-            &swapchain_properties,
-        )?;
+        let dp = idp
+            .init(
+                session,
+                &adapter,
+                device_lock.clone(),
+                &mut queue_negotiator,
+                &swapchain_properties,
+            )
+            .context("Error initialising draw pass")?;
 
         // Lock device
         let mut device = device_lock
@@ -172,15 +175,13 @@ impl<DP: DrawPass> RenderingContext<DP> {
             adapter,
 
             queue: queue_negotiator
-                .get_queue::<DrawQueue>(&mut queue_groups)
+                .get_queue::<DrawQueue>()
                 .ok_or(EnvironmentError::NoQueues)
                 .context("Error getting draw queue")?,
 
             draw_pass: ManuallyDrop::new(dp),
             target_chain: ManuallyDrop::new(target_chain),
             cmd_pool: ManuallyDrop::new(cmd_pool),
-
-            vp_matrix: Mat4::identity(),
 
             // pixels_per_point: window.scale_factor() as f32,
             pixels_per_point: window.scale_factor() as f32,
@@ -237,7 +238,7 @@ impl<DP: DrawPass> RenderingContext<DP> {
 
         // Level draw pass
         self.target_chain
-            .do_draw_with(&mut device, &mut queue, &*self.draw_pass, session)
+            .do_draw_with(&mut device, &mut queue, &mut *self.draw_pass, session)
             .context("Error preparing next target")?;
 
         Ok(())

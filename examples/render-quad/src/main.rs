@@ -1,4 +1,4 @@
-//! Renders ./example.bsp
+//! Renders ./example.bsp geometry: (), texture_idx: ()  geometry: (), texture_idx: ()
 
 #[macro_use]
 extern crate stockton_input_codegen;
@@ -9,9 +9,11 @@ extern crate legion;
 use anyhow::{Context, Result};
 use log::warn;
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
+
+use std::sync::{Arc, RwLock};
+use stockton_levels::parts::data::{Geometry, Vertex};
+use stockton_levels::types::Rgba;
+use stockton_render::draw::LevelDrawPass;
 use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
 
 use egui::{containers::CentralPanel, Frame};
@@ -19,16 +21,18 @@ use stockton_contrib::delta_time::*;
 use stockton_contrib::flycam::*;
 
 use stockton_input::{Axis, InputManager, Mouse};
-use stockton_levels::prelude::*;
 
 use stockton_render::error::full_error_display;
 use stockton_render::systems::*;
 use stockton_render::{Renderer, UiState, WindowEvent};
 
-use stockton_types::components::{CameraSettings, Transform};
-use stockton_types::{Session, Vector3};
+use stockton_types::components::{CameraSettings, CameraVPMatrix, Transform};
+use stockton_types::{Session, Vector2, Vector3};
 
-type MapFile = ();
+mod level;
+use level::*;
+
+type Dp<'a> = LevelDrawPass<'a, DemoLevel>;
 
 #[derive(InputManager, Default, Clone, Debug)]
 struct MovementInputs {
@@ -69,7 +73,7 @@ fn main() {
     }
 }
 
-fn try_main() -> Result<()> {
+fn try_main<'a>() -> Result<()> {
     // Initialise logger
     simplelog::TermLogger::init(
         log::LevelFilter::Debug,
@@ -94,17 +98,36 @@ fn try_main() -> Result<()> {
     window.set_cursor_visible(false);
 
     // TODO: Parse the map file
-    let map = todo!();
+    let map = Arc::new(RwLock::new(DemoLevel {
+        faces: vec![Face {
+            geometry: Geometry::Vertices(
+                Vertex {
+                    position: Vector3::new(-128.0, 128.0, 128.0),
+                    tex: Vector2::new(0.0, 0.0),
+                    color: Rgba::from_slice(&[0, 0, 0, 1]),
+                },
+                Vertex {
+                    position: Vector3::new(-128.0, -128.0, 128.0),
+                    tex: Vector2::new(0.0, 1.0),
+                    color: Rgba::from_slice(&[0, 0, 0, 1]),
+                },
+                Vertex {
+                    position: Vector3::new(128.0, 128.0, 128.0),
+                    tex: Vector2::new(1.0, 0.0),
+                    color: Rgba::from_slice(&[0, 0, 0, 1]),
+                },
+            ),
+            texture_idx: 0,
+        }]
+        .into_boxed_slice(),
+        textures: vec![Texture {
+            name: "example_texture".to_string(),
+        }]
+        .into_boxed_slice(),
+    }));
 
     // Create the UI State
     let mut ui = UiState::new();
-
-    // Create the renderer
-    let (renderer, tx) = Renderer::new(&window)?;
-    let new_control_flow = renderer.update_control_flow.clone();
-
-    // Populate the initial UI state
-    ui.populate_initial_state(&renderer);
 
     // Create the input manager
     let manager = {
@@ -123,10 +146,11 @@ fn try_main() -> Result<()> {
         MovementInputsManager::new(actions)
     };
 
+    let ratio = window.inner_size().width as f32 / window.inner_size().height as f32;
+
     // Load everything into the session
     let mut session = Session::new(
         move |resources| {
-            resources.insert(ui);
             resources.insert(map);
             resources.insert(manager);
             resources.insert(Timing::default());
@@ -135,16 +159,20 @@ fn try_main() -> Result<()> {
         move |schedule| {
             schedule
                 .add_system(update_deltatime_system())
-                .add_system(process_window_events_system::<MovementInputsManager, MapFile>())
+                .add_system(process_window_events_system::<
+                    MovementInputsManager,
+                    Dp<'static>,
+                >())
                 .flush()
                 .add_system(hello_world_system())
                 .add_system(flycam_move_system::<MovementInputsManager>())
-                .flush();
+                .flush()
+                .add_thread_local(calc_vp_matrix_system(ratio));
         },
     );
 
     // Add our player entity
-    let _player = session.world.push((
+    let player = session.world.push((
         Transform {
             position: Vector3::new(0.0, 0.0, 0.0),
             rotation: Vector3::new(0.0, 0.0, 0.0),
@@ -154,8 +182,19 @@ fn try_main() -> Result<()> {
             fov: 90.0,
             near: 0.1,
         },
+        CameraVPMatrix::default(),
         FlycamControlled::new(512.0, 400.0),
     ));
+
+    // Create the renderer
+    let (renderer, tx): (Renderer<Dp<'static>>, _) = Renderer::new(&window, &session, player)?;
+    let new_control_flow = renderer.update_control_flow.clone();
+
+    // Populate the initial UI state
+    ui.populate_initial_state(&renderer);
+
+    session.resources.insert(renderer);
+    session.resources.insert(ui);
 
     // Done loading - This is our main loop.
     // It just communicates events to the session and continuously ticks
@@ -164,7 +203,14 @@ fn try_main() -> Result<()> {
             Event::MainEventsCleared => {
                 window.request_redraw();
             }
-            Event::RedrawRequested(_) => session.do_update(),
+            Event::RedrawRequested(_) => {
+                session.do_update();
+                let mut renderer = session
+                    .resources
+                    .get_mut::<Renderer<Dp<'static>>>()
+                    .unwrap();
+                renderer.render(&session).unwrap();
+            }
             _ => {
                 if let Some(we) = WindowEvent::from(&event) {
                     tx.send(we).unwrap()

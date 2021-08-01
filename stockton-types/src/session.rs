@@ -6,7 +6,7 @@ use legion::*;
 /// A loaded world.
 pub struct Session {
     pub world: World,
-    resources: Resources,
+    pub resources: Resources,
     schedule: Schedule,
 }
 

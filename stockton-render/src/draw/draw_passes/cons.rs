@@ -1,8 +1,10 @@
 //! Code for using multiple draw passes in place of just one
 //! Note that this can be extended to an arbitrary amount of draw passes.
 
+use std::sync::{Arc, RwLock};
+
 use super::DrawPass;
-use crate::{draw::queue_negotiator::QueueNegotiator, types::*};
+use crate::types::*;
 use stockton_types::Session;
 
 use anyhow::Result;
@@ -14,23 +16,21 @@ pub struct ConsDrawPass<A: DrawPass, B: DrawPass> {
 }
 
 impl<A: DrawPass, B: DrawPass> DrawPass for ConsDrawPass<A, B> {
-    fn queue_draw(&self, session: &Session, cmd_buffer: &mut CommandBufferT) -> Result<()> {
-        self.a.queue_draw(&session, cmd_buffer)?;
-        self.b.queue_draw(&session, cmd_buffer)?;
+    fn queue_draw(
+        &mut self,
+        session: &Session,
+        img_view: &ImageViewT,
+        cmd_buffer: &mut CommandBufferT,
+    ) -> Result<()> {
+        self.a.queue_draw(session, img_view, cmd_buffer)?;
+        self.b.queue_draw(session, img_view, cmd_buffer)?;
 
         Ok(())
     }
 
-    fn find_aux_queues<'a>(
-        adapter: &'a Adapter,
-        queue_negotiator: &mut QueueNegotiator,
-    ) -> Result<Vec<(&'a QueueFamilyT, Vec<f32>)>> {
-        let mut vec = Vec::new();
-
-        vec.extend(A::find_aux_queues(adapter, queue_negotiator)?);
-        vec.extend(B::find_aux_queues(adapter, queue_negotiator)?);
-
-        Ok(vec)
+    fn deactivate(self, device: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
+        self.a.deactivate(device)?;
+        self.b.deactivate(device)
     }
 }
 
@@ -38,15 +38,16 @@ impl<A: DrawPass, B: DrawPass> DrawPass for ConsDrawPass<A, B> {
 pub struct NilDrawPass;
 
 impl DrawPass for NilDrawPass {
-
-    fn queue_draw(&self, _input: &Session, _cmd_buffer: &mut CommandBufferT) -> Result<()> {
+    fn queue_draw(
+        &mut self,
+        _input: &Session,
+        _img_view: &ImageViewT,
+        _cmd_buffer: &mut CommandBufferT,
+    ) -> Result<()> {
         Ok(())
     }
 
-    fn find_aux_queues<'a>(
-        _adapter: &'a Adapter,
-        _queue_negotiator: &mut QueueNegotiator,
-    ) -> Result<Vec<(&'a QueueFamilyT, Vec<f32>)>> {
-        Ok(vec![])
+    fn deactivate(self, _device: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
+        Ok(())
     }
 }

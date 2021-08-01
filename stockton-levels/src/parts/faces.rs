@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 pub type FaceRef = u32;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Geometry {
     Vertices(Vertex, Vertex, Vertex),
 }

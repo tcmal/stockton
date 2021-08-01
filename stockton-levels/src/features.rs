@@ -14,5 +14,8 @@
 
 use crate::parts::*;
 
-pub trait MinRenderFeatures: HasFaces + HasTextures + Send + Sync {}
-impl<T> MinRenderFeatures for T where T: HasFaces + HasTextures + Send + Sync {}
+pub trait MinRenderFeatures<'a>: HasFaces + HasTextures + HasVisData<'a> + Send + Sync {}
+impl<'a, T> MinRenderFeatures<'a> for T where
+    T: HasFaces + HasTextures + HasVisData<'a> + Send + Sync
+{
+}

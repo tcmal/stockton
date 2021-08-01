@@ -4,7 +4,6 @@ use crate::draw::texture::image::LoadableImage;
 use stockton_levels::{parts::IsTexture, prelude::HasTextures};
 
 use std::{
-    mem::drop,
     path::Path,
     sync::{Arc, RwLock},
 };
@@ -39,8 +38,8 @@ impl<'a, T: HasTextures> TextureResolver for FsResolver<'a, T> {
         let tex = map.get_texture(tex)?;
         let path = self.path.join(&tex.name());
 
-        drop(tex);
-        drop(map);
+        // drop(tex);
+        // drop(map);
 
         if let Ok(file) = Reader::open(path) {
             if let Ok(guessed) = file.with_guessed_format() {
@@ -50,6 +49,7 @@ impl<'a, T: HasTextures> TextureResolver for FsResolver<'a, T> {
             }
         }
 
+        log::warn!("Couldn't resolve texture {:?}", tex.name());
         None
     }
 }

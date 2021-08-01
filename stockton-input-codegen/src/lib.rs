@@ -29,13 +29,13 @@ pub fn derive_inputmanager(input: TokenStream) -> TokenStream {
     let fields_enum = gen_fields_enum(&fields_enum_ident, &caps_buttons, &caps_axes);
     let manager_struct = gen_manager_struct(
         &manager_ident,
-        &struct_ident,
+        struct_ident,
         &fields_enum_ident,
         buttons.len(),
     );
     let trait_impl = gen_trait_impl(
         &manager_ident,
-        &struct_ident,
+        struct_ident,
         &fields_enum_ident,
         &buttons,
         &axes,
@@ -233,9 +233,9 @@ fn gen_trait_impl(
     buttons_caps: &[Ident],
     axes_caps: &[Ident],
 ) -> TokenStream2 {
-    let just_hot_resets = gen_just_hot_resets(&buttons);
+    let just_hot_resets = gen_just_hot_resets(buttons);
     let field_match_modify =
-        gen_field_mutation(&buttons, &axes, &buttons_caps, &axes_caps, &fields_enum);
+        gen_field_mutation(buttons, axes, buttons_caps, axes_caps, fields_enum);
 
     quote!(
         impl InputManager for #manager {
@@ -305,8 +305,8 @@ fn gen_field_mutation(
 ) -> TokenStream2 {
     let arms = {
         let mut btn_arms: Vec<TokenStream2> =
-            gen_mutate_match_arms_buttons(buttons, &buttons_caps, fields_enum_ident);
-        let mut axes_arms = gen_mutate_match_arms_axes(axes, &axes_caps, fields_enum_ident);
+            gen_mutate_match_arms_buttons(buttons, buttons_caps, fields_enum_ident);
+        let mut axes_arms = gen_mutate_match_arms_axes(axes, axes_caps, fields_enum_ident);
 
         btn_arms.append(&mut axes_arms);
 

@@ -1,19 +1,21 @@
 //! Resources needed for drawing on the screen, including sync objects
 
 use std::{
+    borrow::Borrow,
     iter::{empty, once},
     mem::ManuallyDrop,
 };
 
 use hal::{
     command::CommandBufferFlags,
-    format::{ChannelType, Format, ImageFeature},
-    image::{Extent, Usage as ImgUsage},
-    pso::Viewport,
+    format::{Aspects, ChannelType, Format, ImageFeature},
+    image::{Access, Extent, Layout, SubresourceRange, Usage as ImgUsage},
+    memory::{Barrier, Dependencies},
+    pso::{PipelineStage, Viewport},
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
 
-use super::{buffers::DedicatedLoadedImage, draw_passes::DrawPass};
+use super::{draw_passes::DrawPass};
 use crate::{error::EnvironmentError, types::*};
 use anyhow::{Context, Result};
 use stockton_types::Session;
@@ -26,6 +28,7 @@ pub struct SwapchainProperties {
     pub composite_alpha_mode: CompositeAlphaMode,
     pub viewport: Viewport,
     pub extent: Extent,
+    pub image_count: u32,
 }
 
 impl SwapchainProperties {
@@ -97,6 +100,11 @@ impl SwapchainProperties {
             composite_alpha_mode,
             extent,
             viewport,
+            image_count: if present_mode == PresentMode::MAILBOX {
+                ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(3))
+            } else {
+                ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
+            },
         })
     }
 }
@@ -104,11 +112,7 @@ impl SwapchainProperties {
 pub struct TargetChain {
     /// Surface we're targeting
     pub surface: ManuallyDrop<SurfaceT>,
-
     pub properties: SwapchainProperties,
-
-    /// The depth buffer/image used for drawing
-    pub depth_buffer: ManuallyDrop<DedicatedLoadedImage>,
 
     /// Resources tied to each target frame in the swapchain
     pub targets: Box<[TargetResources]>,
@@ -155,28 +159,6 @@ impl TargetChain {
             image_usage: ImgUsage::COLOR_ATTACHMENT,
         };
 
-        let depth_buffer = {
-            use hal::format::Aspects;
-            use hal::image::SubresourceRange;
-
-            DedicatedLoadedImage::new(
-                device,
-                adapter,
-                properties.depth_format,
-                ImgUsage::DEPTH_STENCIL_ATTACHMENT,
-                SubresourceRange {
-                    aspects: Aspects::DEPTH,
-                    level_start: 0,
-                    level_count: Some(1),
-                    layer_start: 0,
-                    layer_count: Some(1),
-                },
-                properties.extent.width as usize,
-                properties.extent.height as usize,
-            )
-            .context("Error creating depth buffer")?
-        };
-
         let _fat = swap_config.framebuffer_attachment();
         let mut targets: Vec<TargetResources> =
             Vec::with_capacity(swap_config.image_count as usize);
@@ -203,7 +185,6 @@ impl TargetChain {
             surface: ManuallyDrop::new(surface),
             targets: targets.into_boxed_slice(),
             sync_objects: sync_objects.into_boxed_slice(),
-            depth_buffer: ManuallyDrop::new(depth_buffer),
             properties,
             last_syncs: (image_count - 1) as usize, // This means the next one to be used is index 0
             last_image: 0,
@@ -230,8 +211,6 @@ impl TargetChain {
     ) -> SurfaceT {
         use core::ptr::read;
         unsafe {
-            ManuallyDrop::into_inner(read(&self.depth_buffer)).deactivate(device);
-
             for i in 0..self.targets.len() {
                 read(&self.targets[i]).deactivate(device, cmd_pool);
             }
@@ -250,7 +229,7 @@ impl TargetChain {
         &'a mut self,
         device: &mut DeviceT,
         command_queue: &mut QueueT,
-        dp: &DP,
+        dp: &mut DP,
         session: &Session,
     ) -> Result<()> {
         self.last_syncs = (self.last_syncs + 1) % self.sync_objects.len();
@@ -280,8 +259,44 @@ impl TargetChain {
         unsafe {
             target.cmd_buffer.begin_primary(CommandBufferFlags::empty());
 
-            dp.queue_draw(session, &mut target.cmd_buffer)
+            target.cmd_buffer.pipeline_barrier(
+                PipelineStage::TOP_OF_PIPE..PipelineStage::TOP_OF_PIPE,
+                Dependencies::empty(),
+                once(Barrier::Image {
+                    states: (Access::empty(), Layout::Undefined)
+                        ..(Access::empty(), Layout::ColorAttachmentOptimal),
+                    target: img.borrow(),
+                    range: SubresourceRange {
+                        aspects: Aspects::COLOR,
+                        level_start: 0,
+                        level_count: Some(1),
+                        layer_start: 0,
+                        layer_count: Some(1),
+                    },
+                    families: None,
+                }),
+            );
+
+            dp.queue_draw(session, img.borrow(), &mut target.cmd_buffer)
                 .context("Error in draw pass")?;
+
+            target.cmd_buffer.pipeline_barrier(
+                PipelineStage::BOTTOM_OF_PIPE..PipelineStage::BOTTOM_OF_PIPE,
+                Dependencies::empty(),
+                once(Barrier::Image {
+                    states: (Access::empty(), Layout::ColorAttachmentOptimal)
+                        ..(Access::empty(), Layout::Present),
+                    target: img.borrow(),
+                    range: SubresourceRange {
+                        aspects: Aspects::COLOR,
+                        level_start: 0,
+                        level_count: Some(1),
+                        layer_start: 0,
+                        layer_count: Some(1),
+                    },
+                    families: None,
+                }),
+            );
 
             target.cmd_buffer.finish();
         }

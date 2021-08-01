@@ -8,6 +8,6 @@ members = [
     "stockton-contrib",
     "rendy-memory",
     "rendy-descriptor",
-    "examples/render-bsp",
+    "examples/render-quad",
     "examples/input-codegen",
 ]

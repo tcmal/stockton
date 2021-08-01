@@ -22,6 +22,7 @@ rendy-memory = { path = "../rendy-memory" }
 rendy-descriptor = { path = "../rendy-descriptor" }
 anyhow = "1.0.40"
 thiserror = "1.0.25"
+derive_builder = "0.10.2"
 
 [features]
 default = ["vulkan"]

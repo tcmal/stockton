@@ -1,8 +1,8 @@
-use crate::{error::full_error_display, Renderer, DrawPass};
+use crate::{error::full_error_display, DrawPass, Renderer};
 use egui::{Modifiers, Rect, Vec2};
 use legion::systems::Runnable;
 use log::debug;
-use stockton_levels::prelude::MinRenderFeatures;
+
 
 use egui::{CtxRef, Event, Output, Pos2, RawInput};
 use epaint::ClippedShape;
@@ -93,7 +93,7 @@ impl UiState {
         }
     }
 
-    pub fn populate_initial_state<T: MinRenderFeatures>(&mut self, renderer: &Renderer<T>) {
+    pub fn populate_initial_state<'a, T: DrawPass>(&mut self, renderer: &Renderer<T>) {
         let props = &renderer.context.target_chain.properties;
         self.set_dimensions(props.extent.width, props.extent.height);
         self.set_pixels_per_point(Some(renderer.context.pixels_per_point));

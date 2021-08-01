@@ -7,4 +7,3 @@ edition = "2018"
 [dependencies]
 nalgebra-glm = "^0.6"
 legion = { version = "^0.3" }
-stockton-levels = { path = "../stockton-levels" }

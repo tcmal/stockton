@@ -3,7 +3,8 @@
 pub mod target;
 
 mod buffers;
-mod camera;
+mod builders;
+pub mod camera;
 mod context;
 pub mod draw_passes;
 mod queue_negotiator;

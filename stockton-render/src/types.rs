@@ -25,6 +25,7 @@ pub type FramebufferT = <back::Backend as hal::Backend>::Framebuffer;
 pub type RenderPassT = <back::Backend as hal::Backend>::RenderPass;
 
 pub type Adapter = hal::adapter::Adapter<back::Backend>;
+pub type EntryPoint<'a> = hal::pso::EntryPoint<'a, back::Backend>;
 pub type QueueGroup = hal::queue::QueueGroup<back::Backend>;
 
 pub type DescriptorAllocator = rendy_descriptor::DescriptorAllocator<back::Backend>;

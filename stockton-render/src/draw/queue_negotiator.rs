@@ -12,6 +12,7 @@ use std::{
 pub struct QueueNegotiator {
     family_ids: HashMap<TypeId, QueueFamilyId>,
     already_allocated: HashMap<TypeId, (Vec<Arc<RwLock<QueueT>>>, usize)>,
+    all: Vec<QueueGroup>,
 }
 
 /// Can be used to select a specific queue family
@@ -25,6 +26,7 @@ impl QueueNegotiator {
         QueueNegotiator {
             family_ids: HashMap::new(),
             already_allocated: HashMap::new(),
+            all: vec![],
         }
     }
 
@@ -57,20 +59,23 @@ impl QueueNegotiator {
         Ok(())
     }
 
-    pub fn get_queue<T: QueueFamilySelector>(
-        &mut self,
-        groups: &mut Vec<QueueGroup>,
-    ) -> Option<Arc<RwLock<QueueT>>> {
+    pub fn set_queue_groups(&mut self, queue_groups: Vec<QueueGroup>) {
+        self.all = queue_groups
+    }
+
+    pub fn get_queue<T: QueueFamilySelector>(&mut self) -> Option<Arc<RwLock<QueueT>>> {
         let tid = TypeId::of::<T>();
         let family_id = self.family_ids.get(&tid)?;
-
-        match groups
+        log::debug!("{:?}", self.all);
+        log::debug!("{:?}", self.already_allocated);
+        match self
+            .all
             .iter()
             .position(|x| !x.queues.is_empty() && x.family == *family_id)
         {
             Some(idx) => {
                 // At least one remaining queue
-                let queue = groups[idx].queues.pop().unwrap();
+                let queue = self.all[idx].queues.pop().unwrap();
                 let queue = Arc::new(RwLock::new(queue));
 
                 self.add_to_allocated::<T>(queue.clone());

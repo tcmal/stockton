@@ -2,18 +2,57 @@
 
 use super::{DrawPass, IntoDrawPass};
 use crate::{
-    draw::{queue_negotiator::QueueNegotiator, target::SwapchainProperties, texture::TextureRepo},
-    error::EnvironmentError,
+    draw::{
+        buffers::{
+            draw_buffers::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
+            DedicatedLoadedImage, ModifiableBuffer,
+        },
+        builders::{
+            pipeline::{
+                CompletePipeline, PipelineSpecBuilder, VertexBufferSpec,
+                VertexPrimitiveAssemblerSpec,
+            },
+            renderpass::RenderpassSpec,
+            shader::ShaderDesc,
+        },
+        queue_negotiator::QueueNegotiator,
+        target::SwapchainProperties,
+        texture::{resolver::FsResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
+    },
+    error::{EnvironmentError, LevelError, LockPoisoned},
     types::*,
 };
-use stockton_levels::features::MinRenderFeatures;
-use stockton_types::*;
+use hal::{
+    buffer::SubRange,
+    command::{ClearColor, ClearDepthStencil, ClearValue, RenderAttachmentInfo, SubpassContents},
+    format::{Aspects, Format},
+    image::{
+        Filter, FramebufferAttachment, Layout, SubresourceRange, Usage, ViewCapabilities, WrapMode,
+    },
+    pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
+    pso::{
+        BlendDesc, BlendOp, BlendState, ColorBlendDesc, ColorMask, Comparison, DepthStencilDesc,
+        DepthTest, Face, Factor, FrontFace, InputAssemblerDesc, LogicOp, PolygonMode, Primitive,
+        Rasterizer, ShaderStageFlags, State, VertexInputRate,
+    },
+};
+use legion::{Entity, IntoQuery};
+use shaderc::ShaderKind;
+use stockton_levels::{
+    features::MinRenderFeatures,
+    parts::{data::Geometry, IsFace},
+};
+use stockton_types::{
+    components::{CameraSettings, CameraVPMatrix, Transform},
+    *,
+};
 
 use std::{
     array::IntoIter,
+    convert::TryInto,
     iter::{empty, once},
     marker::PhantomData,
-    mem::{size_of, ManuallyDrop},
+    path::Path,
     sync::{Arc, RwLock},
 };
 
@@ -24,435 +63,398 @@ use anyhow::{Context, Result};
 struct UvPoint(pub Vector3, pub i32, pub Vector2);
 
 /// Draw a level
-pub struct LevelDrawPass<M: MinRenderFeatures> {
+pub struct LevelDrawPass<'a, M> {
     pipeline: CompletePipeline,
     repo: TextureRepo,
+    active_camera: Entity,
+    draw_buffers: DrawBuffers<'a, UvPoint>,
+
+    framebuffers: Vec<FramebufferT>,
+    depth_buffers: Vec<DedicatedLoadedImage>,
+    next_resources: usize,
+
     _d: PhantomData<M>,
 }
 
-impl<M: MinRenderFeatures> DrawPass for LevelDrawPass<M> {
+impl<'a, M> DrawPass for LevelDrawPass<'a, M>
+where
+    M: for<'b> MinRenderFeatures<'b> + 'static,
+{
     fn queue_draw(
-        &self,
-        _input: &Session,
-        _cmd_buffer: &mut crate::types::CommandBufferT,
+        &mut self,
+        session: &Session,
+        img_view: &ImageViewT,
+        cmd_buffer: &mut crate::types::CommandBufferT,
     ) -> anyhow::Result<()> {
-        todo!()
-        // // Get visible faces
-        // // let faces = get_visible_faces(
-        // //     pos,
-        // //     &*self
-        // //         .context
-        // //         .map
-        // //         .read()
-        // //         .map_err(|_| LockPoisoned::Map)
-        // //         .context("Error getting read lock on map")?,
-        // // );
-        // let faces: Vec<u32> = {
-        //     let map = &*self
-        //         .context
-        //         .map
-        //         .read()
-        //         .map_err(|_| LockPoisoned::Map)
-        //         .context("Error getting read lock on map")?;
+        // We might have loaded more textures
+        self.repo.process_responses();
 
-        //     map.iter_faces().map(|x| x.index(map)).collect()
-        // };
+        // Make sure we update the vertex buffers after they're written to, but before they're read from.
+        self.draw_buffers
+            .vertex_buffer
+            .record_commit_cmds(cmd_buffer)?;
+        self.draw_buffers
+            .index_buffer
+            .record_commit_cmds(cmd_buffer)?;
 
-        // // Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
-        // let mut current_chunk = file
-        //     .get_face(0)
-        //     .ok_or(LevelError::BadReference)?
-        //     .texture_idx(file) as usize
-        //     / 8;
-        // let mut chunk_start = 0;
+        // Get level & camera
+        let mut query = <(&Transform, &CameraSettings, &CameraVPMatrix)>::query();
+        let (camera_transform, camera_settings, camera_vp) = query
+            .get(&session.world, self.active_camera)
+            .context("Couldn't find camera components")?;
+        let map_lock: Arc<RwLock<M>> = session.resources.get::<Arc<RwLock<M>>>().unwrap().clone();
+        let map = map_lock.read().map_err(|_| LockPoisoned::Map)?;
 
-        // let mut curr_vert_idx: usize = 0;
-        // let mut curr_idx_idx: usize = 0;
+        // Get framebuffer and depth buffer
+        let fb = &self.framebuffers[self.next_resources];
+        let db = &self.depth_buffers[self.next_resources];
+        self.next_resources = (self.next_resources + 1) % self.framebuffers.len();
 
-        // for face in faces.iter().map(|idx| file.get_face(*idx)) {
-        //     if let Some(face) = face {
-        //         if current_chunk != face.texture_idx(file) as usize / 8 {
-        //             // Last index was last of group, so draw it all if textures are loaded.
-        //             draw_or_queue(
-        //                 current_chunk,
-        //                 self.tex_repo,
-        //                 cmd_buffer,
-        //                 self.pipeline.pipeline_layout,
-        //                 chunk_start as u32,
-        //                 curr_idx_idx as u32,
-        //             )?;
+        unsafe {
+            cmd_buffer.begin_render_pass(
+                &self.pipeline.renderpass,
+                fb,
+                self.pipeline.render_area,
+                vec![
+                    RenderAttachmentInfo {
+                        image_view: img_view,
+                        clear_value: ClearValue {
+                            color: ClearColor {
+                                float32: [0.0, 0.0, 0.0, 1.0],
+                            },
+                        },
+                    },
+                    RenderAttachmentInfo {
+                        image_view: &*db.image_view,
+                        clear_value: ClearValue {
+                            depth_stencil: ClearDepthStencil {
+                                depth: 1.0,
+                                stencil: 0,
+                            },
+                        },
+                    },
+                ]
+                .into_iter(),
+                SubpassContents::Inline,
+            );
+            cmd_buffer.bind_graphics_pipeline(&self.pipeline.pipeline);
 
-        //             // Next group of same-chunked faces starts here.
-        //             chunk_start = curr_idx_idx;
-        //             current_chunk = face.texture_idx(file) as usize / 8;
-        //         }
+            // VP Matrix
+            let vp = &*(camera_vp.vp_matrix.data.as_slice() as *const [f32] as *const [u32]);
 
-        //         match face.geometry(file) {
-        //             Geometry::Vertices(v1, v2, v3) => {
-        //                 for v in [v1, v2, v3] {
-        //                     let uvp =
-        //                         UvPoint(v.position, face.texture_idx(file).try_into()?, v.tex);
+            cmd_buffer.push_graphics_constants(
+                &self.pipeline.pipeline_layout,
+                ShaderStageFlags::VERTEX,
+                0,
+                vp,
+            );
 
-        //                     draw_buffers.vertex_buffer[curr_vert_idx] = uvp;
-        //                     curr_vert_idx += 1;
-        //                 }
-        //                 draw_buffers.index_buffer[curr_idx_idx] = (
-        //                     curr_vert_idx as u16 - 2,
-        //                     curr_vert_idx as u16 - 1,
-        //                     curr_vert_idx as u16,
-        //                 );
-        //                 curr_idx_idx += 1;
-        //             }
-        //         }
+            // Bind buffers
+            cmd_buffer.bind_vertex_buffers(
+                0,
+                once((
+                    self.draw_buffers.vertex_buffer.get_buffer(),
+                    SubRange {
+                        offset: 0,
+                        size: None,
+                    },
+                )),
+            );
+            cmd_buffer.bind_index_buffer(
+                self.draw_buffers.index_buffer.get_buffer(),
+                SubRange {
+                    offset: 0,
+                    size: None,
+                },
+                hal::IndexType::U16,
+            );
+        }
 
-        //         if curr_vert_idx >= INITIAL_VERT_SIZE.try_into()?
-        //             || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into()?
-        //         {
-        //             println!("out of vertex buffer space!");
-        //             break;
-        //         }
-        //     } else {
-        //         anyhow::bail!(LevelError::BadReference);
-        //     }
-        // }
+        // Get visible faces
+        let mut faces = map.get_visible(camera_transform, camera_settings);
 
-        // // Draw the final group of chunks
-        // draw_or_queue(
-        //     current_chunk,
-        //     self.tex_repo,
-        //     cmd_buffer,
-        //     self.pipeline.pipeline_layout,
-        //     chunk_start as u32,
-        //     curr_idx_idx as u32,
-        // )?;
+        // Iterate over faces, copying them in and drawing groups that use the same texture chunk all at once.
+        let face = faces.next();
+        if let Some(face) = face {
+            let mut face = map.get_face(face).ok_or(LevelError::BadReference)?;
+            let mut current_chunk = face.texture_idx(&map) as usize / 8;
+            let mut chunk_start = 0;
 
-        // Ok(())
+            let mut curr_vert_idx: usize = 0;
+            let mut curr_idx_idx: usize = 0;
+            loop {
+                if current_chunk != face.texture_idx(&map) as usize / 8 {
+                    // Last index was last of group, so draw it all if textures are loaded.
+                    draw_or_queue(
+                        current_chunk,
+                        &mut self.repo,
+                        cmd_buffer,
+                        &*self.pipeline.pipeline_layout,
+                        chunk_start as u32,
+                        curr_idx_idx as u32,
+                    )?;
+
+                    // Next group of same-chunked faces starts here.
+                    chunk_start = curr_idx_idx;
+                    current_chunk = face.texture_idx(&map) as usize / 8;
+                }
+
+                match face.geometry(&map) {
+                    Geometry::Vertices(v1, v2, v3) => {
+                        for v in [v1, v2, v3] {
+                            let uvp =
+                                UvPoint(v.position, face.texture_idx(&map).try_into()?, v.tex);
+
+                            self.draw_buffers.vertex_buffer[curr_vert_idx] = uvp;
+                            curr_vert_idx += 1;
+                        }
+                        self.draw_buffers.index_buffer[curr_idx_idx] = (
+                            curr_vert_idx as u16 - 3,
+                            curr_vert_idx as u16 - 2,
+                            curr_vert_idx as u16 - 1,
+                        );
+                        curr_idx_idx += 1;
+                    }
+                }
+
+                if curr_vert_idx >= INITIAL_VERT_SIZE.try_into()?
+                    || curr_idx_idx >= INITIAL_INDEX_SIZE.try_into()?
+                {
+                    println!("out of vertex buffer space!");
+                    break;
+                }
+
+                match faces.next() {
+                    Some(x) => face = map.get_face(x).ok_or(LevelError::BadReference)?,
+                    None => break,
+                };
+            }
+
+            // Draw the final group of chunks
+            draw_or_queue(
+                current_chunk,
+                &mut self.repo,
+                cmd_buffer,
+                &*self.pipeline.pipeline_layout,
+                chunk_start as u32,
+                curr_idx_idx as u32,
+            )?;
+        }
+
+        unsafe {
+            cmd_buffer.end_render_pass();
+        }
+
+        Ok(())
     }
 
-    fn find_aux_queues<'a>(
-        _adapter: &'a Adapter,
-        _queue_negotiator: &mut QueueNegotiator,
-    ) -> Result<Vec<(&'a QueueFamilyT, Vec<f32>)>> {
-        todo!()
-        // queue_negotiator.find(TexLoadQueue)
+    fn deactivate(self, device_lock: &mut Arc<RwLock<DeviceT>>) -> Result<()> {
+        unsafe {
+            let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
+            self.pipeline.deactivate(&mut device);
+            self.draw_buffers.deactivate(&mut device);
+            for fb in self.framebuffers.into_iter() {
+                device.destroy_framebuffer(fb);
+            }
+            for db in self.depth_buffers.into_iter() {
+                db.deactivate(&mut device);
+            }
+        }
+        self.repo.deactivate(device_lock);
+
+        Ok(())
     }
 }
 
-impl<M: MinRenderFeatures> IntoDrawPass<LevelDrawPass<M>> for () {
+impl<'a, M> IntoDrawPass<LevelDrawPass<'a, M>> for Entity
+where
+    M: for<'b> MinRenderFeatures<'b> + 'static,
+{
     fn init(
         self,
-        _device_lock: Arc<RwLock<DeviceT>>,
-        _queue_negotiator: &mut QueueNegotiator,
-        _swapchain_properties: &SwapchainProperties,
-    ) -> Result<LevelDrawPass<M>> {
-        todo!()
-        // let repo = TextureRepo::new(
-        //     device_lock.clone(),
-        //     queue_negotiator
-        //         .family()
-        //         .ok_or(EnvironmentError::NoQueues)?,
-        // );
-        // let pipeline = {
-        //     let device = device_lock.write().or(Err(LockPoisoned::Device))?;
-        //     CompletePipeline::new(
-        //         device,
-        //         swapchain_properties.extent,
-        //         swapchain_properties,
-        //         std::iter::empty(),
-        //     )?
-        // };
-        // Ok(LevelDrawPass {
-        //     pipeline,
-        //     repo,
-        //     _d: PhantomData,
-        // })
-    }
-}
-
-/// Entry point name for shaders
-const ENTRY_NAME: &str = "main";
-
-/// Source for vertex shader. TODO
-const VERTEX_SOURCE: &str = include_str!("../data/stockton.vert");
-
-/// Source for fragment shader. TODO
-const FRAGMENT_SOURCE: &str = include_str!("../data/stockton.frag");
-
-/// A complete graphics pipeline and associated resources
-pub struct CompletePipeline {
-    /// Our main render pass
-    pub(crate) renderpass: ManuallyDrop<RenderPassT>,
-
-    /// The layout of our main graphics pipeline
-    pub(crate) pipeline_layout: ManuallyDrop<PipelineLayoutT>,
-
-    /// Our main graphics pipeline
-    pub(crate) pipeline: ManuallyDrop<GraphicsPipelineT>,
-
-    /// The vertex shader module
-    pub(crate) vs_module: ManuallyDrop<ShaderModuleT>,
-
-    /// The fragment shader module
-    pub(crate) fs_module: ManuallyDrop<ShaderModuleT>,
-}
-
-impl CompletePipeline {
-    pub fn new<'a, T: Iterator<Item = &'a DescriptorSetLayoutT> + std::fmt::Debug>(
-        device: &mut DeviceT,
-        extent: hal::image::Extent,
+        session: &Session,
+        adapter: &Adapter,
+        device_lock: Arc<RwLock<DeviceT>>,
+        queue_negotiator: &mut QueueNegotiator,
         swapchain_properties: &SwapchainProperties,
-        set_layouts: T,
-    ) -> Result<Self> {
-        use hal::format::Format;
-        use hal::pso::*;
-
-        // Renderpass
-        let renderpass = {
-            use hal::{image::Layout, pass::*};
-
-            let img_attachment = Attachment {
-                format: Some(swapchain_properties.format),
-                samples: 1,
-                ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
-                stencil_ops: AttachmentOps::new(
-                    AttachmentLoadOp::Clear,
-                    AttachmentStoreOp::DontCare,
-                ),
-                layouts: Layout::Undefined..Layout::ColorAttachmentOptimal,
-            };
-
-            let depth_attachment = Attachment {
-                format: Some(swapchain_properties.depth_format),
-                samples: 1,
-                ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
-                stencil_ops: AttachmentOps::new(
-                    AttachmentLoadOp::DontCare,
-                    AttachmentStoreOp::DontCare,
-                ),
-                layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
-            };
-
-            let subpass = SubpassDesc {
-                colors: &[(0, Layout::ColorAttachmentOptimal)],
-                depth_stencil: Some(&(1, Layout::DepthStencilAttachmentOptimal)),
-                inputs: &[],
-                resolves: &[],
-                preserves: &[],
-            };
-
-            unsafe {
-                device.create_render_pass(
-                    IntoIter::new([img_attachment, depth_attachment]),
-                    once(subpass),
-                    empty(),
-                )
-            }
-            .context("Error creating render pass")?
-        };
-
-        // Subpass
-        let subpass = hal::pass::Subpass {
-            index: 0,
-            main_pass: &renderpass,
-        };
-
-        // Shader modules
-        let (vs_module, fs_module) = {
-            let mut compiler = shaderc::Compiler::new().ok_or(EnvironmentError::NoShaderC)?;
-
-            let vertex_compile_artifact = compiler
-                .compile_into_spirv(
-                    VERTEX_SOURCE,
-                    shaderc::ShaderKind::Vertex,
-                    "vertex.vert",
-                    ENTRY_NAME,
-                    None,
-                )
-                .context("Error compiling vertex shader")?;
-
-            let fragment_compile_artifact = compiler
-                .compile_into_spirv(
-                    FRAGMENT_SOURCE,
-                    shaderc::ShaderKind::Fragment,
-                    "fragment.frag",
-                    ENTRY_NAME,
-                    None,
-                )
-                .context("Error compiling fragment shader")?;
-
-            // Make into shader module
-            unsafe {
-                (
-                    device
-                        .create_shader_module(vertex_compile_artifact.as_binary())
-                        .context("Error creating vertex shader module")?,
-                    device
-                        .create_shader_module(fragment_compile_artifact.as_binary())
-                        .context("Error creating fragment shader module")?,
-                )
-            }
-        };
-
-        // Shader entry points (ShaderStage)
-        let (vs_entry, fs_entry) = (
-            EntryPoint::<back::Backend> {
-                entry: ENTRY_NAME,
-                module: &vs_module,
-                specialization: Specialization::default(),
-            },
-            EntryPoint::<back::Backend> {
-                entry: ENTRY_NAME,
-                module: &fs_module,
-                specialization: Specialization::default(),
-            },
-        );
-
-        // Rasterizer
-        let rasterizer = Rasterizer {
-            polygon_mode: PolygonMode::Fill,
-            cull_face: Face::BACK,
-            front_face: FrontFace::CounterClockwise,
-            depth_clamping: false,
-            depth_bias: None,
-            conservative: true,
-            line_width: State::Static(1.0),
-        };
-
-        // Depth stencil
-        let depth_stencil = DepthStencilDesc {
-            depth: Some(DepthTest {
-                fun: Comparison::Less,
-                write: true,
-            }),
-            depth_bounds: false,
-            stencil: None,
-        };
-
-        // Pipeline layout
-        let layout = unsafe {
-            device.create_pipeline_layout(
-                set_layouts.into_iter(),
-                // vp matrix, 4x4 f32
-                IntoIter::new([(ShaderStageFlags::VERTEX, 0..64)]),
-            )
-        }
-        .context("Error creating pipeline layout")?;
-
-        // Colour blending
-        let blender = {
-            let blend_state = BlendState {
-                color: BlendOp::Add {
-                    src: Factor::One,
-                    dst: Factor::Zero,
-                },
-                alpha: BlendOp::Add {
-                    src: Factor::One,
-                    dst: Factor::Zero,
-                },
-            };
-
-            BlendDesc {
+    ) -> Result<LevelDrawPass<'a, M>> {
+        let spec = PipelineSpecBuilder::default()
+            .rasterizer(Rasterizer {
+                polygon_mode: PolygonMode::Fill,
+                cull_face: Face::BACK,
+                front_face: FrontFace::CounterClockwise,
+                depth_clamping: false,
+                depth_bias: None,
+                conservative: true,
+                line_width: State::Static(1.0),
+            })
+            .depth_stencil(DepthStencilDesc {
+                depth: Some(DepthTest {
+                    fun: Comparison::Less,
+                    write: true,
+                }),
+                depth_bounds: false,
+                stencil: None,
+            })
+            .blender(BlendDesc {
                 logic_op: Some(LogicOp::Copy),
                 targets: vec![ColorBlendDesc {
                     mask: ColorMask::ALL,
-                    blend: Some(blend_state),
+                    blend: Some(BlendState {
+                        color: BlendOp::Add {
+                            src: Factor::One,
+                            dst: Factor::Zero,
+                        },
+                        alpha: BlendOp::Add {
+                            src: Factor::One,
+                            dst: Factor::Zero,
+                        },
+                    }),
                 }],
+            })
+            .primitive_assembler(VertexPrimitiveAssemblerSpec::with_buffers(
+                InputAssemblerDesc::new(Primitive::TriangleList),
+                vec![VertexBufferSpec {
+                    attributes: vec![Format::Rgb32Sfloat, Format::R32Sint, Format::Rg32Sfloat],
+                    rate: VertexInputRate::Vertex,
+                }],
+            ))
+            .shader_vertex(ShaderDesc {
+                source: include_str!("../data/stockton.vert").to_string(),
+                entry: "main".to_string(),
+                kind: ShaderKind::Vertex,
+            })
+            .shader_fragment(ShaderDesc {
+                source: include_str!("../data/stockton.frag").to_string(),
+                entry: "main".to_string(),
+                kind: ShaderKind::Fragment,
+            })
+            .push_constants(vec![(ShaderStageFlags::VERTEX, 0..64)])
+            .renderpass(RenderpassSpec {
+                colors: vec![Attachment {
+                    format: Some(swapchain_properties.format),
+                    samples: 1,
+                    ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
+                    stencil_ops: AttachmentOps::new(
+                        AttachmentLoadOp::Clear,
+                        AttachmentStoreOp::DontCare,
+                    ),
+                    layouts: Layout::ColorAttachmentOptimal..Layout::ColorAttachmentOptimal,
+                }],
+                depth: Some(Attachment {
+                    format: Some(swapchain_properties.depth_format),
+                    samples: 1,
+                    ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
+                    stencil_ops: AttachmentOps::new(
+                        AttachmentLoadOp::DontCare,
+                        AttachmentStoreOp::DontCare,
+                    ),
+                    layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
+                }),
+                inputs: vec![],
+                resolves: vec![],
+                preserves: vec![],
+            })
+            .build()
+            .context("Error building pipeline")?;
+
+        let map_lock: Arc<RwLock<M>> = session.resources.get::<Arc<RwLock<M>>>().unwrap().clone();
+        let repo = TextureRepo::new(
+            device_lock.clone(),
+            queue_negotiator
+                .family::<TexLoadQueue>()
+                .ok_or(EnvironmentError::NoSuitableFamilies)
+                .context("Error finding texture queue")?,
+            queue_negotiator
+                .get_queue::<TexLoadQueue>()
+                .ok_or(EnvironmentError::NoQueues)
+                .context("Error finding texture queue")?,
+            adapter,
+            TextureLoadConfig {
+                resolver: FsResolver::new(Path::new("textures"), map_lock),
+                filter: Filter::Linear,
+                wrap_mode: WrapMode::Tile,
+            },
+        )
+        .context("Error creating texture repo")?;
+
+        let (draw_buffers, pipeline, framebuffers, depth_buffers) = {
+            let mut device = device_lock.write().map_err(|_| LockPoisoned::Device)?;
+            let draw_buffers =
+                DrawBuffers::new(&mut device, adapter).context("Error creating draw buffers")?;
+            let pipeline = spec
+                .build(
+                    &mut device,
+                    swapchain_properties.extent,
+                    swapchain_properties,
+                    once(&*repo.get_ds_layout()?),
+                )
+                .context("Error building pipeline")?;
+
+            let mut framebuffers = Vec::with_capacity(swapchain_properties.image_count as usize);
+            let mut depth_buffers = Vec::with_capacity(swapchain_properties.image_count as usize);
+            let fat = FramebufferAttachment {
+                usage: Usage::COLOR_ATTACHMENT,
+                format: swapchain_properties.format,
+                view_caps: ViewCapabilities::empty(),
+            };
+            let dat = FramebufferAttachment {
+                usage: Usage::DEPTH_STENCIL_ATTACHMENT,
+                format: swapchain_properties.depth_format,
+                view_caps: ViewCapabilities::empty(),
+            };
+            for _i in 0..swapchain_properties.image_count {
+                unsafe {
+                    framebuffers.push(device.create_framebuffer(
+                        &pipeline.renderpass,
+                        IntoIter::new([fat.clone(), dat.clone()]),
+                        swapchain_properties.extent,
+                    )?);
+                    depth_buffers.push(
+                        DedicatedLoadedImage::new(
+                            &mut device,
+                            adapter,
+                            swapchain_properties.depth_format,
+                            Usage::DEPTH_STENCIL_ATTACHMENT,
+                            SubresourceRange {
+                                aspects: Aspects::DEPTH,
+                                level_start: 0,
+                                level_count: Some(1),
+                                layer_start: 0,
+                                layer_count: Some(1),
+                            },
+                            swapchain_properties.extent.width as usize,
+                            swapchain_properties.extent.height as usize,
+                        )
+                        .context("Error creating depth buffer")?,
+                    )
+                }
             }
+
+            (draw_buffers, pipeline, framebuffers, depth_buffers)
         };
 
-        // Baked states
-        let baked_states = BakedStates {
-            viewport: Some(Viewport {
-                rect: extent.rect(),
-                depth: (0.0..1.0),
-            }),
-            scissor: Some(extent.rect()),
-            blend_constants: None,
-            depth_bounds: None,
-        };
-
-        // Primitive assembler
-        let primitive_assembler = PrimitiveAssemblerDesc::Vertex {
-            buffers: &[VertexBufferDesc {
-                binding: 0,
-                stride: (size_of::<f32>() * 6) as u32,
-                rate: VertexInputRate::Vertex,
-            }],
-            attributes: &[
-                AttributeDesc {
-                    location: 0,
-                    binding: 0,
-                    element: Element {
-                        format: Format::Rgb32Sfloat,
-                        offset: 0,
-                    },
-                },
-                AttributeDesc {
-                    location: 1,
-                    binding: 0,
-                    element: Element {
-                        format: Format::R32Sint,
-                        offset: (size_of::<f32>() * 3) as u32,
-                    },
-                },
-                AttributeDesc {
-                    location: 2,
-                    binding: 0,
-                    element: Element {
-                        format: Format::Rg32Sfloat,
-                        offset: (size_of::<f32>() * 4) as u32,
-                    },
-                },
-            ],
-            input_assembler: InputAssemblerDesc::new(Primitive::TriangleList),
-            vertex: vs_entry,
-            tessellation: None,
-            geometry: None,
-        };
-
-        // Pipeline description
-        let pipeline_desc = GraphicsPipelineDesc {
-            label: Some("3D"),
-            rasterizer,
-            fragment: Some(fs_entry),
-            blender,
-            depth_stencil,
-            multisampling: None,
-            baked_states,
-            layout: &layout,
-            subpass,
-            flags: PipelineCreationFlags::empty(),
-            parent: BasePipeline::None,
-            primitive_assembler,
-        };
-
-        // Pipeline
-        let pipeline = unsafe { device.create_graphics_pipeline(&pipeline_desc, None) }
-            .context("Error creating graphics pipeline")?;
-
-        Ok(CompletePipeline {
-            renderpass: ManuallyDrop::new(renderpass),
-            pipeline_layout: ManuallyDrop::new(layout),
-            pipeline: ManuallyDrop::new(pipeline),
-            vs_module: ManuallyDrop::new(vs_module),
-            fs_module: ManuallyDrop::new(fs_module),
+        Ok(LevelDrawPass {
+            pipeline,
+            repo,
+            draw_buffers,
+            active_camera: self,
+            _d: PhantomData,
+            framebuffers,
+            depth_buffers,
+            next_resources: 0,
         })
     }
 
-    /// Deactivate vulkan resources. Use before dropping
-    pub fn deactivate(self, device: &mut DeviceT) {
-        unsafe {
-            use core::ptr::read;
+    fn find_aux_queues<'c>(
+        adapter: &'c Adapter,
+        queue_negotiator: &mut QueueNegotiator,
+    ) -> Result<Vec<(&'c QueueFamilyT, Vec<f32>)>> {
+        queue_negotiator.find(adapter, &TexLoadQueue)?;
 
-            device.destroy_render_pass(ManuallyDrop::into_inner(read(&self.renderpass)));
-
-            device.destroy_shader_module(ManuallyDrop::into_inner(read(&self.vs_module)));
-            device.destroy_shader_module(ManuallyDrop::into_inner(read(&self.fs_module)));
-
-            device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
-
-            device.destroy_pipeline_layout(ManuallyDrop::into_inner(read(&self.pipeline_layout)));
-        }
+        Ok(vec![queue_negotiator
+            .family_spec::<TexLoadQueue>(&adapter.queue_families, 1)
+            .ok_or(EnvironmentError::NoSuitableFamilies)?])
     }
 }
 

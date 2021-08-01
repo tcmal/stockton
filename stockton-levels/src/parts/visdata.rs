@@ -1,8 +1,8 @@
 use super::faces::FaceRef;
-use na::Vector3;
 use std::iter::Iterator;
+use stockton_types::components::{CameraSettings, Transform};
 
-pub trait HasVisData {
+pub trait HasVisData<'a> {
     type Faces: Iterator<Item = FaceRef>;
-    fn get_visible(pos: Vector3<f32>, rot: Vector3<f32>) -> Self::Faces;
+    fn get_visible(&'a self, transform: &Transform, settings: &CameraSettings) -> Self::Faces;
 }

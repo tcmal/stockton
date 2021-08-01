@@ -11,9 +11,9 @@ use hal::{
     MemoryTypeId,
 };
 
-mod dedicated_image;
-mod draw_buffers;
-mod staged;
+pub mod dedicated_image;
+pub mod draw_buffers;
+pub mod staged;
 
 pub use dedicated_image::DedicatedLoadedImage;
 pub use draw_buffers::DrawBuffers;
@@ -58,11 +58,6 @@ pub trait ModifiableBuffer: IndexMut<usize> {
     /// Get a handle to the underlying GPU buffer
     fn get_buffer(&mut self) -> &BufferT;
 
-    /// Commit all changes to GPU memory, returning a handle to the GPU buffer
-    fn commit<'a>(
-        &'a mut self,
-        device: &DeviceT,
-        command_queue: &mut QueueT,
-        command_pool: &mut CommandPoolT,
-    ) -> Result<&'a BufferT>;
+    /// Record the command(s) required to commit changes to this buffer to the given command buffer.
+    fn record_commit_cmds<'a>(&'a mut self, cmd_buffer: &mut CommandBufferT) -> Result<()>;
 }
