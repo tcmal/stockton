@@ -1,6 +1,6 @@
 # stockton
 
-[![Build Status](https://travis-ci.org/tcmal/stockton.svg?branch=master)](https://travis-ci.org/tcmal/stockton)
+[![check and test](https://github.com/tcmal/stockton/actions/workflows/test.yml/badge.svg)](https://github.com/tcmal/stockton/actions/workflows/test.yml) [![rustfmt and clippy](https://github.com/tcmal/stockton/actions/workflows/lint.yml/badge.svg)](https://github.com/tcmal/stockton/actions/workflows/lint.yml)
 
 A WIP Game engine using Vulkan and Rust.
 
