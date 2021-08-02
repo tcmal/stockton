@@ -8,18 +8,14 @@ use std::{
 
 use hal::{
     command::CommandBufferFlags,
-    format::{Aspects, ChannelType, Format, ImageFeature},
-    image::{
-        Access, Extent, FramebufferAttachment, Layout, SubresourceRange, Usage as ImgUsage,
-        ViewCapabilities,
-    },
-    memory::{Barrier, Dependencies},
-    pso::{PipelineStage, Viewport},
+    format::{ChannelType, Format, ImageFeature},
+    image::{Extent, FramebufferAttachment, Usage as ImgUsage, ViewCapabilities},
+    pso::Viewport,
     window::{CompositeAlphaMode, Extent2D, PresentMode, SwapchainConfig},
 };
 
 use super::draw_passes::DrawPass;
-use crate::{error::EnvironmentError, types::*};
+use crate::{draw_passes::Singular, error::EnvironmentError, types::*};
 use anyhow::{Context, Result};
 use stockton_types::Session;
 
@@ -236,7 +232,7 @@ impl TargetChain {
         unsafe { ManuallyDrop::into_inner(read(&self.surface)) }
     }
 
-    pub fn do_draw_with<'a, DP: DrawPass>(
+    pub fn do_draw_with<'a, DP: DrawPass<Singular>>(
         &'a mut self,
         device: &mut DeviceT,
         command_queue: &mut QueueT,
@@ -270,44 +266,8 @@ impl TargetChain {
         unsafe {
             target.cmd_buffer.begin_primary(CommandBufferFlags::empty());
 
-            target.cmd_buffer.pipeline_barrier(
-                PipelineStage::TOP_OF_PIPE..PipelineStage::TOP_OF_PIPE,
-                Dependencies::empty(),
-                once(Barrier::Image {
-                    states: (Access::empty(), Layout::Undefined)
-                        ..(Access::empty(), Layout::ColorAttachmentOptimal),
-                    target: img.borrow(),
-                    range: SubresourceRange {
-                        aspects: Aspects::COLOR,
-                        level_start: 0,
-                        level_count: Some(1),
-                        layer_start: 0,
-                        layer_count: Some(1),
-                    },
-                    families: None,
-                }),
-            );
-
             dp.queue_draw(session, img.borrow(), &mut target.cmd_buffer)
                 .context("Error in draw pass")?;
-
-            target.cmd_buffer.pipeline_barrier(
-                PipelineStage::BOTTOM_OF_PIPE..PipelineStage::BOTTOM_OF_PIPE,
-                Dependencies::empty(),
-                once(Barrier::Image {
-                    states: (Access::empty(), Layout::ColorAttachmentOptimal)
-                        ..(Access::empty(), Layout::Present),
-                    target: img.borrow(),
-                    range: SubresourceRange {
-                        aspects: Aspects::COLOR,
-                        level_start: 0,
-                        level_count: Some(1),
-                        layer_start: 0,
-                        layer_count: Some(1),
-                    },
-                    families: None,
-                }),
-            );
 
             target.cmd_buffer.finish();
         }

@@ -8,7 +8,7 @@ use stockton_skeleton::{
         VertexPrimitiveAssemblerSpec,
     },
     context::RenderingContext,
-    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass},
+    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
     error::{EnvironmentError, LockPoisoned},
     queue_negotiator::QueueNegotiator,
     texture::{
@@ -32,8 +32,7 @@ use hal::{
     buffer::SubRange,
     command::{ClearColor, ClearValue, RenderAttachmentInfo, SubpassContents},
     format::Format,
-    image::Layout,
-    pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
+    pass::Attachment,
     pso::{
         BlendDesc, BlendOp, BlendState, ColorBlendDesc, ColorMask, DepthStencilDesc, Face, Factor,
         FrontFace, InputAssemblerDesc, LogicOp, PolygonMode, Primitive, Rasterizer, Rect,
@@ -54,7 +53,7 @@ pub struct UiDrawPass<'a> {
     framebuffers: TargetSpecificResources<FramebufferT>,
 }
 
-impl<'a> DrawPass for UiDrawPass<'a> {
+impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
     fn queue_draw(
         &mut self,
         session: &Session,
@@ -208,7 +207,7 @@ impl<'a> DrawPass for UiDrawPass<'a> {
     }
 }
 
-impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
+impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
     fn init(self, session: &mut Session, context: &mut RenderingContext) -> Result<UiDrawPass<'a>> {
         let spec = PipelineSpecBuilder::default()
             .rasterizer(Rasterizer {
@@ -263,12 +262,9 @@ impl<'a> IntoDrawPass<UiDrawPass<'a>> for () {
                 colors: vec![Attachment {
                     format: Some(context.target_chain().properties().format),
                     samples: 1,
-                    ops: AttachmentOps::new(AttachmentLoadOp::Load, AttachmentStoreOp::Store),
-                    stencil_ops: AttachmentOps::new(
-                        AttachmentLoadOp::DontCare,
-                        AttachmentStoreOp::DontCare,
-                    ),
-                    layouts: Layout::ColorAttachmentOptimal..Layout::ColorAttachmentOptimal,
+                    ops: P::attachment_ops(),
+                    stencil_ops: P::attachment_ops(),
+                    layouts: P::layout_as_range(),
                 }],
                 depth: None,
                 inputs: vec![],

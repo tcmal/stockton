@@ -19,6 +19,7 @@ use super::{
     target::{SwapchainProperties, TargetChain},
 };
 use crate::{
+    draw_passes::Singular,
     error::{EnvironmentError, LockPoisoned},
     types::*,
 };
@@ -56,7 +57,9 @@ pub struct RenderingContext {
 
 impl RenderingContext {
     /// Create a new RenderingContext for the given window.
-    pub fn new<IDP: IntoDrawPass<DP>, DP: DrawPass>(window: &Window) -> Result<Self> {
+    pub fn new<IDP: IntoDrawPass<DP, Singular>, DP: DrawPass<Singular>>(
+        window: &Window,
+    ) -> Result<Self> {
         // Create surface
         let (instance, surface, mut adapters) = unsafe {
             let instance =
@@ -208,7 +211,11 @@ impl RenderingContext {
     }
 
     /// Draw onto the next frame of the swapchain
-    pub fn draw_next_frame<DP: DrawPass>(&mut self, session: &Session, dp: &mut DP) -> Result<()> {
+    pub fn draw_next_frame<DP: DrawPass<Singular>>(
+        &mut self,
+        session: &Session,
+        dp: &mut DP,
+    ) -> Result<()> {
         let mut device = self
             .device
             .write()

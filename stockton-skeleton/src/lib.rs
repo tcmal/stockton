@@ -18,7 +18,7 @@ pub mod types;
 pub mod utils;
 
 use context::RenderingContext;
-use draw_passes::{DrawPass, IntoDrawPass};
+use draw_passes::{DrawPass, IntoDrawPass, Singular};
 
 use anyhow::{Context, Result};
 
@@ -35,9 +35,9 @@ pub struct Renderer<DP> {
     draw_pass: DP,
 }
 
-impl<DP: DrawPass> Renderer<DP> {
+impl<DP: DrawPass<Singular>> Renderer<DP> {
     /// Create a new Renderer.
-    pub fn new<IDP: IntoDrawPass<DP>>(
+    pub fn new<IDP: IntoDrawPass<DP, Singular>>(
         window: &Window,
         session: &mut Session,
         idp: IDP,

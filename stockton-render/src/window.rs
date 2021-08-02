@@ -1,5 +1,8 @@
 use stockton_input::{Action as KBAction, InputManager, Mouse};
-use stockton_skeleton::{draw_passes::DrawPass, Renderer};
+use stockton_skeleton::{
+    draw_passes::{DrawPass, Singular},
+    Renderer,
+};
 
 use std::sync::{
     mpsc::{channel, Receiver, Sender},
@@ -81,7 +84,7 @@ pub struct UiState {
 }
 
 impl UiState {
-    pub fn populate_initial_state<T: DrawPass>(&mut self, renderer: &Renderer<T>) {
+    pub fn populate_initial_state<T: DrawPass<Singular>>(&mut self, renderer: &Renderer<T>) {
         let props = &renderer.context().target_chain().properties();
         self.set_dimensions(props.extent.width, props.extent.height);
         self.set_pixels_per_point(Some(renderer.context().pixels_per_point()));
@@ -213,7 +216,7 @@ impl WindowFlow {
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass>(
+pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass<Singular>>(
     #[resource] window_channel: &mut WindowFlow,
     #[resource] manager: &mut T,
     #[resource] mouse: &mut Mouse,
@@ -270,7 +273,7 @@ pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass>
     manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
 }
 
-pub fn process_window_events_system<T: 'static + InputManager, DP: 'static + DrawPass>(
+pub fn process_window_events_system<T: 'static + InputManager, DP: 'static + DrawPass<Singular>>(
 ) -> impl Runnable {
     _process_window_events_system::<T, DP>(Vec::with_capacity(4))
 }

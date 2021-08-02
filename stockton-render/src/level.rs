@@ -13,7 +13,7 @@ use stockton_skeleton::{
         VertexPrimitiveAssemblerSpec,
     },
     context::RenderingContext,
-    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass},
+    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
     error::{EnvironmentError, LevelError, LockPoisoned},
     queue_negotiator::QueueNegotiator,
     texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
@@ -67,7 +67,7 @@ pub struct LevelDrawPass<'a, M> {
     _d: PhantomData<M>,
 }
 
-impl<'a, M> DrawPass for LevelDrawPass<'a, M>
+impl<'a, M, P: PassPosition> DrawPass<P> for LevelDrawPass<'a, M>
 where
     M: for<'b> MinRenderFeatures<'b> + 'static,
 {
@@ -269,10 +269,11 @@ pub struct LevelDrawPassConfig<R> {
     pub tex_resolver: R,
 }
 
-impl<'a, M, R> IntoDrawPass<LevelDrawPass<'a, M>> for LevelDrawPassConfig<R>
+impl<'a, M, R, P> IntoDrawPass<LevelDrawPass<'a, M>, P> for LevelDrawPassConfig<R>
 where
     M: for<'b> MinRenderFeatures<'b> + 'static,
     R: TextureResolver + Send + Sync + 'static,
+    P: PassPosition,
 {
     fn init(
         self,
@@ -303,12 +304,12 @@ where
                     mask: ColorMask::ALL,
                     blend: Some(BlendState {
                         color: BlendOp::Add {
-                            src: Factor::One,
-                            dst: Factor::Zero,
+                            src: Factor::SrcAlpha,
+                            dst: Factor::OneMinusSrcAlpha,
                         },
                         alpha: BlendOp::Add {
-                            src: Factor::One,
-                            dst: Factor::Zero,
+                            src: Factor::SrcAlpha,
+                            dst: Factor::OneMinusSrcAlpha,
                         },
                     }),
                 }],
@@ -335,12 +336,9 @@ where
                 colors: vec![Attachment {
                     format: Some(context.target_chain().properties().format),
                     samples: 1,
-                    ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::Store),
-                    stencil_ops: AttachmentOps::new(
-                        AttachmentLoadOp::Clear,
-                        AttachmentStoreOp::DontCare,
-                    ),
-                    layouts: Layout::ColorAttachmentOptimal..Layout::ColorAttachmentOptimal,
+                    ops: P::attachment_ops(),
+                    stencil_ops: P::attachment_ops(),
+                    layouts: P::layout_as_range(),
                 }],
                 depth: Some(Attachment {
                     format: Some(context.target_chain().properties().depth_format),

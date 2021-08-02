@@ -7,7 +7,10 @@ use stockton_types::{
     Vector3,
 };
 
-use stockton_skeleton::{draw_passes::DrawPass, Renderer};
+use stockton_skeleton::{
+    draw_passes::{DrawPass, Singular},
+    Renderer,
+};
 
 fn euler_to_direction(euler: &Vector3) -> Vector3 {
     let pitch = euler.x;
@@ -23,7 +26,7 @@ fn euler_to_direction(euler: &Vector3) -> Vector3 {
 
 #[system(for_each)]
 #[filter(maybe_changed::<Transform>() | maybe_changed::<CameraSettings>())]
-pub fn calc_vp_matrix<DP: DrawPass + 'static>(
+pub fn calc_vp_matrix<DP: DrawPass<Singular> + 'static>(
     transform: &Transform,
     settings: &CameraSettings,
     matrix: &mut CameraVPMatrix,
