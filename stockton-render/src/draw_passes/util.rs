@@ -27,7 +27,7 @@ impl<T> TargetSpecificResources<T> {
     }
 
     /// Get the next resource, wrapping around if necessary.
-    pub fn get_next<'a>(&'a mut self) -> &'a T {
+    pub fn get_next(&mut self) -> &T {
         let el = &self.elements[self.next_idx];
         self.next_idx = (self.next_idx + 1) % self.elements.len();
         el

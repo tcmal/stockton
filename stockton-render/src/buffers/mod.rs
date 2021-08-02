@@ -59,5 +59,5 @@ pub trait ModifiableBuffer: IndexMut<usize> {
     fn get_buffer(&mut self) -> &BufferT;
 
     /// Record the command(s) required to commit changes to this buffer to the given command buffer.
-    fn record_commit_cmds<'a>(&'a mut self, cmd_buffer: &mut CommandBufferT) -> Result<()>;
+    fn record_commit_cmds(&mut self, cmd_buffer: &mut CommandBufferT) -> Result<()>;
 }

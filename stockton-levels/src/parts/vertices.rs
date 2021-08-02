@@ -42,8 +42,7 @@ impl<'de> Deserialize<'de> for Vertex {
             TexV,
             Color,
         }
-        const FIELDS: &[&str] =
-            &["pos_x", "pos_y", "pos_z", "tex_x", "tex_y", "color"];
+        const FIELDS: &[&str] = &["pos_x", "pos_y", "pos_z", "tex_x", "tex_y", "color"];
 
         struct VertexVisitor;
 

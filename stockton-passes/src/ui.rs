@@ -117,7 +117,9 @@ impl<'a> DrawPass for UiDrawPass<'a> {
         }
 
         let (_out, shapes) = ui.end_frame();
-        let screen = ui.dimensions().ok_or(anyhow!("UI not set up properly."))?;
+        let screen = ui
+            .dimensions()
+            .ok_or_else(|| anyhow!("UI not set up properly."))?;
         let shapes = ui.ctx().tessellate(shapes);
 
         for ClippedMesh(rect, tris) in shapes.iter() {
@@ -376,23 +378,15 @@ impl LoadableImage for UiTexture {
     fn height(&self) -> u32 {
         self.0.height as u32
     }
-    fn copy_row(&self, y: u32, ptr: *mut u8) {
+    unsafe fn copy_row(&self, y: u32, ptr: *mut u8) {
         let row_size = self.0.width as u32;
         let pixels = &self.0.pixels[(y * row_size) as usize..((y + 1) * row_size) as usize];
 
         for (i, x) in pixels.iter().enumerate() {
-            unsafe {
-                *ptr.offset(i as isize * 4) = 255;
-                *ptr.offset((i as isize * 4) + 1) = 255;
-                *ptr.offset((i as isize * 4) + 2) = 255;
-                *ptr.offset((i as isize * 4) + 3) = *x;
-            }
-        }
-    }
-
-    unsafe fn copy_into(&self, ptr: *mut u8, row_size: usize) {
-        for y in 0..self.height() {
-            self.copy_row(y, ptr.offset((row_size * y as usize).try_into().unwrap()));
+            *ptr.offset(i as isize * 4) = 255;
+            *ptr.offset((i as isize * 4) + 1) = 255;
+            *ptr.offset((i as isize * 4) + 2) = 255;
+            *ptr.offset((i as isize * 4) + 3) = *x;
         }
     }
 }

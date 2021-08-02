@@ -184,11 +184,12 @@ impl<R: TextureResolver> TextureLoader<R> {
     pub fn new(
         adapter: &Adapter,
         device_lock: Arc<RwLock<DeviceT>>,
-        family: QueueFamilyId,
-        queue_lock: Arc<RwLock<QueueT>>,
+        (family, queue_lock): (QueueFamilyId, Arc<RwLock<QueueT>>),
         ds_layout: Arc<RwLock<DescriptorSetLayoutT>>,
-        request_channel: Receiver<LoaderRequest>,
-        return_channel: Sender<TexturesBlock<DynamicBlock>>,
+        (request_channel, return_channel): (
+            Receiver<LoaderRequest>,
+            Sender<TexturesBlock<DynamicBlock>>,
+        ),
         config: TextureLoadConfig<R>,
     ) -> Result<Self> {
         let mut device = device_lock
@@ -300,8 +301,7 @@ impl<R: TextureResolver> TextureLoader<R> {
                 &mut device,
                 &mut buffers[0].1,
                 &queue_lock,
-                &mut staging_allocator,
-                &mut tex_allocator,
+                (&mut staging_allocator, &mut tex_allocator),
                 staging_memory_type,
                 optimal_buffer_copy_pitch_alignment,
                 &config,
@@ -535,8 +535,7 @@ impl<R: TextureResolver> TextureLoader<R> {
         device: &mut DeviceT,
         buf: &mut CommandBufferT,
         queue_lock: &Arc<RwLock<QueueT>>,
-        staging_allocator: &mut DynamicAllocator,
-        tex_allocator: &mut DynamicAllocator,
+        (staging_allocator, tex_allocator): (&mut DynamicAllocator, &mut DynamicAllocator),
         staging_memory_type: MemoryTypeId,
         obcpa: u64,
         config: &TextureLoadConfig<R>,

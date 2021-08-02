@@ -80,7 +80,7 @@ fn main() {
     }
 }
 
-fn try_main<'a>() -> Result<()> {
+fn try_main() -> Result<()> {
     // Initialise logger
     simplelog::TermLogger::init(
         log::LevelFilter::Debug,
@@ -134,7 +134,7 @@ fn try_main<'a>() -> Result<()> {
     }));
 
     // Create the UI State
-    let ui = UiState::new();
+    let ui = UiState::default();
 
     // Create the input manager
     let manager = {
@@ -196,10 +196,7 @@ fn try_main<'a>() -> Result<()> {
         (
             LevelDrawPassConfig {
                 active_camera: player,
-                tex_resolver: FsResolver::new(
-                    Path::new("./examples/render-quad/textures"),
-                    map.clone(),
-                ),
+                tex_resolver: FsResolver::new(Path::new("./examples/render-quad/textures"), map),
             },
             (),
         ),

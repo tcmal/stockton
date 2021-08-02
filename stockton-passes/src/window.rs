@@ -84,17 +84,7 @@ pub struct UiState {
 }
 
 impl UiState {
-    pub fn new() -> Self {
-        UiState {
-            ctx: CtxRef::default(),
-            raw_input: RawInput::default(),
-            frame_active: false,
-            modifiers: Default::default(),
-            pointer_pos: Pos2::new(0.0, 0.0),
-        }
-    }
-
-    pub fn populate_initial_state<'a, T: DrawPass>(&mut self, renderer: &Renderer<T>) {
+    pub fn populate_initial_state<T: DrawPass>(&mut self, renderer: &Renderer<T>) {
         let props = &renderer.context().target_chain().properties();
         self.set_dimensions(props.extent.width, props.extent.height);
         self.set_pixels_per_point(Some(renderer.context().pixels_per_point()));
@@ -163,15 +153,45 @@ impl UiState {
     fn handle_action(&mut self, action: KBAction) {
         // TODO
         match action {
-            KBAction::MousePress(stockton_input::MouseButton::Left) => {
+            KBAction::MousePress(btn) => {
                 self.raw_input.events.push(Event::PointerButton {
                     pos: self.pointer_pos,
-                    button: egui::PointerButton::Primary,
+                    button: match btn {
+                        stockton_input::MouseButton::Left => egui::PointerButton::Primary,
+                        stockton_input::MouseButton::Right => egui::PointerButton::Secondary,
+                        stockton_input::MouseButton::Middle => egui::PointerButton::Middle,
+                        stockton_input::MouseButton::Other(_) => todo!(),
+                    },
                     pressed: true,
                     modifiers: self.modifiers,
                 });
             }
+            KBAction::MouseRelease(btn) => {
+                self.raw_input.events.push(Event::PointerButton {
+                    pos: self.pointer_pos,
+                    button: match btn {
+                        stockton_input::MouseButton::Left => egui::PointerButton::Primary,
+                        stockton_input::MouseButton::Right => egui::PointerButton::Secondary,
+                        stockton_input::MouseButton::Middle => egui::PointerButton::Middle,
+                        stockton_input::MouseButton::Other(_) => todo!(),
+                    },
+                    pressed: false,
+                    modifiers: self.modifiers,
+                });
+            }
             _ => (),
+        }
+    }
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        UiState {
+            ctx: CtxRef::default(),
+            raw_input: RawInput::default(),
+            frame_active: false,
+            modifiers: Default::default(),
+            pointer_pos: Pos2::new(0.0, 0.0),
         }
     }
 }

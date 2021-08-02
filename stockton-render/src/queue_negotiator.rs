@@ -8,10 +8,12 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+type SharedQueue = Arc<RwLock<QueueT>>;
+
 /// Used to find appropriate queue families and share queues from them as needed.
 pub struct QueueNegotiator {
     family_ids: HashMap<TypeId, QueueFamilyId>,
-    already_allocated: HashMap<TypeId, (Vec<Arc<RwLock<QueueT>>>, usize)>,
+    already_allocated: HashMap<TypeId, (Vec<SharedQueue>, usize)>,
     all: Vec<QueueGroup>,
 }
 
@@ -22,14 +24,6 @@ pub trait QueueFamilySelector: 'static {
 }
 
 impl QueueNegotiator {
-    pub fn new() -> Self {
-        QueueNegotiator {
-            family_ids: HashMap::new(),
-            already_allocated: HashMap::new(),
-            all: vec![],
-        }
-    }
-
     pub fn find<T: QueueFamilySelector>(&mut self, adapter: &Adapter, filter: &T) -> Result<()> {
         if self.family_ids.contains_key(&TypeId::of::<T>()) {
             return Ok(());
@@ -113,7 +107,7 @@ impl QueueNegotiator {
 
     pub fn family_spec<'a, T: QueueFamilySelector>(
         &self,
-        queue_families: &'a Vec<QueueFamilyT>,
+        queue_families: &'a [QueueFamilyT],
         count: usize,
     ) -> Option<(&'a QueueFamilyT, Vec<f32>)> {
         let qf_id = self.family::<T>()?;
@@ -122,6 +116,16 @@ impl QueueNegotiator {
         let v = vec![1.0; count];
 
         Some((qf, v))
+    }
+}
+
+impl Default for QueueNegotiator {
+    fn default() -> Self {
+        QueueNegotiator {
+            family_ids: HashMap::new(),
+            already_allocated: HashMap::new(),
+            all: vec![],
+        }
     }
 }
 

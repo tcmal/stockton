@@ -275,10 +275,10 @@ impl CompletePipeline {
             if let Some(x) = self.gm_module.take() {
                 device.destroy_shader_module(x)
             }
-            self.ts_module.take().map(|(a, b)| {
+            if let Some((a, b)) = self.ts_module.take() {
                 device.destroy_shader_module(a);
                 device.destroy_shader_module(b);
-            });
+            }
 
             device.destroy_graphics_pipeline(ManuallyDrop::into_inner(read(&self.pipeline)));
 

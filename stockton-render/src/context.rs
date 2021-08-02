@@ -77,7 +77,7 @@ impl RenderingContext {
         let (mut queue_negotiator, surface) = {
             let dq: DrawQueue = DrawQueue { surface };
 
-            let mut qn = QueueNegotiator::new();
+            let mut qn = QueueNegotiator::default();
 
             // Draw Queue
             qn.find(&adapter, &dq)

@@ -94,11 +94,9 @@ impl TextureRepo {
             let loader = TextureLoader::new(
                 adapter,
                 device_lock.clone(),
-                family,
-                queue,
+                (family, queue),
                 ds_lock.clone(),
-                req_recv,
-                resp_send,
+                (req_recv, resp_send),
                 config,
             )?;
 
