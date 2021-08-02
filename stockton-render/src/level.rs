@@ -1,26 +1,10 @@
 //! Minimal code for drawing any level, based on traits from stockton-levels
 
-use hal::{
-    buffer::SubRange,
-    command::{ClearColor, ClearDepthStencil, ClearValue, RenderAttachmentInfo, SubpassContents},
-    format::{Aspects, Format},
-    image::{
-        Filter, FramebufferAttachment, Layout, SubresourceRange, Usage, ViewCapabilities, WrapMode,
-    },
-    pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
-    pso::{
-        BlendDesc, BlendOp, BlendState, ColorBlendDesc, ColorMask, Comparison, DepthStencilDesc,
-        DepthTest, Face, Factor, FrontFace, InputAssemblerDesc, LogicOp, PolygonMode, Primitive,
-        Rasterizer, ShaderStageFlags, State, VertexInputRate,
-    },
-};
-use legion::{Entity, IntoQuery};
-use shaderc::ShaderKind;
 use stockton_levels::{
     features::MinRenderFeatures,
     parts::{data::Geometry, IsFace},
 };
-use stockton_render::{
+use stockton_skeleton::{
     buffers::{
         DedicatedLoadedImage, DrawBuffers, ModifiableBuffer, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE,
     },
@@ -49,6 +33,22 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use hal::{
+    buffer::SubRange,
+    command::{ClearColor, ClearDepthStencil, ClearValue, RenderAttachmentInfo, SubpassContents},
+    format::{Aspects, Format},
+    image::{
+        Filter, FramebufferAttachment, Layout, SubresourceRange, Usage, ViewCapabilities, WrapMode,
+    },
+    pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
+    pso::{
+        BlendDesc, BlendOp, BlendState, ColorBlendDesc, ColorMask, Comparison, DepthStencilDesc,
+        DepthTest, Face, Factor, FrontFace, InputAssemblerDesc, LogicOp, PolygonMode, Primitive,
+        Rasterizer, ShaderStageFlags, State, VertexInputRate,
+    },
+};
+use legion::{Entity, IntoQuery};
+use shaderc::ShaderKind;
 
 /// The Vertexes that go to the shader
 #[derive(Debug, Clone, Copy)]

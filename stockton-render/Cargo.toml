@@ -1,31 +1,22 @@
 [package]
 name = "stockton-render"
 version = "0.1.0"
-authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
+authors = ["tcmal <oscar.shrimpton.personal@gmail.com>"]
 edition = "2018"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [dependencies]
-stockton-input = { path = "../stockton-input" }
-stockton-levels = { path = "../stockton-levels" }
+stockton-skeleton = { path = "../stockton-skeleton" }
 stockton-types = { path = "../stockton-types" }
-winit = "^0.21"
-gfx-hal = "^0.8.0"
-arrayvec = "0.4.10"
-nalgebra-glm = "^0.6"
-shaderc = "^0.7"
-log = "0.4.0"
-image = "0.23.11"
-legion = { version = "^0.3" }
-rendy-memory = { path = "../rendy-memory" }
-rendy-descriptor = { path = "../rendy-descriptor" }
+stockton-levels = { path = "../stockton-levels" }
+stockton-input = { path = "../stockton-input" }
 anyhow = "1.0.40"
-thiserror = "1.0.25"
-derive_builder = "0.10.2"
-
-[features]
-default = ["vulkan"]
-vulkan = ["gfx-backend-vulkan"]
-
-[dependencies.gfx-backend-vulkan]
-version = "^0.8.0"
-optional = true
+egui = "^0.12"
+epaint = "^0.12"
+gfx-hal = "^0.8.0"
+shaderc = "^0.7"
+legion = { version = "^0.3" }
+log = "0.4.0"
+winit = "^0.21"
+nalgebra-glm = "^0.6"

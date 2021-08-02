@@ -1,6 +1,33 @@
 //! Minimal code for drawing any level, based on traits from stockton-levels
+use crate::window::UiState;
 
+use stockton_skeleton::{
+    buffers::{DrawBuffers, ModifiableBuffer},
+    builders::{
+        CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
+        VertexPrimitiveAssemblerSpec,
+    },
+    context::RenderingContext,
+    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass},
+    error::{EnvironmentError, LockPoisoned},
+    queue_negotiator::QueueNegotiator,
+    texture::{
+        resolver::TextureResolver, LoadableImage, TexLoadQueue, TextureLoadConfig, TextureRepo,
+    },
+    types::*,
+};
+use stockton_types::{Session, Vector2};
+
+use std::{
+    array::IntoIter,
+    convert::TryInto,
+    iter::{empty, once},
+    sync::Arc,
+};
+
+use anyhow::{anyhow, Context, Result};
 use egui::{ClippedMesh, TextureId};
+use egui::{CtxRef, Texture};
 use hal::{
     buffer::SubRange,
     command::{ClearColor, ClearValue, RenderAttachmentInfo, SubpassContents},
@@ -14,33 +41,6 @@ use hal::{
     },
 };
 use shaderc::ShaderKind;
-use stockton_render::{
-    buffers::{DrawBuffers, ModifiableBuffer},
-    builders::{
-        CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
-        VertexPrimitiveAssemblerSpec,
-    },
-    context::RenderingContext,
-    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass},
-    error::{EnvironmentError, LockPoisoned},
-    queue_negotiator::QueueNegotiator,
-    texture::{TexLoadQueue, TextureLoadConfig, TextureRepo},
-    types::*,
-};
-use stockton_types::{Session, Vector2};
-
-use std::{
-    array::IntoIter,
-    convert::TryInto,
-    iter::{empty, once},
-};
-
-use anyhow::{anyhow, Context, Result};
-use egui::{CtxRef, Texture};
-use std::sync::Arc;
-use stockton_render::texture::{resolver::TextureResolver, LoadableImage};
-
-use crate::window::UiState;
 
 #[derive(Debug)]
 pub struct UiPoint(pub Vector2, pub Vector2, pub [f32; 4]);

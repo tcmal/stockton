@@ -7,9 +7,7 @@ use stockton_types::{
     Vector3,
 };
 
-use stockton_render::Renderer;
-
-use stockton_render::draw_passes::DrawPass;
+use stockton_skeleton::{draw_passes::DrawPass, Renderer};
 
 fn euler_to_direction(euler: &Vector3) -> Vector3 {
     let pitch = euler.x;

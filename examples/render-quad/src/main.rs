@@ -6,35 +6,40 @@ extern crate stockton_input_codegen;
 #[macro_use]
 extern crate legion;
 
-use anyhow::{Context, Result};
-use log::warn;
-use std::collections::BTreeMap;
-use stockton_passes::camera::calc_vp_matrix_system;
-use stockton_passes::window::{process_window_events_system, UiState, WindowEvent, WindowFlow};
-use winit::event_loop::ControlFlow;
+use std::{
+    collections::BTreeMap,
+    path::Path,
+    sync::{Arc, RwLock},
+};
 
-use std::path::Path;
-use std::sync::{Arc, RwLock};
-use stockton_levels::parts::data::{Geometry, Vertex};
-use stockton_levels::types::Rgba;
-use stockton_passes::{
+use stockton_contrib::{delta_time::*, flycam::*};
+use stockton_input::{Axis, InputManager, Mouse};
+use stockton_levels::{
+    parts::data::{Geometry, Vertex},
+    types::Rgba,
+};
+use stockton_render::{
+    camera::calc_vp_matrix_system,
     level::{LevelDrawPass, LevelDrawPassConfig},
     ui::UiDrawPass,
+    window::{process_window_events_system, UiState, WindowEvent, WindowFlow},
 };
-use stockton_render::{draw_passes::ConsDrawPass, texture::resolver::FsResolver};
-use winit::{event::Event, event_loop::EventLoop, window::WindowBuilder};
+use stockton_skeleton::{
+    draw_passes::ConsDrawPass, error::full_error_display, texture::resolver::FsResolver, Renderer,
+};
+use stockton_types::{
+    components::{CameraSettings, CameraVPMatrix, Transform},
+    Session, Vector2, Vector3,
+};
 
+use anyhow::{Context, Result};
 use egui::{containers::CentralPanel, Frame};
-use stockton_contrib::delta_time::*;
-use stockton_contrib::flycam::*;
-
-use stockton_input::{Axis, InputManager, Mouse};
-
-use stockton_render::error::full_error_display;
-use stockton_render::Renderer;
-
-use stockton_types::components::{CameraSettings, CameraVPMatrix, Transform};
-use stockton_types::{Session, Vector2, Vector3};
+use log::warn;
+use winit::{
+    event::Event,
+    event_loop::{ControlFlow, EventLoop},
+    window::WindowBuilder,
+};
 
 mod level;
 use level::*;

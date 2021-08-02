@@ -1,22 +1,19 @@
-use std::sync::mpsc::channel;
-use std::sync::mpsc::Receiver;
-use std::sync::mpsc::Sender;
-use std::sync::Arc;
-use std::sync::RwLock;
+use stockton_input::{Action as KBAction, InputManager, Mouse};
+use stockton_skeleton::{draw_passes::DrawPass, Renderer};
 
-use egui::{Modifiers, Rect, Vec2};
+use std::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Arc, RwLock,
+};
+
+use egui::{CtxRef, Event, Modifiers, Output, Pos2, RawInput, Rect, Vec2};
+use epaint::ClippedShape;
 use legion::systems::Runnable;
 use log::debug;
-use stockton_render::{draw_passes::DrawPass, Renderer};
-
-use egui::{CtxRef, Event, Output, Pos2, RawInput};
-use epaint::ClippedShape;
-use stockton_input::{Action as KBAction, InputManager, Mouse};
-
-use winit::event::{
-    ElementState, Event as WinitEvent, MouseButton, WindowEvent as WinitWindowEvent,
+use winit::{
+    event::{ElementState, Event as WinitEvent, MouseButton, WindowEvent as WinitWindowEvent},
+    event_loop::ControlFlow,
 };
-use winit::event_loop::ControlFlow;
 
 #[derive(Debug, Clone, Copy)]
 pub enum WindowEvent {
