@@ -6,7 +6,8 @@ use stockton_levels::{
 };
 use stockton_skeleton::{
     buffers::{
-        DedicatedLoadedImage, DrawBuffers, ModifiableBuffer, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE,
+        draw::{DrawBuffers, INITIAL_INDEX_SIZE, INITIAL_VERT_SIZE},
+        image::{BoundImageView, ImageSpec, DEPTH_RESOURCES},
     },
     builders::{
         CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
@@ -15,6 +16,7 @@ use stockton_skeleton::{
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
     error::{EnvironmentError, LevelError, LockPoisoned},
+    mem::{DataPool, DepthBufferPool, StagingPool, TexturesPool},
     queue_negotiator::QueueNegotiator,
     texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
     types::*,
@@ -36,10 +38,8 @@ use anyhow::{Context, Result};
 use hal::{
     buffer::SubRange,
     command::{ClearColor, ClearDepthStencil, ClearValue, RenderAttachmentInfo, SubpassContents},
-    format::{Aspects, Format},
-    image::{
-        Filter, FramebufferAttachment, Layout, SubresourceRange, Usage, ViewCapabilities, WrapMode,
-    },
+    format::Format,
+    image::{Filter, FramebufferAttachment, Layout, Usage, ViewCapabilities, WrapMode},
     pass::{Attachment, AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
     pso::{
         BlendDesc, BlendOp, BlendState, ColorBlendDesc, ColorMask, Comparison, DepthStencilDesc,
@@ -57,12 +57,12 @@ struct UvPoint(pub Vector3, pub i32, pub Vector2);
 /// Draw a level
 pub struct LevelDrawPass<'a, M> {
     pipeline: CompletePipeline,
-    repo: TextureRepo,
+    repo: TextureRepo<TexturesPool, StagingPool>,
     active_camera: Entity,
-    draw_buffers: DrawBuffers<'a, UvPoint>,
+    draw_buffers: DrawBuffers<'a, UvPoint, DataPool, StagingPool>,
 
     framebuffers: TargetSpecificResources<FramebufferT>,
-    depth_buffers: TargetSpecificResources<DedicatedLoadedImage>,
+    depth_buffers: TargetSpecificResources<BoundImageView<DepthBufferPool>>,
 
     _d: PhantomData<M>,
 }
@@ -115,7 +115,7 @@ where
                         },
                     },
                     RenderAttachmentInfo {
-                        image_view: &*db.image_view,
+                        image_view: &*db.img_view(),
                         clear_value: ClearValue {
                             depth_stencil: ClearDepthStencil {
                                 depth: 1.0,
@@ -175,11 +175,9 @@ where
             loop {
                 if current_chunk != face.texture_idx(&map) as usize / 8 {
                     // Last index was last of group, so draw it all if textures are loaded.
-                    draw_or_queue(
+                    self.draw_or_queue(
                         current_chunk,
-                        &mut self.repo,
                         cmd_buffer,
-                        &*self.pipeline.pipeline_layout,
                         chunk_start as u32,
                         curr_idx_idx as u32,
                     )?;
@@ -221,11 +219,9 @@ where
             }
 
             // Draw the final group of chunks
-            draw_or_queue(
+            self.draw_or_queue(
                 current_chunk,
-                &mut self.repo,
                 cmd_buffer,
-                &*self.pipeline.pipeline_layout,
                 chunk_start as u32,
                 curr_idx_idx as u32,
             )?;
@@ -239,18 +235,18 @@ where
     }
 
     fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
+        self.draw_buffers.deactivate(context);
         unsafe {
             let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
             self.pipeline.deactivate(&mut device);
-            self.draw_buffers.deactivate(&mut device);
             for fb in self.framebuffers.dissolve() {
                 device.destroy_framebuffer(fb);
             }
-            for db in self.depth_buffers.dissolve() {
-                db.deactivate(&mut device);
-            }
         }
-        self.repo.deactivate(context.device());
+        for db in self.depth_buffers.dissolve() {
+            db.deactivate_with_context(context);
+        }
+        self.repo.deactivate(context);
 
         Ok(())
     }
@@ -261,6 +257,31 @@ where
         _context: &mut RenderingContext,
     ) -> Result<()> {
         todo!()
+    }
+}
+impl<'a, M> LevelDrawPass<'a, M> {
+    fn draw_or_queue(
+        &mut self,
+        current_chunk: usize,
+        cmd_buffer: &mut CommandBufferT,
+        chunk_start: u32,
+        curr_idx_idx: u32,
+    ) -> Result<()> {
+        if let Some(ds) = self.repo.attempt_get_descriptor_set(current_chunk) {
+            unsafe {
+                cmd_buffer.bind_graphics_descriptor_sets(
+                    &*self.pipeline.pipeline_layout,
+                    0,
+                    once(ds),
+                    empty(),
+                );
+                cmd_buffer.draw_indexed(chunk_start * 3..(curr_idx_idx * 3) + 1, 0, 0..1);
+            }
+        } else {
+            self.repo.queue_load(current_chunk)?
+        }
+
+        Ok(())
     }
 }
 
@@ -357,31 +378,20 @@ where
             .build()
             .context("Error building pipeline")?;
 
-        let repo = TextureRepo::new(
-            context.device().clone(),
-            context
-                .queue_negotiator_mut()
-                .family::<TexLoadQueue>()
-                .ok_or(EnvironmentError::NoSuitableFamilies)
-                .context("Error finding texture queue")?,
-            context
-                .queue_negotiator_mut()
-                .get_queue::<TexLoadQueue>()
-                .ok_or(EnvironmentError::NoQueues)
-                .context("Error finding texture queue")?,
-            context.adapter(),
+        let repo = TextureRepo::new::<_, TexLoadQueue>(
+            context,
             TextureLoadConfig {
                 resolver: self.tex_resolver,
                 filter: Filter::Linear,
                 wrap_mode: WrapMode::Tile,
             },
         )
-        .context("Error creating texture repo")?;
+        .context("Error createing texture repo")?;
 
-        let (draw_buffers, pipeline, framebuffers, depth_buffers) = {
+        let draw_buffers =
+            DrawBuffers::from_context(context).context("Error creating draw buffers")?;
+        let (pipeline, framebuffers) = {
             let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
-            let draw_buffers = DrawBuffers::new(&mut device, context.adapter())
-                .context("Error creating draw buffers")?;
             let pipeline = spec
                 .build(
                     &mut device,
@@ -407,30 +417,24 @@ where
                 },
                 context.target_chain().properties().image_count as usize,
             )?;
-            let depth_buffers = TargetSpecificResources::new(
-                || {
-                    DedicatedLoadedImage::new(
-                        &mut device,
-                        context.adapter(),
-                        context.target_chain().properties().depth_format,
-                        Usage::DEPTH_STENCIL_ATTACHMENT,
-                        SubresourceRange {
-                            aspects: Aspects::DEPTH,
-                            level_start: 0,
-                            level_count: Some(1),
-                            layer_start: 0,
-                            layer_count: Some(1),
-                        },
-                        context.target_chain().properties().extent.width as usize,
-                        context.target_chain().properties().extent.height as usize,
-                    )
-                    .context("Error creating depth buffer")
-                },
-                context.target_chain().properties().image_count as usize,
-            )?;
 
-            (draw_buffers, pipeline, framebuffers, depth_buffers)
+            (pipeline, framebuffers)
         };
+        let db_spec = ImageSpec {
+            width: context.target_chain().properties().extent.width,
+            height: context.target_chain().properties().extent.height,
+            format: context.target_chain().properties().depth_format,
+            usage: Usage::DEPTH_STENCIL_ATTACHMENT,
+            resources: DEPTH_RESOURCES,
+        };
+        let img_count = context.target_chain().properties().image_count;
+        let depth_buffers = TargetSpecificResources::new(
+            || {
+                BoundImageView::from_context(context, &db_spec)
+                    .context("Error creating depth buffer")
+            },
+            img_count as usize,
+        )?;
 
         Ok(LevelDrawPass {
             pipeline,
@@ -453,24 +457,4 @@ where
             .family_spec::<TexLoadQueue>(&adapter.queue_families, 1)
             .ok_or(EnvironmentError::NoSuitableFamilies)?])
     }
-}
-
-fn draw_or_queue(
-    current_chunk: usize,
-    tex_repo: &mut TextureRepo,
-    cmd_buffer: &mut CommandBufferT,
-    pipeline_layout: &PipelineLayoutT,
-    chunk_start: u32,
-    curr_idx_idx: u32,
-) -> Result<()> {
-    if let Some(ds) = tex_repo.attempt_get_descriptor_set(current_chunk) {
-        unsafe {
-            cmd_buffer.bind_graphics_descriptor_sets(pipeline_layout, 0, once(ds), empty());
-            cmd_buffer.draw_indexed(chunk_start * 3..(curr_idx_idx * 3) + 1, 0, 0..1);
-        }
-    } else {
-        tex_repo.queue_load(current_chunk)?
-    }
-
-    Ok(())
 }

@@ -1,5 +1,7 @@
 use super::{renderpass::RenderpassSpec, shader::ShaderDesc};
-use crate::{error::EnvironmentError, target::SwapchainProperties, types::*};
+use crate::{
+    error::EnvironmentError, target::SwapchainProperties, types::*, utils::get_pixel_size,
+};
 
 use std::{mem::ManuallyDrop, ops::Range};
 
@@ -33,23 +35,15 @@ impl VertexBufferSpec {
                     format: *format,
                 },
             });
-            offset += get_size(*format);
+            offset += get_pixel_size(*format);
         }
 
         v
     }
     pub fn stride(&self) -> ElemStride {
-        self.attributes.iter().fold(0, |x, f| x + get_size(*f))
-    }
-}
-
-fn get_size(f: Format) -> u32 {
-    match f {
-        Format::Rgb32Sfloat => 4 * 3,
-        Format::R32Sint => 4,
-        Format::Rg32Sfloat => 4 * 2,
-        Format::Rgba32Sfloat => 4 * 4,
-        _ => unimplemented!("dont know size of format {:?}", f),
+        self.attributes
+            .iter()
+            .fold(0, |x, f| x + get_pixel_size(*f))
     }
 }
 

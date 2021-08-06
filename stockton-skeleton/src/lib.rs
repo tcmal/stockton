@@ -11,6 +11,7 @@ pub mod builders;
 pub mod context;
 pub mod draw_passes;
 pub mod error;
+pub mod mem;
 pub mod queue_negotiator;
 mod target;
 pub mod texture;

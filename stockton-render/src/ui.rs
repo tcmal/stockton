@@ -2,7 +2,7 @@
 use crate::window::UiState;
 
 use stockton_skeleton::{
-    buffers::{DrawBuffers, ModifiableBuffer},
+    buffers::draw::DrawBuffers,
     builders::{
         CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
         VertexPrimitiveAssemblerSpec,
@@ -10,6 +10,7 @@ use stockton_skeleton::{
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
     error::{EnvironmentError, LockPoisoned},
+    mem::{DataPool, StagingPool, TexturesPool},
     queue_negotiator::QueueNegotiator,
     texture::{
         resolver::TextureResolver, LoadableImage, TexLoadQueue, TextureLoadConfig, TextureRepo,
@@ -47,8 +48,8 @@ pub struct UiPoint(pub Vector2, pub Vector2, pub [f32; 4]);
 /// Draw a Ui object
 pub struct UiDrawPass<'a> {
     pipeline: CompletePipeline,
-    repo: TextureRepo,
-    draw_buffers: DrawBuffers<'a, UiPoint>,
+    repo: TextureRepo<TexturesPool, StagingPool>,
+    draw_buffers: DrawBuffers<'a, UiPoint, DataPool, StagingPool>,
 
     framebuffers: TargetSpecificResources<FramebufferT>,
 }
@@ -185,15 +186,16 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
     }
 
     fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
+        self.draw_buffers.deactivate(context);
+
         unsafe {
             let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
             self.pipeline.deactivate(&mut device);
-            self.draw_buffers.deactivate(&mut device);
             for fb in self.framebuffers.dissolve() {
                 device.destroy_framebuffer(fb);
             }
         }
-        self.repo.deactivate(context.device());
+        self.repo.deactivate(context);
 
         Ok(())
     }
@@ -276,19 +278,8 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
             .context("Error building pipeline")?;
 
         let ui: &mut UiState = &mut session.resources.get_mut::<UiState>().unwrap();
-        let repo = TextureRepo::new(
-            context.device().clone(),
-            context
-                .queue_negotiator_mut()
-                .family::<TexLoadQueue>()
-                .ok_or(EnvironmentError::NoSuitableFamilies)
-                .context("Error finding texture queue")?,
-            context
-                .queue_negotiator_mut()
-                .get_queue::<TexLoadQueue>()
-                .ok_or(EnvironmentError::NoQueues)
-                .context("Error finding texture queue")?,
-            context.adapter(),
+        let repo = TextureRepo::new::<_, TexLoadQueue>(
+            context,
             TextureLoadConfig {
                 resolver: UiTextures::new(ui.ctx().clone()),
                 filter: hal::image::Filter::Linear,
@@ -297,10 +288,12 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
         )
         .context("Error creating texture repo")?;
 
-        let (draw_buffers, pipeline, framebuffers) = {
+        let draw_buffers =
+            DrawBuffers::from_context(context).context("Error creating draw buffers")?;
+
+        let (pipeline, framebuffers) = {
             let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
-            let draw_buffers = DrawBuffers::new(&mut device, context.adapter())
-                .context("Error creating draw buffers")?;
+
             let pipeline = spec
                 .build(
                     &mut device,
@@ -321,7 +314,7 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
                 },
                 context.target_chain().properties().image_count as usize,
             )?;
-            (draw_buffers, pipeline, framebuffers)
+            (pipeline, framebuffers)
         };
 
         Ok(UiDrawPass {

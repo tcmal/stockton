@@ -2,13 +2,15 @@
 //! This relies on draw passes for the actual drawing logic.
 
 use std::{
+    any::{Any, TypeId},
+    collections::HashMap,
     mem::ManuallyDrop,
     ptr::read,
     sync::{Arc, RwLock},
 };
 
 use anyhow::{Context, Result};
-use hal::pool::CommandPoolCreateFlags;
+use hal::{pool::CommandPoolCreateFlags, PhysicalDeviceProperties};
 use log::debug;
 
 use winit::window::Window;
@@ -21,16 +23,15 @@ use super::{
 use crate::{
     draw_passes::Singular,
     error::{EnvironmentError, LockPoisoned},
+    mem::MemoryPool,
     types::*,
 };
 
 use stockton_types::Session;
 
-/// Contains all the hal related stuff.
-/// In the end, this takes in a depth-sorted list of faces and a map file and renders them.
-// TODO: Settings for clear colour, buffer sizes, etc
+/// Contains most root vulkan objects, and some precalculated info such as best formats to use.
+/// In most cases, this and the DrawPass should contain all vulkan objects present.
 pub struct RenderingContext {
-    // Parents for most of these things
     /// Vulkan Instance
     instance: ManuallyDrop<back::Instance>,
 
@@ -40,6 +41,9 @@ pub struct RenderingContext {
     /// Adapter we're using
     adapter: Adapter,
 
+    /// The properties of the physical device we're using
+    physical_device_properties: PhysicalDeviceProperties,
+
     /// Swapchain and stuff
     target_chain: ManuallyDrop<TargetChain>,
 
@@ -47,12 +51,17 @@ pub struct RenderingContext {
     /// The command pool used for our buffers
     cmd_pool: ManuallyDrop<CommandPoolT>,
 
+    /// The queue negotiator to use
     queue_negotiator: QueueNegotiator,
 
     /// The queue to use for drawing
     queue: Arc<RwLock<QueueT>>,
 
+    ///  Number of pixels per standard point
     pixels_per_point: f32,
+
+    /// The list of memory pools
+    memory_pools: HashMap<TypeId, Box<dyn Any>>,
 }
 
 impl RenderingContext {
@@ -164,6 +173,7 @@ impl RenderingContext {
             instance: ManuallyDrop::new(instance),
 
             device: device_lock,
+            physical_device_properties: adapter.physical_device.properties(),
             adapter,
 
             queue_negotiator,
@@ -172,8 +182,8 @@ impl RenderingContext {
             target_chain: ManuallyDrop::new(target_chain),
             cmd_pool: ManuallyDrop::new(cmd_pool),
 
-            // pixels_per_point: window.scale_factor() as f32,
             pixels_per_point: window.scale_factor() as f32,
+            memory_pools: HashMap::new(),
         })
     }
 
@@ -259,6 +269,36 @@ impl RenderingContext {
     pub fn queue_negotiator_mut(&mut self) -> &mut QueueNegotiator {
         &mut self.queue_negotiator
     }
+
+    /// Get a reference to the physical device's properties.
+    pub fn physical_device_properties(&self) -> &PhysicalDeviceProperties {
+        &self.physical_device_properties
+    }
+
+    /// Get the specified memory pool, lazily initialising it if it's not yet present
+    pub fn memory_pool<'a, P: MemoryPool>(&'a mut self) -> Result<&'a Arc<RwLock<P>>> {
+        self.ensure_memory_pool::<P>()?;
+        Ok(self.existing_memory_pool::<P>().unwrap())
+    }
+
+    /// Ensure the specified memory pool is initialised.
+    pub fn ensure_memory_pool<P: MemoryPool>(&mut self) -> Result<()> {
+        let tid = TypeId::of::<P>();
+        if !self.memory_pools.contains_key(&tid) {
+            self.memory_pools
+                .insert(tid, Box::new(P::from_context(self)?));
+        }
+        Ok(())
+    }
+
+    /// Get the specified memory pool, returning None if it's not yet present
+    /// You should only use this when you're certain it exists, such as when freeing memory
+    /// allocated from that pool
+    pub fn existing_memory_pool<P: MemoryPool>(&self) -> Option<&Arc<RwLock<P>>> {
+        self.memory_pools
+            .get(&TypeId::of::<P>())
+            .map(|x| x.downcast_ref().unwrap())
+    }
 }
 
 impl core::ops::Drop for RenderingContext {
@@ -266,6 +306,8 @@ impl core::ops::Drop for RenderingContext {
         {
             self.device.write().unwrap().wait_idle().unwrap();
         }
+
+        // TODO: Better deactivation code
 
         unsafe {
             let mut device = self.device.write().unwrap();

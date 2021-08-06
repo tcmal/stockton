@@ -6,7 +6,6 @@ mod load;
 mod loader;
 mod repo;
 pub mod resolver;
-mod staging_buffer;
 
 pub use self::block::TexturesBlock;
 pub use self::image::LoadableImage;

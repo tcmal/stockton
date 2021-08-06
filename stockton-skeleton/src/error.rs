@@ -15,6 +15,9 @@ pub enum LockPoisoned {
 
     #[error("Other lock poisoned")]
     Other,
+
+    #[error("Memory pool lock poisoned")]
+    MemoryPool,
 }
 
 /// Indicates the given property has no acceptable values
@@ -43,6 +46,15 @@ pub enum EnvironmentError {
 
     #[error("No suitable queues")]
     NoQueues,
+
+    #[error("Memory pool missing")]
+    MemoryPoolMissing,
+}
+
+#[derive(Debug, Error)]
+pub enum UsageError {
+    #[error("Attempt to create mappable memory block from non-mappable memory")]
+    NonMappableMemory,
 }
 
 /// Indicates an issue with the level object being used

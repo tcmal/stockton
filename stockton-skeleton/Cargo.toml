@@ -16,16 +16,20 @@ shaderc = "^0.7"
 log = "0.4.0"
 image = "0.23.11"
 legion = { version = "^0.3" }
-rendy-memory = { path = "../rendy-memory" }
 rendy-descriptor = { path = "../rendy-descriptor" }
 anyhow = "1.0.40"
 thiserror = "1.0.25"
 derive_builder = "0.10.2"
 
 [features]
-default = ["vulkan"]
+default = ["vulkan", "rendy-pools"]
 vulkan = ["gfx-backend-vulkan"]
+rendy-pools = ["rendy-memory"]
 
 [dependencies.gfx-backend-vulkan]
 version = "^0.8.0"
+optional = true
+
+[dependencies.rendy-memory]
+path = "../rendy-memory"
 optional = true

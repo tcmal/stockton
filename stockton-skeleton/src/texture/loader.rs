@@ -1,13 +1,23 @@
 //! Manages the loading/unloading of textures
 
 use super::{
-    block::{LoadedImage, TexturesBlock},
-    load::{load_image, QueuedLoad, TextureLoadConfig, TextureLoadError, LAYERS, RESOURCES},
+    block::TexturesBlock,
+    load::{
+        load_image, QueuedLoad, TextureLoadConfig, TextureLoadError, FORMAT, LAYERS, RESOURCES,
+    },
     repo::BLOCK_SIZE,
     resolver::TextureResolver,
     PIXEL_SIZE,
 };
-use crate::{error::LockPoisoned, types::*, utils::find_memory_type_id};
+use crate::{
+    buffers::image::SampledImage,
+    context::RenderingContext,
+    error::{EnvironmentError, LockPoisoned},
+    mem::{MappableBlock, MemoryPool},
+    queue_negotiator::QueueFamilySelector,
+    types::*,
+    utils::get_pixel_size,
+};
 
 use std::{
     array::IntoIter,
@@ -26,18 +36,14 @@ use anyhow::{Context, Result};
 use arrayvec::ArrayVec;
 use hal::{
     command::{BufferImageCopy, CommandBufferFlags},
-    format::{Aspects, Format},
+    format::Aspects,
     image::{Access, Extent, Layout, Offset, SubresourceLayers, SubresourceRange},
-    memory::{Barrier, Dependencies, Properties as MemProps, SparseFlags},
+    memory::{Barrier, Dependencies},
     pso::{Descriptor, DescriptorSetWrite, ImageDescriptorType, PipelineStage, ShaderStageFlags},
-    queue::family::QueueFamilyId,
-    MemoryTypeId,
 };
 use image::{Rgba, RgbaImage};
 use log::*;
 use rendy_descriptor::{DescriptorRanges, DescriptorSetLayoutBinding, DescriptorType};
-use rendy_memory::DynamicConfig;
-use thiserror::Error;
 
 /// The number of command buffers to have in flight simultaneously.
 pub const NUM_SIMULTANEOUS_CMDS: usize = 2;
@@ -47,9 +53,15 @@ pub type BlockRef = usize;
 
 /// Manages the loading/unloading of textures
 /// This is expected to load the textures, then send the loaded blocks back
-pub struct TextureLoader<R: TextureResolver> {
+pub struct TextureLoader<R, TP, SP>
+where
+    R: TextureResolver,
+    TP: MemoryPool,
+    SP: MemoryPool,
+    SP::Block: MappableBlock,
+{
     /// Blocks for which commands have been queued and are done loading once the fence is triggered.
-    commands_queued: ArrayVec<[QueuedLoad<DynamicBlock>; NUM_SIMULTANEOUS_CMDS]>,
+    commands_queued: ArrayVec<[QueuedLoad<TP, SP>; NUM_SIMULTANEOUS_CMDS]>,
 
     /// The command buffers  used and a fence to go with them
     buffers: VecDeque<(FenceT, CommandBufferT)>,
@@ -64,21 +76,18 @@ pub struct TextureLoader<R: TextureResolver> {
     queue: Arc<RwLock<QueueT>>,
 
     /// The memory allocator being used for textures
-    tex_allocator: ManuallyDrop<DynamicAllocator>,
+    tex_mempool: Arc<RwLock<TP>>,
 
     /// The memory allocator for staging memory
-    staging_allocator: ManuallyDrop<DynamicAllocator>,
+    staging_mempool: Arc<RwLock<SP>>,
 
     /// Allocator for descriptor sets
     descriptor_allocator: ManuallyDrop<DescriptorAllocator>,
 
     ds_layout: Arc<RwLock<DescriptorSetLayoutT>>,
 
-    /// Type ID for staging memory
-    staging_memory_type: MemoryTypeId,
-
     /// From adapter, used for determining alignment
-    optimal_buffer_copy_pitch_alignment: hal::buffer::Offset,
+    optimal_buffer_copy_pitch_alignment: u32,
 
     /// Configuration for how to find and load textures
     config: TextureLoadConfig<R>,
@@ -88,19 +97,20 @@ pub struct TextureLoader<R: TextureResolver> {
     request_channel: Receiver<LoaderRequest>,
 
     /// The channel blocks are returned to.
-    return_channel: Sender<TexturesBlock<DynamicBlock>>,
+    return_channel: Sender<TexturesBlock<TP>>,
 
     /// A filler image for descriptors that aren't needed but still need to be written to
-    blank_image: ManuallyDrop<LoadedImage<DynamicBlock>>,
+    blank_image: ManuallyDrop<SampledImage<TP>>,
 }
 
-#[derive(Error, Debug)]
-pub enum TextureLoaderError {
-    #[error("Couldn't find a suitable memory type")]
-    NoMemoryTypes,
-}
-
-impl<R: TextureResolver> TextureLoader<R> {
+impl<R, TP, SP> TextureLoader<R, TP, SP>
+where
+    R: TextureResolver,
+    TP: MemoryPool,
+    SP: MemoryPool,
+    SP::Block: MappableBlock,
+{
+    /// Keep loading textures until asked to stop. This should be called from a seperate thread.
     pub fn loop_until_exit(mut self) -> Result<TextureLoaderRemains> {
         debug!("TextureLoader starting main loop");
         let mut res = Ok(false);
@@ -123,12 +133,15 @@ impl<R: TextureResolver> TextureLoader<R> {
             _ => unreachable!(),
         }
     }
+
     fn main(&mut self) -> Result<bool> {
+        // Get a device lock so we can check fence status
         let mut device = self
             .device
             .write()
             .map_err(|_| LockPoisoned::Device)
             .context("Error getting device lock")?;
+
         // Check for blocks that are finished, then send them back
         let mut i = 0;
         while i < self.commands_queued.len() {
@@ -139,12 +152,21 @@ impl<R: TextureResolver> TextureLoader<R> {
                 let (assets, mut staging_bufs, block) = self.commands_queued.remove(i).dissolve();
                 debug!("Load finished for texture block {:?}", block.id);
 
+                // Lock staging memory pool
+                let mut staging_mempool = self
+                    .staging_mempool
+                    .write()
+                    .map_err(|_| LockPoisoned::MemoryPool)?;
+
                 // Destroy staging buffers
                 for buf in staging_bufs.drain(..) {
-                    buf.deactivate(&mut device, &mut self.staging_allocator);
+                    buf.deactivate_device_pool(&mut device, &mut *staging_mempool);
                 }
 
+                // Return assets used for loading
                 self.buffers.push_back(assets);
+
+                // Send back our loaded block
                 self.return_channel
                     .send(block)
                     .context("Error returning texture block")?;
@@ -153,6 +175,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             }
         }
 
+        // Release device lock
         drop(device);
 
         // Check for messages to start loading blocks
@@ -181,97 +204,42 @@ impl<R: TextureResolver> TextureLoader<R> {
         Ok(false)
     }
 
-    pub fn new(
-        adapter: &Adapter,
-        device_lock: Arc<RwLock<DeviceT>>,
-        (family, queue_lock): (QueueFamilyId, Arc<RwLock<QueueT>>),
+    /// Create a new loader from the given context.
+    pub fn new<Q: QueueFamilySelector>(
+        context: &mut RenderingContext,
         ds_layout: Arc<RwLock<DescriptorSetLayoutT>>,
-        (request_channel, return_channel): (
-            Receiver<LoaderRequest>,
-            Sender<TexturesBlock<DynamicBlock>>,
-        ),
+        (request_channel, return_channel): (Receiver<LoaderRequest>, Sender<TexturesBlock<TP>>),
         config: TextureLoadConfig<R>,
     ) -> Result<Self> {
+        // Queue family & Lock
+        let family = context
+            .queue_negotiator_mut()
+            .family::<Q>()
+            .ok_or(EnvironmentError::NoSuitableFamilies)?;
+        let queue_lock = context
+            .queue_negotiator_mut()
+            .get_queue::<Q>()
+            .ok_or(EnvironmentError::NoQueues)?;
+
+        // Memory pools
+        let tex_mempool = context.memory_pool()?.clone();
+        let staging_mempool = context.memory_pool()?.clone();
+
+        // Lock device
+        let device_lock = context.device().clone();
         let mut device = device_lock
             .write()
             .map_err(|_| LockPoisoned::Device)
             .context("Error getting device lock")?;
-        let device_props = adapter.physical_device.properties();
 
-        let type_mask = unsafe {
-            use hal::image::{Kind, Tiling, Usage, ViewCapabilities};
-
-            // We create an empty image with the same format as used for textures
-            // this is to get the type_mask required, which will stay the same for
-            // all colour images of the same tiling. (certain memory flags excluded).
-
-            // Size and alignment don't necessarily stay the same, so we're forced to
-            // guess at the alignment for our allocator.
-
-            // TODO: Way to tune these options
-            let img = device
-                .create_image(
-                    Kind::D2(16, 16, 1, 1),
-                    1,
-                    Format::Rgba8Srgb,
-                    Tiling::Optimal,
-                    Usage::SAMPLED,
-                    SparseFlags::empty(),
-                    ViewCapabilities::empty(),
-                )
-                .context("Error creating test image to get buffer settings")?;
-
-            let type_mask = device.get_image_requirements(&img).type_mask;
-
-            device.destroy_image(img);
-
-            type_mask
-        };
-
-        debug!("Using type mask {:?}", type_mask);
-
-        // Tex Allocator
-        let mut tex_allocator = {
-            let props = MemProps::DEVICE_LOCAL;
-
-            DynamicAllocator::new(
-                find_memory_type_id(adapter, type_mask, props)
-                    .ok_or(TextureLoaderError::NoMemoryTypes)
-                    .context("Couldn't create tex memory allocator")?,
-                props,
-                DynamicConfig {
-                    block_size_granularity: 4 * 32 * 32, // 32x32 image
-                    max_chunk_size: u64::pow(2, 63),
-                    min_device_allocation: 4 * 32 * 32,
-                },
-                device_props.limits.non_coherent_atom_size as u64,
-            )
-        };
-
-        let (staging_memory_type, mut staging_allocator) = {
-            let props = MemProps::CPU_VISIBLE | MemProps::COHERENT;
-            let t = find_memory_type_id(adapter, u32::MAX, props)
-                .ok_or(TextureLoaderError::NoMemoryTypes)
-                .context("Couldn't create staging memory allocator")?;
-            (
-                t,
-                DynamicAllocator::new(
-                    t,
-                    props,
-                    DynamicConfig {
-                        block_size_granularity: 4 * 32 * 32, // 32x32 image
-                        max_chunk_size: u64::pow(2, 63),
-                        min_device_allocation: 4 * 32 * 32,
-                    },
-                    device_props.limits.non_coherent_atom_size as u64,
-                ),
-            )
-        };
+        // Physical properties
+        let device_props = context.physical_device_properties();
+        let optimal_buffer_copy_pitch_alignment =
+            device_props.limits.optimal_buffer_copy_pitch_alignment as u32;
 
         // Pool
         let mut pool = unsafe {
             use hal::pool::CommandPoolCreateFlags;
-
             device.create_command_pool(family, CommandPoolCreateFlags::RESET_INDIVIDUAL)
         }
         .context("Error creating command pool")?;
@@ -293,16 +261,13 @@ impl<R: TextureResolver> TextureLoader<R> {
             data
         };
 
-        let optimal_buffer_copy_pitch_alignment =
-            device_props.limits.optimal_buffer_copy_pitch_alignment;
-
+        // Blank image (for padding descriptors)
         let blank_image = unsafe {
             Self::get_blank_image(
                 &mut device,
                 &mut buffers[0].1,
                 &queue_lock,
-                (&mut staging_allocator, &mut tex_allocator),
-                staging_memory_type,
+                (&staging_mempool, &tex_mempool),
                 optimal_buffer_copy_pitch_alignment,
                 &config,
             )
@@ -319,11 +284,10 @@ impl<R: TextureResolver> TextureLoader<R> {
             queue: queue_lock,
             ds_layout,
 
-            tex_allocator: ManuallyDrop::new(tex_allocator),
-            staging_allocator: ManuallyDrop::new(staging_allocator),
+            tex_mempool,
+            staging_mempool,
             descriptor_allocator: ManuallyDrop::new(DescriptorAllocator::new()),
 
-            staging_memory_type,
             optimal_buffer_copy_pitch_alignment,
 
             request_channel,
@@ -333,7 +297,7 @@ impl<R: TextureResolver> TextureLoader<R> {
         })
     }
 
-    unsafe fn attempt_queue_load(&mut self, block_ref: usize) -> Result<QueuedLoad<DynamicBlock>> {
+    unsafe fn attempt_queue_load(&mut self, block_ref: usize) -> Result<QueuedLoad<TP, SP>> {
         let mut device = self
             .device
             .write()
@@ -403,7 +367,7 @@ impl<R: TextureResolver> TextureLoader<R> {
                     binding: 0,
                     array_offset: tex_idx % BLOCK_SIZE,
                     descriptors: once(Descriptor::Image(
-                        &*self.blank_image.img_view,
+                        &*self.blank_image.img_view(),
                         Layout::ShaderReadOnlyOptimal,
                     )),
                 });
@@ -411,7 +375,7 @@ impl<R: TextureResolver> TextureLoader<R> {
                     set: descriptor_set.raw_mut(),
                     binding: 1,
                     array_offset: tex_idx % BLOCK_SIZE,
-                    descriptors: once(Descriptor::Sampler(&*self.blank_image.sampler)),
+                    descriptors: once(Descriptor::Sampler(&*self.blank_image.sampler())),
                 });
 
                 continue;
@@ -423,9 +387,8 @@ impl<R: TextureResolver> TextureLoader<R> {
 
             let (staging_buffer, img) = load_image(
                 &mut device,
-                &mut self.staging_allocator,
-                &mut self.tex_allocator,
-                self.staging_memory_type,
+                &mut self.staging_mempool,
+                &mut self.tex_mempool,
                 self.optimal_buffer_copy_pitch_alignment,
                 img_data,
                 &self.config,
@@ -438,7 +401,7 @@ impl<R: TextureResolver> TextureLoader<R> {
                     binding: 0,
                     array_offset,
                     descriptors: once(Descriptor::Image(
-                        &*img.img_view,
+                        img.img_view(),
                         Layout::ShaderReadOnlyOptimal,
                     )),
                 });
@@ -446,7 +409,7 @@ impl<R: TextureResolver> TextureLoader<R> {
                     set: descriptor_set.raw_mut(),
                     binding: 1,
                     array_offset,
-                    descriptors: once(Descriptor::Sampler(&*img.sampler)),
+                    descriptors: once(Descriptor::Sampler(img.sampler())),
                 });
             }
 
@@ -462,7 +425,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             imgs.iter().map(|li| Barrier::Image {
                 states: (Access::empty(), Layout::Undefined)
                     ..(Access::TRANSFER_WRITE, Layout::TransferDstOptimal),
-                target: &*li.img,
+                target: &*li.img(),
                 families: None,
                 range: SubresourceRange {
                     aspects: Aspects::COLOR,
@@ -477,13 +440,13 @@ impl<R: TextureResolver> TextureLoader<R> {
         // Record copy commands
         for (li, sb) in imgs.iter().zip(staging_bufs.iter()) {
             buf.copy_buffer_to_image(
-                &*sb.buf,
-                &*li.img,
+                &*sb.buf(),
+                &*li.img(),
                 Layout::TransferDstOptimal,
                 once(BufferImageCopy {
                     buffer_offset: 0,
-                    buffer_width: (li.row_size / super::PIXEL_SIZE) as u32,
-                    buffer_height: li.height,
+                    buffer_width: (li.row_size() / get_pixel_size(FORMAT)) as u32,
+                    buffer_height: li.height(),
                     image_layers: SubresourceLayers {
                         aspects: Aspects::COLOR,
                         level: 0,
@@ -491,8 +454,8 @@ impl<R: TextureResolver> TextureLoader<R> {
                     },
                     image_offset: Offset { x: 0, y: 0, z: 0 },
                     image_extent: gfx_hal::image::Extent {
-                        width: li.width,
-                        height: li.height,
+                        width: li.unpadded_row_size(),
+                        height: li.height(),
                         depth: 1,
                     },
                 }),
@@ -504,7 +467,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             imgs.iter().map(|li| Barrier::Image {
                 states: (Access::TRANSFER_WRITE, Layout::TransferDstOptimal)
                     ..(Access::empty(), Layout::ShaderReadOnlyOptimal),
-                target: &*li.img,
+                target: &*li.img(),
                 families: None,
                 range: RESOURCES,
             }),
@@ -535,11 +498,10 @@ impl<R: TextureResolver> TextureLoader<R> {
         device: &mut DeviceT,
         buf: &mut CommandBufferT,
         queue_lock: &Arc<RwLock<QueueT>>,
-        (staging_allocator, tex_allocator): (&mut DynamicAllocator, &mut DynamicAllocator),
-        staging_memory_type: MemoryTypeId,
-        obcpa: u64,
+        (staging_mempool, tex_mempool): (&Arc<RwLock<SP>>, &Arc<RwLock<TP>>),
+        obcpa: u32,
         config: &TextureLoadConfig<R>,
-    ) -> Result<LoadedImage<DynamicBlock>> {
+    ) -> Result<SampledImage<TP>> {
         let img_data = RgbaImage::from_pixel(1, 1, Rgba([255, 0, 255, 255]));
 
         let height = img_data.height();
@@ -551,9 +513,8 @@ impl<R: TextureResolver> TextureLoader<R> {
 
         let (staging_buffer, img) = load_image(
             device,
-            staging_allocator,
-            tex_allocator,
-            staging_memory_type,
+            staging_mempool,
+            tex_mempool,
             obcpa,
             img_data,
             config,
@@ -567,7 +528,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             once(Barrier::Image {
                 states: (Access::empty(), Layout::Undefined)
                     ..(Access::TRANSFER_WRITE, Layout::TransferDstOptimal),
-                target: &*img.img,
+                target: &*img.img(),
                 families: None,
                 range: SubresourceRange {
                     aspects: Aspects::COLOR,
@@ -579,8 +540,8 @@ impl<R: TextureResolver> TextureLoader<R> {
             }),
         );
         buf.copy_buffer_to_image(
-            &*staging_buffer.buf,
-            &*img.img,
+            &*staging_buffer.buf(),
+            &*img.img(),
             Layout::TransferDstOptimal,
             once(BufferImageCopy {
                 buffer_offset: 0,
@@ -602,7 +563,7 @@ impl<R: TextureResolver> TextureLoader<R> {
             once(Barrier::Image {
                 states: (Access::TRANSFER_WRITE, Layout::TransferDstOptimal)
                     ..(Access::empty(), Layout::ShaderReadOnlyOptimal),
-                target: &*img.img,
+                target: &*img.img(),
                 families: None,
                 range: RESOURCES,
             }),
@@ -628,7 +589,10 @@ impl<R: TextureResolver> TextureLoader<R> {
 
         device.destroy_fence(fence);
 
-        staging_buffer.deactivate(device, staging_allocator);
+        {
+            let mut staging_mempool = staging_mempool.write().unwrap();
+            staging_buffer.deactivate_device_pool(device, &mut *staging_mempool);
+        }
 
         Ok(img)
     }
@@ -658,8 +622,9 @@ impl<R: TextureResolver> TextureLoader<R> {
                         device.destroy_fence(assets.0);
                         // Command buffer will be freed when we reset the command pool
                         // Destroy staging buffers
+                        let mut staging_mempool = self.staging_mempool.write().unwrap();
                         for buf in staging_bufs.drain(..) {
-                            buf.deactivate(&mut device, &mut self.staging_allocator);
+                            buf.deactivate_device_pool(&mut device, &mut staging_mempool);
                         }
 
                         self.return_channel
@@ -674,7 +639,11 @@ impl<R: TextureResolver> TextureLoader<R> {
             }
 
             // Destroy blank image
-            read(&*self.blank_image).deactivate(&mut device, &mut *self.tex_allocator);
+            {
+                let mut tex_mempool = self.tex_mempool.write().unwrap();
+                read(&*self.blank_image)
+                    .deactivate_with_device_pool(&mut device, &mut *tex_mempool);
+            }
 
             // Destroy fences
 
@@ -690,7 +659,6 @@ impl<R: TextureResolver> TextureLoader<R> {
             debug!("Done deactivating TextureLoader");
 
             TextureLoaderRemains {
-                tex_allocator: ManuallyDrop::new(read(&*self.tex_allocator)),
                 descriptor_allocator: ManuallyDrop::new(read(&*self.descriptor_allocator)),
             }
         }
@@ -698,7 +666,6 @@ impl<R: TextureResolver> TextureLoader<R> {
 }
 
 pub struct TextureLoaderRemains {
-    pub tex_allocator: ManuallyDrop<DynamicAllocator>,
     pub descriptor_allocator: ManuallyDrop<DescriptorAllocator>,
 }
 

@@ -1,7 +1,11 @@
 //! A buffer that can be written to by the CPU using staging memory
 
-use super::{create_buffer, ModifiableBuffer};
-use crate::types::*;
+use crate::{
+    context::RenderingContext,
+    error::LockPoisoned,
+    mem::{Block, MappableBlock, MemoryPool},
+    types::*,
+};
 
 use core::mem::{size_of, ManuallyDrop};
 use std::{
@@ -10,72 +14,88 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use hal::{
-    buffer::Usage,
-    command::BufferCopy,
-    memory::{Properties, Segment},
-};
+use hal::{buffer::Usage, command::BufferCopy, memory::SparseFlags};
 
-/// A GPU buffer that is written to using a staging buffer
-pub struct StagedBuffer<'a, T: Sized> {
+/// A GPU buffer that is written to using a staging buffer. The staging buffer and the GPU buffers are the same size,
+/// so this isn't optimal in a lot of cases.
+pub struct StagedBuffer<'a, T: Sized, P: MemoryPool, SP: MemoryPool> {
     /// CPU-visible buffer
     staged_buffer: ManuallyDrop<BufferT>,
 
     /// CPU-visible memory
-    staged_memory: ManuallyDrop<MemoryT>,
+    staged_memory: ManuallyDrop<SP::Block>,
 
     /// GPU Buffer
     buffer: ManuallyDrop<BufferT>,
 
     /// GPU Memory
-    memory: ManuallyDrop<MemoryT>,
+    memory: ManuallyDrop<P::Block>,
 
     /// Where staged buffer is mapped in CPU memory
     staged_mapped_memory: &'a mut [T],
 
     /// The highest index in the buffer that's been written to.
-    pub highest_used: usize,
+    highest_used: usize,
 }
 
-impl<'a, T: Sized> StagedBuffer<'a, T> {
-    /// size is the size in T
-    pub fn new(device: &mut DeviceT, adapter: &Adapter, usage: Usage, size: u64) -> Result<Self> {
+impl<'a, T, P, SP> StagedBuffer<'a, T, P, SP>
+where
+    T: Sized,
+    P: MemoryPool,
+    SP: MemoryPool,
+    SP::Block: MappableBlock,
+{
+    /// Create an new staged buffer from the given rendering context.
+    /// `size` is the size in T. The GPU buffer's usage will be `usage | Usage::TRANSFER_DST` and the staging buffer's usage will be `Usage::TRANSFER_SRC`.
+    pub fn from_context(context: &mut RenderingContext, usage: Usage, size: u64) -> Result<Self> {
         // Convert size to bytes
         let size_bytes = size * size_of::<T>() as u64;
 
-        // Get CPU-visible buffer
-        let (staged_buffer, mut staged_memory) = create_buffer(
-            device,
-            adapter,
-            Usage::TRANSFER_SRC,
-            Properties::CPU_VISIBLE,
-            size_bytes,
-        )
-        .context("Error creating staging buffer")?;
+        // Make sure our memory pools exist
+        context.ensure_memory_pool::<P>()?;
+        context.ensure_memory_pool::<SP>()?;
 
-        // Get GPU Buffer
-        let (buffer, memory) = create_buffer(
-            device,
-            adapter,
-            Usage::TRANSFER_DST | usage,
-            Properties::DEVICE_LOCAL | Properties::COHERENT,
-            size_bytes,
-        )
-        .context("Error creating GPU buffer")?;
+        // Lock the device and memory pools
+        let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+        let mut mempool = context
+            .existing_memory_pool::<P>()
+            .unwrap()
+            .write()
+            .map_err(|_| LockPoisoned::MemoryPool)?;
+        let mut staging_mempool = context
+            .existing_memory_pool::<SP>()
+            .unwrap()
+            .write()
+            .map_err(|_| LockPoisoned::MemoryPool)?;
 
-        // Map it somewhere and get a slice to that memory
+        // Staging buffer
+        let (staged_buffer, mut staged_memory) = unsafe {
+            create_buffer(
+                &mut device,
+                size_bytes,
+                Usage::TRANSFER_SRC,
+                &mut *staging_mempool,
+            )
+            .context("Error creating staging buffer")?
+        };
+
+        // GPU Buffer
+        let (buffer, memory) = unsafe {
+            create_buffer(
+                &mut device,
+                size_bytes,
+                usage | Usage::TRANSFER_DST,
+                &mut *mempool,
+            )
+            .context("Error creating GPU buffer")?
+        };
+
+        // Map the staging buffer somewhere
         let staged_mapped_memory = unsafe {
-            let ptr = device
-                .map_memory(
-                    &mut staged_memory,
-                    Segment {
-                        offset: 0,
-                        size: Some(size_bytes),
-                    },
-                )
-                .context("Error mapping staged memory")?;
-
-            std::slice::from_raw_parts_mut(ptr as *mut T, size.try_into()?)
+            std::slice::from_raw_parts_mut(
+                std::mem::transmute(staged_memory.map(&mut device, 0..size_bytes)?),
+                size.try_into()?,
+            )
         };
 
         Ok(StagedBuffer {
@@ -88,26 +108,39 @@ impl<'a, T: Sized> StagedBuffer<'a, T> {
         })
     }
 
-    /// Call this before dropping
-    pub(crate) fn deactivate(mut self, device: &mut DeviceT) {
+    /// Destroy all Vulkan objects. Should be called before dropping.
+    pub fn deactivate(mut self, context: &mut RenderingContext) {
         unsafe {
-            device.unmap_memory(&mut self.staged_memory);
+            let device = &mut *context.device().write().unwrap();
 
-            device.free_memory(ManuallyDrop::take(&mut self.staged_memory));
+            self.staged_memory.unmap(device).unwrap();
+
+            context
+                .existing_memory_pool::<SP>()
+                .unwrap()
+                .write()
+                .unwrap()
+                .free(device, ManuallyDrop::take(&mut self.staged_memory));
+
+            context
+                .existing_memory_pool::<P>()
+                .unwrap()
+                .write()
+                .unwrap()
+                .free(device, ManuallyDrop::take(&mut self.memory));
+
             device.destroy_buffer(ManuallyDrop::take(&mut self.staged_buffer));
-
-            device.free_memory(ManuallyDrop::take(&mut self.memory));
             device.destroy_buffer(ManuallyDrop::take(&mut self.buffer));
         };
     }
-}
 
-impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
-    fn get_buffer(&mut self) -> &BufferT {
+    /// Get a handle to the underlying GPU buffer
+    pub fn get_buffer(&mut self) -> &BufferT {
         &self.buffer
     }
 
-    fn record_commit_cmds(&mut self, buf: &mut CommandBufferT) -> Result<()> {
+    /// Record the command(s) required to commit changes to this buffer to the given command buffer.
+    pub fn record_commit_cmds(&mut self, buf: &mut CommandBufferT) -> Result<()> {
         unsafe {
             buf.copy_buffer(
                 &self.staged_buffer,
@@ -122,9 +155,35 @@ impl<'a, T: Sized> ModifiableBuffer for StagedBuffer<'a, T> {
 
         Ok(())
     }
+
+    /// Get the highest byte in this buffer that's been written to (by the CPU)
+    pub fn highest_used(&self) -> usize {
+        self.highest_used
+    }
 }
 
-impl<'a, T: Sized> Index<usize> for StagedBuffer<'a, T> {
+/// Used internally to create a buffer from a memory pool
+unsafe fn create_buffer<P: MemoryPool>(
+    device: &mut DeviceT,
+    size: u64,
+    usage: Usage,
+    mempool: &mut P,
+) -> Result<(BufferT, P::Block)> {
+    let mut buffer = device
+        .create_buffer(size, usage, SparseFlags::empty())
+        .context("Error creating buffer")?;
+    let req = device.get_buffer_requirements(&buffer);
+
+    let (memory, _) = mempool.alloc(device, size, req.alignment)?;
+
+    device
+        .bind_buffer_memory(memory.memory(), 0, &mut buffer)
+        .context("Error binding memory to buffer")?;
+
+    Ok((buffer, memory))
+}
+
+impl<'a, T: Sized, P: MemoryPool, SP: MemoryPool> Index<usize> for StagedBuffer<'a, T, P, SP> {
     type Output = T;
 
     fn index(&self, index: usize) -> &Self::Output {
@@ -132,7 +191,7 @@ impl<'a, T: Sized> Index<usize> for StagedBuffer<'a, T> {
     }
 }
 
-impl<'a, T: Sized> IndexMut<usize> for StagedBuffer<'a, T> {
+impl<'a, T: Sized, P: MemoryPool, SP: MemoryPool> IndexMut<usize> for StagedBuffer<'a, T, P, SP> {
     fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         if index > self.highest_used {
             self.highest_used = index;

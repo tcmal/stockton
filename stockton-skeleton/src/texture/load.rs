@@ -1,31 +1,31 @@
-use super::{
-    block::LoadedImage, block::TexturesBlock, repo::BLOCK_SIZE, resolver::TextureResolver,
-    staging_buffer::StagingBuffer, LoadableImage, PIXEL_SIZE,
+use std::sync::{Arc, RwLock};
+
+use super::{block::TexturesBlock, repo::BLOCK_SIZE, resolver::TextureResolver, LoadableImage};
+use crate::{
+    buffers::{
+        image::{ImageSpec, SampledImage, COLOR_RESOURCES},
+        staging::StagingBuffer,
+    },
+    error::LockPoisoned,
+    mem::{Block, MappableBlock, MemoryPool},
+    types::*,
 };
-use crate::types::*;
 
 use anyhow::{Context, Result};
 use arrayvec::ArrayVec;
 use hal::{
-    format::{Aspects, Format, Swizzle},
+    format::{Aspects, Format},
     image::{
-        Filter, SamplerDesc, SubresourceLayers, SubresourceRange, Usage as ImgUsage, ViewKind,
-        WrapMode,
+        Filter, SamplerDesc, SubresourceLayers, SubresourceRange, Usage as ImgUsage, WrapMode,
     },
-    memory::SparseFlags,
-    MemoryTypeId,
 };
-use rendy_memory::{Allocator, Block};
-use std::mem::ManuallyDrop;
 use thiserror::Error;
 
-#[derive(Error, Debug)]
-pub enum TextureLoadError {
-    #[error("No available resources")]
-    NoResources,
-}
-
+/// The format used by the texture repo
+// TODO: This should be customisable.
 pub const FORMAT: Format = Format::Rgba8Srgb;
+
+/// The resources used by each texture. ie one colour aspect
 pub const RESOURCES: SubresourceRange = SubresourceRange {
     aspects: Aspects::COLOR,
     level_start: 0,
@@ -33,159 +33,112 @@ pub const RESOURCES: SubresourceRange = SubresourceRange {
     layer_start: 0,
     layer_count: Some(1),
 };
+
+/// The layers used by each texture. ie one colour layer
 pub const LAYERS: SubresourceLayers = SubresourceLayers {
     aspects: Aspects::COLOR,
     level: 0,
     layers: 0..1,
 };
 
+/// Configuration required to load a texture
 pub struct TextureLoadConfig<R: TextureResolver> {
+    /// The resolver to use
     pub resolver: R,
+
+    /// How to sample the image
     pub filter: Filter,
+
+    /// How to deal with texture coordinates outside the image.
     pub wrap_mode: WrapMode,
 }
 
-pub struct QueuedLoad<B: Block<back::Backend>> {
+/// A texture load that has been queued, and is finished when the fence triggers.
+pub struct QueuedLoad<TP: MemoryPool, SP: MemoryPool> {
     pub fence: FenceT,
     pub buf: CommandBufferT,
-    pub block: TexturesBlock<B>,
-    pub staging_bufs: ArrayVec<[StagingBuffer; BLOCK_SIZE]>,
+    pub block: TexturesBlock<TP>,
+    pub staging_bufs: ArrayVec<[StagingBuffer<SP>; BLOCK_SIZE]>,
 }
 
-impl<B: Block<back::Backend>> QueuedLoad<B> {
+impl<TP: MemoryPool, SP: MemoryPool> QueuedLoad<TP, SP> {
+    /// Break down into a tuple
     pub fn dissolve(
         self,
     ) -> (
         (FenceT, CommandBufferT),
-        ArrayVec<[StagingBuffer; BLOCK_SIZE]>,
-        TexturesBlock<B>,
+        ArrayVec<[StagingBuffer<SP>; BLOCK_SIZE]>,
+        TexturesBlock<TP>,
     ) {
         ((self.fence, self.buf), self.staging_bufs, self.block)
     }
 }
 
-pub fn tex_size_info<T: LoadableImage>(img: &T, obcpa: hal::buffer::Offset) -> (usize, usize) {
-    let initial_row_size = PIXEL_SIZE * img.width() as usize;
-    let row_alignment_mask = obcpa as u32 - 1;
-
-    let row_size = ((initial_row_size as u32 + row_alignment_mask) & !row_alignment_mask) as usize;
-    let total_size = (row_size * (img.height() as usize)) as u64;
-    debug_assert!(row_size as usize >= initial_row_size);
-
-    (row_size, total_size as usize)
-}
-
-pub fn create_image_view<T, I>(
+/// Create a SampledImage for the given LoadableImage, and load the image data into a StagingBuffer
+/// Note that this doesn't queue up transferring from the buffer to the image.
+pub unsafe fn load_image<I, R, SP, TP>(
     device: &mut DeviceT,
-    allocator: &mut T,
-    format: Format,
-    usage: ImgUsage,
-    img: &I,
-) -> Result<(T::Block, ImageT)>
-where
-    T: Allocator<back::Backend>,
-    I: LoadableImage,
-{
-    // Make the image
-    let mut image_ref = unsafe {
-        use hal::image::{Kind, Tiling, ViewCapabilities};
-
-        device.create_image(
-            Kind::D2(img.width(), img.height(), 1, 1),
-            1,
-            format,
-            Tiling::Optimal,
-            usage,
-            SparseFlags::empty(),
-            ViewCapabilities::empty(),
-        )
-    }
-    .context("Error creating image")?;
-
-    // Allocate memory
-    let (block, _) = unsafe {
-        let requirements = device.get_image_requirements(&image_ref);
-
-        allocator.alloc(device, requirements.size, requirements.alignment)
-    }
-    .context("Error allocating memory")?;
-
-    unsafe {
-        device
-            .bind_image_memory(block.memory(), block.range().start, &mut image_ref)
-            .context("Error binding memory to image")?;
-    }
-
-    Ok((block, image_ref))
-}
-
-pub unsafe fn load_image<I: LoadableImage, R: TextureResolver>(
-    device: &mut DeviceT,
-    staging_allocator: &mut DynamicAllocator,
-    tex_allocator: &mut DynamicAllocator,
-    staging_memory_type: MemoryTypeId,
-    obcpa: u64,
+    staging_allocator: &Arc<RwLock<SP>>,
+    tex_allocator: &Arc<RwLock<TP>>,
+    obcpa: u32,
     img_data: I,
     config: &TextureLoadConfig<R>,
-) -> Result<(StagingBuffer, LoadedImage<DynamicBlock>)> {
-    // Calculate buffer size
-    let (row_size, total_size) = tex_size_info(&img_data, obcpa);
+) -> Result<(StagingBuffer<SP>, SampledImage<TP>)>
+where
+    I: LoadableImage,
+    R: TextureResolver,
+    SP: MemoryPool,
+    TP: MemoryPool,
+    SP::Block: MappableBlock,
+{
+    // Create sampled image
+    let sampled_image = {
+        let mut tex_allocator = tex_allocator
+            .write()
+            .map_err(|_| LockPoisoned::MemoryPool)?;
+
+        SampledImage::from_device_allocator(
+            device,
+            &mut *tex_allocator,
+            obcpa as u32,
+            &ImageSpec {
+                width: img_data.width(),
+                height: img_data.height(),
+                format: FORMAT,
+                usage: ImgUsage::TRANSFER_DST | ImgUsage::SAMPLED,
+                resources: COLOR_RESOURCES,
+            },
+            &SamplerDesc::new(config.filter, config.wrap_mode),
+        )?
+    };
 
     // Create staging buffer
-    let mut staging_buffer = StagingBuffer::new(
-        device,
-        staging_allocator,
-        total_size as u64,
-        staging_memory_type,
-    )
-    .context("Error creating staging buffer")?;
+    let total_size = sampled_image.bound_image().mem().size();
+
+    let mut staging_buffer = {
+        let mut staging_allocator = staging_allocator
+            .write()
+            .map_err(|_| LockPoisoned::MemoryPool)?;
+
+        StagingBuffer::from_device_pool(device, &mut *staging_allocator, total_size as u64)
+            .context("Error creating staging buffer")?
+    };
 
     // Write to staging buffer
     let mapped_memory = staging_buffer
-        .map_memory(device)
+        .map(device, 0..total_size)
         .context("Error mapping staged memory")?;
 
-    img_data.copy_into(mapped_memory, row_size);
+    img_data.copy_into(mapped_memory, sampled_image.row_size() as usize);
 
-    staging_buffer.unmap_memory(device);
+    staging_buffer.unmap(device)?;
 
-    // Create image
-    let (img_mem, img) = create_image_view(
-        device,
-        tex_allocator,
-        FORMAT,
-        ImgUsage::SAMPLED | ImgUsage::TRANSFER_DST,
-        &img_data,
-    )
-    .context("Error creating image")?;
+    Ok((staging_buffer, sampled_image))
+}
 
-    // Create image view
-    let img_view = device
-        .create_image_view(
-            &img,
-            ViewKind::D2,
-            FORMAT,
-            Swizzle::NO,
-            ImgUsage::SAMPLED | ImgUsage::TRANSFER_DST,
-            RESOURCES,
-        )
-        .context("Error creating image view")?;
-
-    // Create sampler
-    let sampler = device
-        .create_sampler(&SamplerDesc::new(config.filter, config.wrap_mode))
-        .context("Error creating sampler")?;
-
-    Ok((
-        staging_buffer,
-        LoadedImage {
-            mem: ManuallyDrop::new(img_mem),
-            img: ManuallyDrop::new(img),
-            img_view: ManuallyDrop::new(img_view),
-            sampler: ManuallyDrop::new(sampler),
-            row_size,
-            height: img_data.height(),
-            width: img_data.width(),
-        },
-    ))
+/// Errors that can be encountered when loading a texture.
+#[derive(Error, Debug)]
+pub enum TextureLoadError {
+    #[error("No available resources")]
+    NoResources,
 }
