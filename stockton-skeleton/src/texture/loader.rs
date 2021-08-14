@@ -149,7 +149,11 @@ where
                 .context("Error checking fence status")?;
 
             if signalled {
-                let (assets, mut staging_bufs, block) = self.commands_queued.remove(i).dissolve();
+                let queued_load = self.commands_queued.remove(i);
+                let assets = (queued_load.fence, queued_load.buf);
+                let block = queued_load.block;
+                let mut staging_bufs = queued_load.staging_bufs;
+
                 debug!("Load finished for texture block {:?}", block.id);
 
                 // Lock staging memory pool
@@ -384,8 +388,8 @@ where
 
             let (staging_buffer, img) = load_image(
                 &mut device,
-                &mut self.staging_mempool,
-                &mut self.tex_mempool,
+                &self.staging_mempool,
+                &self.tex_mempool,
                 self.optimal_buffer_copy_pitch_alignment,
                 img_data,
                 &self.config,
@@ -613,8 +617,10 @@ where
 
                     if signalled {
                         // Destroy finished ones
-                        let (assets, mut staging_bufs, block) =
-                            self.commands_queued.remove(i).dissolve();
+                        let queued_load = self.commands_queued.remove(i);
+                        let assets = (queued_load.fence, queued_load.buf);
+                        let block = queued_load.block;
+                        let mut staging_bufs = queued_load.staging_bufs;
 
                         device.destroy_fence(assets.0);
                         // Command buffer will be freed when we reset the command pool

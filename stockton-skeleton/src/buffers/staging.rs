@@ -61,15 +61,11 @@ where
     /// Map the given range to CPU-visible memory, returning a pointer to the start of that range.
     /// inner_range is local to this block of memory, not to the container as a whole.
     pub fn map(&mut self, device: &mut DeviceT, inner_range: Range<u64>) -> Result<*mut u8> {
-        Ok(<<P as MemoryPool>::Block>::map(
-            &mut *self.mem,
-            device,
-            inner_range,
-        )?)
+        <<P as MemoryPool>::Block>::map(&mut *self.mem, device, inner_range)
     }
 
     /// Remove any mappings present for this staging buffer.
-    pub unsafe fn unmap(&mut self, device: &mut DeviceT) -> Result<()> {
+    pub fn unmap(&mut self, device: &mut DeviceT) -> Result<()> {
         self.mem.unmap(device)
     }
 

@@ -285,12 +285,13 @@ impl RenderingContext {
     }
 
     /// Get the specified memory pool, lazily initialising it if it's not yet present
-    pub fn memory_pool<'a, P: MemoryPool>(&'a mut self) -> Result<&'a Arc<RwLock<P>>> {
+    pub fn memory_pool<P: MemoryPool>(&mut self) -> Result<&Arc<RwLock<P>>> {
         self.ensure_memory_pool::<P>()?;
         Ok(self.existing_memory_pool::<P>().unwrap())
     }
 
     /// Ensure the specified memory pool is initialised.
+    #[allow(clippy::map_entry)] // We can't follow the suggestion because of a borrowing issue
     pub fn ensure_memory_pool<P: MemoryPool>(&mut self) -> Result<()> {
         let tid = TypeId::of::<P>();
         if !self.memory_pools.contains_key(&tid) {

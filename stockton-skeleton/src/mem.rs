@@ -92,15 +92,15 @@ mod rendy {
     /// So we can use rendy blocks as our blocks
     impl<T: RBlock<back::Backend>> Block for T {
         fn properties(&self) -> Properties {
-            <T as RBlock<back::Backend>>::properties(&self)
+            <T as RBlock<back::Backend>>::properties(self)
         }
 
         fn memory(&self) -> &MemoryT {
-            <T as RBlock<back::Backend>>::memory(&self)
+            <T as RBlock<back::Backend>>::memory(self)
         }
 
         fn range(&self) -> Range<u64> {
-            <T as RBlock<back::Backend>>::range(&self)
+            <T as RBlock<back::Backend>>::range(self)
         }
     }
 
@@ -359,7 +359,8 @@ mod rendy {
         }
 
         fn unmap(&mut self, device: &mut DeviceT) -> Result<()> {
-            Ok(self.0.unmap(device))
+            self.0.unmap(device);
+            Ok(())
         }
     }
 }

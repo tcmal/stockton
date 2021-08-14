@@ -61,19 +61,6 @@ pub struct QueuedLoad<TP: MemoryPool, SP: MemoryPool> {
     pub staging_bufs: ArrayVec<[StagingBuffer<SP>; BLOCK_SIZE]>,
 }
 
-impl<TP: MemoryPool, SP: MemoryPool> QueuedLoad<TP, SP> {
-    /// Break down into a tuple
-    pub fn dissolve(
-        self,
-    ) -> (
-        (FenceT, CommandBufferT),
-        ArrayVec<[StagingBuffer<SP>; BLOCK_SIZE]>,
-        TexturesBlock<TP>,
-    ) {
-        ((self.fence, self.buf), self.staging_bufs, self.block)
-    }
-}
-
 /// Create a SampledImage for the given LoadableImage, and load the image data into a StagingBuffer
 /// Note that this doesn't queue up transferring from the buffer to the image.
 pub unsafe fn load_image<I, R, SP, TP>(

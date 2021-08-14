@@ -116,7 +116,7 @@ impl<P: MemoryPool> BoundImageView<P> {
 
             // Allocate memory
             let (mem, _) = pool
-                .alloc(&device, requirements.size, requirements.alignment)
+                .alloc(device, requirements.size, requirements.alignment)
                 .context("Error allocating memory")?;
 
             // Bind memory
@@ -169,7 +169,7 @@ impl<P: MemoryPool> BoundImageView<P> {
         unsafe {
             device.destroy_image_view(read(&*self.img_view));
             device.destroy_image(read(&*self.img));
-            pool.free(&device, read(&*self.mem));
+            pool.free(device, read(&*self.mem));
         }
     }
 
