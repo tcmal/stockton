@@ -10,8 +10,8 @@ use stockton_skeleton::{
         image::{BoundImageView, ImageSpec, DEPTH_RESOURCES},
     },
     builders::{
-        CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
-        VertexPrimitiveAssemblerSpec,
+        AttachmentSpec, CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc,
+        VertexBufferSpec, VertexPrimitiveAssemblerSpec,
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
@@ -354,22 +354,32 @@ where
             })
             .push_constants(vec![(ShaderStageFlags::VERTEX, 0..64)])
             .renderpass(RenderpassSpec {
-                colors: vec![Attachment {
-                    format: Some(context.target_chain().properties().format),
-                    samples: 1,
-                    ops: P::attachment_ops(),
-                    stencil_ops: P::attachment_ops(),
-                    layouts: P::layout_as_range(),
+                colors: vec![AttachmentSpec {
+                    attachment: Attachment {
+                        format: Some(context.target_chain().properties().format),
+                        samples: 1,
+                        ops: P::attachment_ops(),
+                        stencil_ops: P::attachment_ops(),
+                        layouts: P::layout_as_range(),
+                    },
+
+                    used_layout: Layout::ColorAttachmentOptimal,
                 }],
-                depth: Some(Attachment {
-                    format: Some(context.target_chain().properties().depth_format),
-                    samples: 1,
-                    ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
-                    stencil_ops: AttachmentOps::new(
-                        AttachmentLoadOp::DontCare,
-                        AttachmentStoreOp::DontCare,
-                    ),
-                    layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
+                depth: Some(AttachmentSpec {
+                    attachment: Attachment {
+                        format: Some(context.target_chain().properties().depth_format),
+                        samples: 1,
+                        ops: AttachmentOps::new(
+                            AttachmentLoadOp::Clear,
+                            AttachmentStoreOp::DontCare,
+                        ),
+                        stencil_ops: AttachmentOps::new(
+                            AttachmentLoadOp::DontCare,
+                            AttachmentStoreOp::DontCare,
+                        ),
+                        layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
+                    },
+                    used_layout: Layout::DepthStencilAttachmentOptimal,
                 }),
                 inputs: vec![],
                 resolves: vec![],

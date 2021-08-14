@@ -4,8 +4,8 @@ use crate::window::UiState;
 use stockton_skeleton::{
     buffers::draw::DrawBuffers,
     builders::{
-        CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc, VertexBufferSpec,
-        VertexPrimitiveAssemblerSpec,
+        AttachmentSpec, CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc,
+        VertexBufferSpec, VertexPrimitiveAssemblerSpec,
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
@@ -33,6 +33,7 @@ use hal::{
     buffer::SubRange,
     command::{ClearColor, ClearValue, RenderAttachmentInfo, SubpassContents},
     format::Format,
+    image::Layout,
     pass::Attachment,
     pso::{
         BlendDesc, BlendOp, BlendState, ColorBlendDesc, ColorMask, DepthStencilDesc, Face, Factor,
@@ -261,12 +262,15 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
             })
             .push_constants(vec![(ShaderStageFlags::VERTEX, 0..8)])
             .renderpass(RenderpassSpec {
-                colors: vec![Attachment {
-                    format: Some(context.target_chain().properties().format),
-                    samples: 1,
-                    ops: P::attachment_ops(),
-                    stencil_ops: P::attachment_ops(),
-                    layouts: P::layout_as_range(),
+                colors: vec![AttachmentSpec {
+                    attachment: Attachment {
+                        format: Some(context.target_chain().properties().format),
+                        samples: 1,
+                        ops: P::attachment_ops(),
+                        stencil_ops: P::attachment_ops(),
+                        layouts: P::layout_as_range(),
+                    },
+                    used_layout: Layout::ColorAttachmentOptimal,
                 }],
                 depth: None,
                 inputs: vec![],
