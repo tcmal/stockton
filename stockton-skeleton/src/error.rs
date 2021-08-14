@@ -55,6 +55,9 @@ pub enum EnvironmentError {
 pub enum UsageError {
     #[error("Attempt to create mappable memory block from non-mappable memory")]
     NonMappableMemory,
+
+    #[error("Called get_queue without properly requesting the queue beforehand.")]
+    QueueNegotiatorMisuse,
 }
 
 /// Indicates an issue with the level object being used

@@ -111,10 +111,20 @@ impl RenderingContext {
         // Device & Queue groups
         let (device_lock, queue_groups) = {
             // TODO: This sucks, but hal is restrictive on how we can pass this specific argument.
-            let queue_families_specs_real: Vec<_> = queue_families_specs
-                .iter()
-                .map(|(qf, ns)| (*qf, ns.as_slice()))
-                .collect();
+
+            // Deduplicate families & convert to specific type.
+            let mut queue_families_specs_real = Vec::with_capacity(queue_families_specs.len());
+            for (qf, ns) in queue_families_specs.iter_mut() {
+                if let Some(existing_family_spec) = queue_families_specs_real
+                    .iter()
+                    .position(|(qf2, _): &(&QueueFamilyT, &[f32])| qf2.id() == qf.id())
+                {
+                    ns.extend(queue_families_specs_real[existing_family_spec].1.iter());
+                    queue_families_specs_real[existing_family_spec] = (*qf, ns.as_slice());
+                } else {
+                    queue_families_specs_real.push((*qf, ns.as_slice()))
+                }
+            }
 
             let gpu = unsafe {
                 adapter
@@ -166,7 +176,6 @@ impl RenderingContext {
 
         let queue = queue_negotiator
             .get_queue::<DrawQueue>()
-            .ok_or(EnvironmentError::NoQueues)
             .context("Error getting draw queue")?;
 
         Ok(RenderingContext {

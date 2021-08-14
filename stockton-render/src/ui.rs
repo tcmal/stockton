@@ -9,7 +9,7 @@ use stockton_skeleton::{
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
-    error::{EnvironmentError, LockPoisoned},
+    error::LockPoisoned,
     mem::{DataPool, StagingPool, TexturesPool},
     queue_negotiator::QueueNegotiator,
     texture::{
@@ -331,9 +331,9 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
     ) -> Result<Vec<(&'c QueueFamilyT, Vec<f32>)>> {
         queue_negotiator.find(adapter, &TexLoadQueue)?;
 
-        Ok(vec![queue_negotiator
-            .family_spec::<TexLoadQueue>(&adapter.queue_families, 1)
-            .ok_or(EnvironmentError::NoSuitableFamilies)?])
+        Ok(vec![
+            queue_negotiator.family_spec::<TexLoadQueue>(&adapter.queue_families, 1)?
+        ])
     }
 }
 

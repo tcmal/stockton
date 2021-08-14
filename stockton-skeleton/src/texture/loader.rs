@@ -216,10 +216,7 @@ where
             .queue_negotiator_mut()
             .family::<Q>()
             .ok_or(EnvironmentError::NoSuitableFamilies)?;
-        let queue_lock = context
-            .queue_negotiator_mut()
-            .get_queue::<Q>()
-            .ok_or(EnvironmentError::NoQueues)?;
+        let queue_lock = context.queue_negotiator_mut().get_queue::<Q>()?;
 
         // Memory pools
         let tex_mempool = context.memory_pool()?.clone();
