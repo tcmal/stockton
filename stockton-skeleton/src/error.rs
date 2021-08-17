@@ -2,6 +2,8 @@
 
 use thiserror::Error;
 
+/// An error caused by a lock being poisoned.
+/// This indicates an issue somewhere else, in another thread.
 #[derive(Error, Debug)]
 pub enum LockPoisoned {
     #[error("Device lock poisoned")]
@@ -51,6 +53,7 @@ pub enum EnvironmentError {
     MemoryPoolMissing,
 }
 
+/// Indicates invalid usage of an API.
 #[derive(Debug, Error)]
 pub enum UsageError {
     #[error("Attempt to create mappable memory block from non-mappable memory")]
@@ -60,13 +63,7 @@ pub enum UsageError {
     QueueNegotiatorMisuse,
 }
 
-/// Indicates an issue with the level object being used
-#[derive(Debug, Error)]
-pub enum LevelError {
-    #[error("Referential Integrity broken")]
-    BadReference,
-}
-
+/// Displays an error with full backtrace
 pub fn full_error_display(err: anyhow::Error) -> String {
     let cont = err
         .chain()

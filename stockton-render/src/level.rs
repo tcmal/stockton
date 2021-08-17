@@ -15,7 +15,7 @@ use stockton_skeleton::{
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
-    error::{LevelError, LockPoisoned},
+    error::LockPoisoned,
     mem::{DataPool, DepthBufferPool, StagingPool, TexturesPool},
     queue_negotiator::QueueNegotiator,
     texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
@@ -49,6 +49,7 @@ use hal::{
 };
 use legion::{Entity, IntoQuery};
 use shaderc::ShaderKind;
+use thiserror::Error;
 
 /// The Vertexes that go to the shader
 #[derive(Debug, Clone, Copy)]
@@ -467,4 +468,11 @@ where
             queue_negotiator.family_spec::<TexLoadQueue>(&adapter.queue_families, 1)?
         ])
     }
+}
+
+/// Indicates an issue with the level object being used
+#[derive(Debug, Error)]
+pub enum LevelError {
+    #[error("Referential Integrity broken")]
+    BadReference,
 }
