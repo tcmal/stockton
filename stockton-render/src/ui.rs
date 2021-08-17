@@ -123,19 +123,22 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
             .ok_or_else(|| anyhow!("UI not set up properly."))?;
         let shapes = ui.ctx().tessellate(shapes);
 
+        let mut next_idx_idx = 0;
+        let mut next_vert_idx = 0;
         for ClippedMesh(rect, tris) in shapes.iter() {
             assert!(tris.texture_id == TextureId::Egui);
 
             // Copy triangles/indicies
             for i in (0..tris.indices.len()).step_by(3) {
-                self.draw_buffers.index_buffer[i / 3] = (
+                self.draw_buffers.index_buffer[next_idx_idx + (i / 3)] = (
                     tris.indices[i].try_into()?,
                     tris.indices[i + 1].try_into()?,
                     tris.indices[i + 2].try_into()?,
                 );
             }
+
             for (i, vertex) in tris.vertices.iter().enumerate() {
-                self.draw_buffers.vertex_buffer[i] = UiPoint(
+                self.draw_buffers.vertex_buffer[next_vert_idx + i] = UiPoint(
                     Vector2::new(vertex.pos.x, vertex.pos.y),
                     Vector2::new(vertex.uv.x, vertex.uv.y),
                     [
@@ -146,6 +149,7 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
                     ],
                 );
             }
+
             // TODO: *Properly* deal with textures
             if let Some(ds) = self.repo.attempt_get_descriptor_set(0) {
                 unsafe {
@@ -172,11 +176,18 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
                         empty(),
                     );
                     // Call draw
-                    cmd_buffer.draw_indexed(0..tris.indices.len() as u32, 0, 0..1);
+                    cmd_buffer.draw_indexed(
+                        (next_idx_idx as u32 * 3)..((next_idx_idx * 3) + tris.indices.len()) as u32,
+                        next_vert_idx as i32,
+                        0..1,
+                    );
                 }
             } else {
                 self.repo.queue_load(0)?;
             }
+
+            next_idx_idx += tris.indices.len() / 3;
+            next_vert_idx += tris.vertices.len();
         }
 
         unsafe {
