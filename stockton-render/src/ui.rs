@@ -275,7 +275,7 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
             .renderpass(RenderpassSpec {
                 colors: vec![AttachmentSpec {
                     attachment: Attachment {
-                        format: Some(context.target_chain().properties().format),
+                        format: Some(context.properties().color_format),
                         samples: 1,
                         ops: P::attachment_ops(),
                         stencil_ops: P::attachment_ops(),
@@ -312,22 +312,21 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
             let pipeline = spec
                 .build(
                     &mut device,
-                    context.target_chain().properties().extent,
-                    context.target_chain().properties(),
+                    context.properties().extent,
                     once(&*repo.get_ds_layout()?),
                 )
                 .context("Error building pipeline")?;
 
-            let fat = context.target_chain().properties().framebuffer_attachment();
+            let fat = context.properties().swapchain_framebuffer_attachment();
             let framebuffers = TargetSpecificResources::new(
                 || unsafe {
                     Ok(device.create_framebuffer(
                         &pipeline.renderpass,
                         IntoIter::new([fat.clone()]),
-                        context.target_chain().properties().extent,
+                        context.properties().extent,
                     )?)
                 },
-                context.target_chain().properties().image_count as usize,
+                context.properties().image_count as usize,
             )?;
             (pipeline, framebuffers)
         };

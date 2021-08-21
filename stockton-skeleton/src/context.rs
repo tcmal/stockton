@@ -10,7 +10,14 @@ use std::{
 };
 
 use anyhow::{Context, Result};
-use hal::{pool::CommandPoolCreateFlags, PhysicalDeviceProperties};
+use hal::{
+    format::{ChannelType, Format, ImageFeature},
+    image::{Extent, FramebufferAttachment, Usage, ViewCapabilities},
+    pool::CommandPoolCreateFlags,
+    pso::Viewport,
+    window::{CompositeAlphaMode, PresentMode},
+    PhysicalDeviceProperties,
+};
 use log::debug;
 
 use winit::window::Window;
@@ -18,7 +25,7 @@ use winit::window::Window;
 use super::{
     draw_passes::{DrawPass, IntoDrawPass},
     queue_negotiator::{DrawQueue, QueueNegotiator},
-    target::{SwapchainProperties, TargetChain},
+    target::TargetChain,
 };
 use crate::{
     draw_passes::Singular,
@@ -62,6 +69,9 @@ pub struct RenderingContext {
 
     /// The list of memory pools
     memory_pools: HashMap<TypeId, Box<dyn Any>>,
+
+    /// Shared properties for this context
+    properties: ContextProperties,
 }
 
 impl RenderingContext {
@@ -138,9 +148,9 @@ impl RenderingContext {
 
         queue_negotiator.set_queue_groups(queue_groups);
 
-        // Figure out what our swapchain will look like
-        let swapchain_properties = SwapchainProperties::find_best(&adapter, &surface)
-            .context("Error getting properties for swapchain")?;
+        // Context properties
+        let properties = ContextProperties::find_best(&adapter, &surface)
+            .context("Error getting context properties")?;
 
         // Lock device
         let mut device = device_lock
@@ -148,7 +158,7 @@ impl RenderingContext {
             .map_err(|_| LockPoisoned::Device)
             .context("Error getting device lock")?;
 
-        debug!("Detected swapchain properties: {:?}", swapchain_properties);
+        debug!("Detected swapchain properties: {:?}", properties);
 
         // Command pool
         let mut cmd_pool = unsafe {
@@ -162,14 +172,8 @@ impl RenderingContext {
         .context("Error creating draw command pool")?;
 
         // Swapchain and associated resources
-        let target_chain = TargetChain::new(
-            &mut device,
-            &adapter,
-            surface,
-            &mut cmd_pool,
-            swapchain_properties,
-        )
-        .context("Error creating target chain")?;
+        let target_chain = TargetChain::new(&mut device, surface, &mut cmd_pool, &properties)
+            .context("Error creating target chain")?;
 
         // Unlock device
         drop(device);
@@ -193,6 +197,7 @@ impl RenderingContext {
 
             pixels_per_point: window.scale_factor() as f32,
             memory_pools: HashMap::new(),
+            properties,
         })
     }
 
@@ -213,18 +218,12 @@ impl RenderingContext {
         let surface = ManuallyDrop::into_inner(read(&self.target_chain))
             .deactivate_with_recyling(&mut device, &mut self.cmd_pool);
 
-        let properties = SwapchainProperties::find_best(&self.adapter, &surface)
+        self.properties = ContextProperties::find_best(&self.adapter, &surface)
             .context("Error finding best swapchain properties")?;
 
         self.target_chain = ManuallyDrop::new(
-            TargetChain::new(
-                &mut device,
-                &self.adapter,
-                surface,
-                &mut self.cmd_pool,
-                properties,
-            )
-            .context("Error creating target chain")?,
+            TargetChain::new(&mut device, surface, &mut self.cmd_pool, &self.properties)
+                .context("Error creating target chain")?,
         );
         Ok(())
     }
@@ -309,6 +308,11 @@ impl RenderingContext {
             .get(&TypeId::of::<P>())
             .map(|x| x.downcast_ref().unwrap())
     }
+
+    /// Get a reference to the rendering context's properties.
+    pub fn properties(&self) -> &ContextProperties {
+        &self.properties
+    }
 }
 
 impl core::ops::Drop for RenderingContext {
@@ -329,6 +333,119 @@ impl core::ops::Drop for RenderingContext {
             );
 
             device.destroy_command_pool(ManuallyDrop::into_inner(read(&self.cmd_pool)));
+        }
+    }
+}
+
+/// Common properties shared by this entire context
+#[derive(Debug, Clone)]
+pub struct ContextProperties {
+    /// Format to be used by colour attachments. Used by swapchain images.
+    pub color_format: Format,
+
+    /// Recommended format to be used by depth attachments.
+    pub depth_format: Format,
+
+    /// The present mode being used by the context
+    pub present_mode: PresentMode,
+
+    /// How the swapchain is handling alpha values in the end image
+    pub composite_alpha_mode: CompositeAlphaMode,
+
+    pub viewport: Viewport,
+    pub extent: Extent,
+
+    /// The maximum number of frames we queue at once.
+    pub image_count: u32,
+}
+
+impl ContextProperties {
+    /// Find the best properties for the given adapter and surface
+    pub fn find_best(
+        adapter: &Adapter,
+        surface: &SurfaceT,
+    ) -> Result<ContextProperties, EnvironmentError> {
+        let caps = surface.capabilities(&adapter.physical_device);
+        let formats = surface.supported_formats(&adapter.physical_device);
+
+        // Use the first SRGB format our surface prefers
+        let color_format = match formats {
+            Some(formats) => formats
+                .iter()
+                .find(|format| format.base_format().1 == ChannelType::Srgb)
+                .copied()
+                .ok_or(EnvironmentError::ColorFormat),
+            None => Ok(Format::Rgba8Srgb),
+        }?;
+
+        // Use the most preferable format our adapter prefers.
+        let depth_format = *[
+            Format::D32SfloatS8Uint,
+            Format::D24UnormS8Uint,
+            Format::D32Sfloat,
+        ]
+        .iter()
+        .find(|format| {
+            format.is_depth()
+                && adapter
+                    .physical_device
+                    .format_properties(Some(**format))
+                    .optimal_tiling
+                    .contains(ImageFeature::DEPTH_STENCIL_ATTACHMENT)
+        })
+        .ok_or(EnvironmentError::DepthFormat)?;
+
+        // V-Sync if possible
+        let present_mode = [
+            PresentMode::MAILBOX,
+            PresentMode::FIFO,
+            PresentMode::RELAXED,
+            PresentMode::IMMEDIATE,
+        ]
+        .iter()
+        .cloned()
+        .find(|pm| caps.present_modes.contains(*pm))
+        .ok_or(EnvironmentError::PresentMode)?;
+
+        // Prefer opaque
+        let composite_alpha_mode = [
+            CompositeAlphaMode::OPAQUE,
+            CompositeAlphaMode::INHERIT,
+            CompositeAlphaMode::PREMULTIPLIED,
+            CompositeAlphaMode::POSTMULTIPLIED,
+        ]
+        .iter()
+        .cloned()
+        .find(|ca| caps.composite_alpha_modes.contains(*ca))
+        .ok_or(EnvironmentError::CompositeAlphaMode)?;
+
+        let extent = caps.extents.end().to_extent(); // Size
+        let viewport = Viewport {
+            rect: extent.rect(),
+            depth: 0.0..1.0,
+        };
+
+        Ok(ContextProperties {
+            color_format,
+            depth_format,
+            present_mode,
+            composite_alpha_mode,
+            extent,
+            viewport,
+            image_count: if present_mode == PresentMode::MAILBOX {
+                ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(3))
+            } else {
+                ((*caps.image_count.end()) - 1).min((*caps.image_count.start()).max(2))
+            },
+        })
+    }
+
+    /// Get the framebuffer attachment to use for swapchain images
+    pub fn swapchain_framebuffer_attachment(&self) -> FramebufferAttachment {
+        FramebufferAttachment {
+            usage: Usage::COLOR_ATTACHMENT,
+            format: self.color_format,
+            view_caps: ViewCapabilities::empty(),
         }
     }
 }

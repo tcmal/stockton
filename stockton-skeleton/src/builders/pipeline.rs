@@ -1,7 +1,5 @@
 use super::{renderpass::RenderpassSpec, shader::ShaderDesc};
-use crate::{
-    error::EnvironmentError, target::SwapchainProperties, types::*, utils::get_pixel_size,
-};
+use crate::{error::EnvironmentError, types::*, utils::get_pixel_size};
 
 use std::{mem::ManuallyDrop, ops::Range};
 
@@ -114,7 +112,6 @@ impl PipelineSpec {
         self,
         device: &mut DeviceT,
         extent: hal::image::Extent,
-        _swapchain_properties: &SwapchainProperties,
         set_layouts: T,
     ) -> Result<CompletePipeline> {
         // Renderpass

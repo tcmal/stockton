@@ -85,7 +85,7 @@ pub struct UiState {
 
 impl UiState {
     pub fn populate_initial_state<T: DrawPass<Singular>>(&mut self, renderer: &Renderer<T>) {
-        let props = &renderer.context().target_chain().properties();
+        let props = renderer.context().properties();
         self.set_dimensions(props.extent.width, props.extent.height);
         self.set_pixels_per_point(Some(renderer.context().pixels_per_point()));
         debug!("{:?}", self.raw_input);

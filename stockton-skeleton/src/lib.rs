@@ -72,7 +72,7 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
     }
 
     pub fn get_aspect_ratio(&self) -> f32 {
-        let e = self.context.target_chain().properties().extent;
+        let e = self.context.properties().extent;
         e.width as f32 / e.height as f32
     }
 

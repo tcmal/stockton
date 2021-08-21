@@ -198,7 +198,7 @@ mod rendy {
                     .create_image(
                         Kind::D2(16, 16, 1, 1),
                         1,
-                        context.target_chain().properties().depth_format,
+                        context.properties().depth_format,
                         Tiling::Optimal,
                         Usage::SAMPLED,
                         SparseFlags::empty(),

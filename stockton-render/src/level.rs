@@ -357,7 +357,7 @@ where
             .renderpass(RenderpassSpec {
                 colors: vec![AttachmentSpec {
                     attachment: Attachment {
-                        format: Some(context.target_chain().properties().format),
+                        format: Some(context.properties().color_format),
                         samples: 1,
                         ops: P::attachment_ops(),
                         stencil_ops: P::attachment_ops(),
@@ -368,7 +368,7 @@ where
                 }],
                 depth: Some(AttachmentSpec {
                     attachment: Attachment {
-                        format: Some(context.target_chain().properties().depth_format),
+                        format: Some(context.properties().depth_format),
                         samples: 1,
                         ops: AttachmentOps::new(
                             AttachmentLoadOp::Clear,
@@ -406,16 +406,15 @@ where
             let pipeline = spec
                 .build(
                     &mut device,
-                    context.target_chain().properties().extent,
-                    context.target_chain().properties(),
+                    context.properties().extent,
                     once(&*repo.get_ds_layout()?),
                 )
                 .context("Error building pipeline")?;
 
-            let fat = context.target_chain().properties().framebuffer_attachment();
+            let fat = context.properties().swapchain_framebuffer_attachment();
             let dat = FramebufferAttachment {
                 usage: Usage::DEPTH_STENCIL_ATTACHMENT,
-                format: context.target_chain().properties().depth_format,
+                format: context.properties().depth_format,
                 view_caps: ViewCapabilities::empty(),
             };
             let framebuffers = TargetSpecificResources::new(
@@ -423,22 +422,22 @@ where
                     Ok(device.create_framebuffer(
                         &pipeline.renderpass,
                         IntoIter::new([fat.clone(), dat.clone()]),
-                        context.target_chain().properties().extent,
+                        context.properties().extent,
                     )?)
                 },
-                context.target_chain().properties().image_count as usize,
+                context.properties().image_count as usize,
             )?;
 
             (pipeline, framebuffers)
         };
         let db_spec = ImageSpec {
-            width: context.target_chain().properties().extent.width,
-            height: context.target_chain().properties().extent.height,
-            format: context.target_chain().properties().depth_format,
+            width: context.properties().extent.width,
+            height: context.properties().extent.height,
+            format: context.properties().depth_format,
             usage: Usage::DEPTH_STENCIL_ATTACHMENT,
             resources: DEPTH_RESOURCES,
         };
-        let img_count = context.target_chain().properties().image_count;
+        let img_count = context.properties().image_count;
         let depth_buffers = TargetSpecificResources::new(
             || {
                 BoundImageView::from_context(context, &db_spec)
