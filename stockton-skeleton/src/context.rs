@@ -31,6 +31,7 @@ use crate::{
     draw_passes::Singular,
     error::{EnvironmentError, LockPoisoned},
     mem::MemoryPool,
+    queue_negotiator::QueueFamilyNegotiator,
     types::*,
 };
 
@@ -95,25 +96,18 @@ impl RenderingContext {
         let adapter = adapters.remove(0);
 
         // Queue Negotiator
-        let mut queue_families_specs = Vec::new();
-        let (mut queue_negotiator, surface) = {
+        let (queue_negotiator, surface) = {
             let dq: DrawQueue = DrawQueue { surface };
 
-            let mut qn = QueueNegotiator::default();
+            let mut qn = QueueFamilyNegotiator::new();
 
             // Draw Queue
-            qn.find(&adapter, &dq)
+            qn.find(&adapter, &dq, 1)
                 .context("Couldn't find draw queue family")?;
-            queue_families_specs.push(
-                qn.family_spec::<DrawQueue>(&adapter.queue_families, 1)
-                    .context("Couldn't find draw queue family")?,
-            );
 
             // Auxiliary queues for DP
-            queue_families_specs.extend(
-                IDP::find_aux_queues(&adapter, &mut qn)
-                    .context("Level pass couldn't populate queue negotiator")?,
-            );
+            IDP::find_aux_queues(&adapter, &mut qn)
+                .context("Level pass couldn't populate queue family negotiator")?;
 
             (qn, dq.surface)
         };
@@ -123,30 +117,19 @@ impl RenderingContext {
             // TODO: This sucks, but hal is restrictive on how we can pass this specific argument.
 
             // Deduplicate families & convert to specific type.
-            let mut queue_families_specs_real = Vec::with_capacity(queue_families_specs.len());
-            for (qf, ns) in queue_families_specs.iter_mut() {
-                if let Some(existing_family_spec) = queue_families_specs_real
-                    .iter()
-                    .position(|(qf2, _): &(&QueueFamilyT, &[f32])| qf2.id() == qf.id())
-                {
-                    ns.extend(queue_families_specs_real[existing_family_spec].1.iter());
-                    queue_families_specs_real[existing_family_spec] = (*qf, ns.as_slice());
-                } else {
-                    queue_families_specs_real.push((*qf, ns.as_slice()))
-                }
-            }
+            let open_spec = queue_negotiator.get_open_spec(&adapter);
 
             let gpu = unsafe {
                 adapter
                     .physical_device
-                    .open(queue_families_specs_real.as_slice(), hal::Features::empty())
+                    .open(&open_spec.as_vec(), hal::Features::empty())
                     .context("Error opening logical device")?
             };
 
             (Arc::new(RwLock::new(gpu.device)), gpu.queue_groups)
         };
 
-        queue_negotiator.set_queue_groups(queue_groups);
+        let mut queue_negotiator = queue_negotiator.finish(queue_groups);
 
         // Context properties
         let properties = ContextProperties::find_best(&adapter, &surface)

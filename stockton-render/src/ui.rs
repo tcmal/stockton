@@ -11,7 +11,7 @@ use stockton_skeleton::{
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
     error::LockPoisoned,
     mem::{DataPool, StagingPool, TexturesPool},
-    queue_negotiator::QueueNegotiator,
+    queue_negotiator::QueueFamilyNegotiator,
     texture::{
         resolver::TextureResolver, LoadableImage, TexLoadQueue, TextureLoadConfig, TextureRepo,
     },
@@ -341,13 +341,11 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
 
     fn find_aux_queues<'c>(
         adapter: &'c Adapter,
-        queue_negotiator: &mut QueueNegotiator,
-    ) -> Result<Vec<(&'c QueueFamilyT, Vec<f32>)>> {
-        queue_negotiator.find(adapter, &TexLoadQueue)?;
+        queue_negotiator: &mut QueueFamilyNegotiator,
+    ) -> Result<()> {
+        queue_negotiator.find(adapter, &TexLoadQueue, 1)?;
 
-        Ok(vec![
-            queue_negotiator.family_spec::<TexLoadQueue>(&adapter.queue_families, 1)?
-        ])
+        Ok(())
     }
 }
 

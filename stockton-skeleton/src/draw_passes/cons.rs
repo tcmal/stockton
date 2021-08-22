@@ -2,7 +2,7 @@
 //! Note that this can be extended to an arbitrary amount of draw passes.
 
 use super::{Beginning, DrawPass, End, IntoDrawPass, Middle, Singular};
-use crate::{context::RenderingContext, queue_negotiator::QueueNegotiator, types::*};
+use crate::{context::RenderingContext, queue_negotiator::QueueFamilyNegotiator, types::*};
 use stockton_types::Session;
 
 use anyhow::Result;
@@ -73,11 +73,11 @@ macro_rules! into_shared_impl {
 
         fn find_aux_queues<'a>(
             adapter: &'a Adapter,
-            queue_negotiator: &mut QueueNegotiator,
-        ) -> Result<Vec<(&'a QueueFamilyT, Vec<f32>)>> {
-            let mut v = IA::find_aux_queues(adapter, queue_negotiator)?;
-            v.extend(IB::find_aux_queues(adapter, queue_negotiator)?);
-            Ok(v)
+            queue_negotiator: &mut QueueFamilyNegotiator,
+        ) -> Result<()> {
+            IA::find_aux_queues(adapter, queue_negotiator)?;
+            IB::find_aux_queues(adapter, queue_negotiator)?;
+            Ok(())
         }
     };
 }
