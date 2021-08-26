@@ -18,6 +18,8 @@ pub mod texture;
 pub mod types;
 pub mod utils;
 
+use std::mem::ManuallyDrop;
+
 use context::RenderingContext;
 use draw_passes::{DrawPass, IntoDrawPass, Singular};
 
@@ -30,7 +32,7 @@ use winit::window::Window;
 /// Also takes ownership of the window and channels window events to be processed outside winit's event loop.
 pub struct Renderer<DP> {
     /// All the vulkan stuff
-    context: RenderingContext,
+    context: ManuallyDrop<RenderingContext>,
 
     /// The draw pass we're using
     draw_pass: DP,
@@ -50,40 +52,58 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
             .init(session, &mut context)
             .context("Error initialising draw pass")?;
 
-        Ok(Renderer { context, draw_pass })
+        Ok(Renderer {
+            context: ManuallyDrop::new(context),
+            draw_pass,
+        })
     }
 
     /// Render a single frame of the given session.
-    pub fn render(&mut self, session: &Session) -> Result<()> {
-        // Try to draw
-        if self
-            .context
-            .draw_next_frame(session, &mut self.draw_pass)
-            .is_err()
-        {
-            // Probably the surface changed
-            self.handle_surface_change(session)?;
-
-            // If it fails twice, then error
-            self.context.draw_next_frame(session, &mut self.draw_pass)?;
+    /// If this returns an error, the whole renderer is dead, hence it takes ownership to ensure it can't be called in that case.
+    pub fn render(mut self, session: &Session) -> Result<Renderer<DP>> {
+        // Safety: If this fails at any point, the ManuallyDrop won't be touched again, as Renderer will be dropped.
+        // Hence, we can always take from the ManuallyDrop
+        unsafe {
+            match ManuallyDrop::take(&mut self.context)
+                .draw_next_frame(session, &mut self.draw_pass)
+            {
+                Ok(c) => {
+                    self.context = ManuallyDrop::new(c);
+                    Ok(self)
+                }
+                Err((_e, c)) => {
+                    // TODO: Try to detect if the error is actually surface related.
+                    let c = c.attempt_recovery()?;
+                    match c.draw_next_frame(session, &mut self.draw_pass) {
+                        Ok(c) => {
+                            self.context = ManuallyDrop::new(c);
+                            Ok(self)
+                        }
+                        Err((e, _c)) => Err(e),
+                    }
+                }
+            }
         }
+    }
 
-        Ok(())
+    /// Recreate the surface, and other derived components.
+    /// This should be called when the window is resized.
+    pub fn recreate_surface(mut self, session: &Session) -> Result<Renderer<DP>> {
+        // Safety: If this fails at any point, the ManuallyDrop won't be touched again, as Renderer will be dropped.
+        // Hence, we can always take from the ManuallyDrop
+        unsafe {
+            let ctx = ManuallyDrop::take(&mut self.context).recreate_surface()?;
+            self.context = ManuallyDrop::new(ctx);
+        }
+        self.draw_pass
+            .handle_surface_change(session, &mut self.context)?;
+
+        Ok(self)
     }
 
     pub fn get_aspect_ratio(&self) -> f32 {
         let e = self.context.properties().extent;
         e.width as f32 / e.height as f32
-    }
-
-    pub fn handle_surface_change(&mut self, session: &Session) -> Result<()> {
-        unsafe {
-            self.context.handle_surface_change()?;
-            self.draw_pass
-                .handle_surface_change(session, &mut self.context)?;
-        }
-
-        Ok(())
     }
 
     /// Get a reference to the renderer's context.

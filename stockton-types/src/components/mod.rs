@@ -59,17 +59,3 @@ pub struct CameraSettings {
     /// Far clipping plane (world units)
     pub far: f32,
 }
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct CameraVPMatrix {
-    /// The camera's VP Matrix
-    pub vp_matrix: Mat4,
-}
-
-impl Default for CameraVPMatrix {
-    fn default() -> Self {
-        CameraVPMatrix {
-            vp_matrix: Mat4::identity(),
-        }
-    }
-}

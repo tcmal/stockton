@@ -22,16 +22,8 @@ use stockton_skeleton::{
     types::*,
 };
 use stockton_types::{
-    components::{CameraSettings, CameraVPMatrix, Transform},
+    components::{CameraSettings, Transform},
     *,
-};
-
-use std::{
-    array::IntoIter,
-    convert::TryInto,
-    iter::{empty, once},
-    marker::PhantomData,
-    sync::{Arc, RwLock},
 };
 
 use anyhow::{Context, Result};
@@ -48,7 +40,15 @@ use hal::{
     },
 };
 use legion::{Entity, IntoQuery};
+use na::{look_at_lh, perspective_lh_zo};
 use shaderc::ShaderKind;
+use std::{
+    array::IntoIter,
+    convert::TryInto,
+    iter::{empty, once},
+    marker::PhantomData,
+    sync::{Arc, RwLock},
+};
 use thiserror::Error;
 
 /// The Vertexes that go to the shader
@@ -90,10 +90,43 @@ where
             .record_commit_cmds(cmd_buffer)?;
 
         // Get level & camera
-        let mut query = <(&Transform, &CameraSettings, &CameraVPMatrix)>::query();
-        let (camera_transform, camera_settings, camera_vp) = query
+        let mut query = <(&Transform, &CameraSettings)>::query();
+        let (camera_transform, camera_settings) = query
             .get(&session.world, self.active_camera)
             .context("Couldn't find camera components")?;
+
+        let camera_vp = {
+            let aspect_ratio =
+                self.pipeline.render_area.w as f32 / self.pipeline.render_area.h as f32;
+
+            // Get look direction from euler angles
+            let direction = euler_to_direction(&camera_transform.rotation);
+
+            // Converts world space to camera space
+            let view_matrix = look_at_lh(
+                &camera_transform.position,
+                &(camera_transform.position + direction),
+                &Vector3::new(0.0, 1.0, 0.0),
+            );
+
+            // Converts camera space to screen space
+            let projection_matrix = {
+                let mut temp = perspective_lh_zo(
+                    aspect_ratio,
+                    camera_settings.fov,
+                    camera_settings.near,
+                    camera_settings.far,
+                );
+
+                // Vulkan's co-ord system is different from OpenGLs
+                temp[(1, 1)] *= -1.0;
+
+                temp
+            };
+
+            // Chain them together into a single matrix
+            projection_matrix * view_matrix
+        };
         let map_lock: Arc<RwLock<M>> = session.resources.get::<Arc<RwLock<M>>>().unwrap().clone();
         let map = map_lock.read().map_err(|_| LockPoisoned::Map)?;
 
@@ -131,7 +164,7 @@ where
             cmd_buffer.bind_graphics_pipeline(&self.pipeline.pipeline);
 
             // VP Matrix
-            let vp = &*(camera_vp.vp_matrix.data.as_slice() as *const [f32] as *const [u32]);
+            let vp = &*(camera_vp.data.as_slice() as *const [f32] as *const [u32]);
 
             cmd_buffer.push_graphics_constants(
                 &self.pipeline.pipeline_layout,
@@ -238,7 +271,7 @@ where
     fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
         self.draw_buffers.deactivate(context);
         unsafe {
-            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+            let mut device = context.lock_device()?;
             self.pipeline.deactivate(&mut device);
             for fb in self.framebuffers.dissolve() {
                 device.destroy_framebuffer(fb);
@@ -402,7 +435,7 @@ where
         let draw_buffers =
             DrawBuffers::from_context(context).context("Error creating draw buffers")?;
         let (pipeline, framebuffers) = {
-            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+            let mut device = context.lock_device()?;
             let pipeline = spec
                 .build(
                     &mut device,
@@ -457,8 +490,8 @@ where
         })
     }
 
-    fn find_aux_queues<'c>(
-        adapter: &'c Adapter,
+    fn find_aux_queues(
+        adapter: &Adapter,
         queue_negotiator: &mut QueueFamilyNegotiator,
     ) -> Result<()> {
         queue_negotiator.find(adapter, &TexLoadQueue, 1)?;
@@ -472,4 +505,16 @@ where
 pub enum LevelError {
     #[error("Referential Integrity broken")]
     BadReference,
+}
+
+fn euler_to_direction(euler: &Vector3) -> Vector3 {
+    let pitch = euler.x;
+    let yaw = euler.y;
+    let _roll = euler.z; // TODO: Support camera roll
+
+    Vector3::new(
+        yaw.sin() * pitch.cos(),
+        pitch.sin(),
+        yaw.cos() * pitch.cos(),
+    )
 }

@@ -68,11 +68,7 @@ where
         // Create Channels
         let (req_send, req_recv) = channel();
         let (resp_send, resp_recv) = channel();
-        let device = context
-            .device()
-            .write()
-            .map_err(|_| LockPoisoned::Device)
-            .context("Error getting device lock")?;
+        let device = context.lock_device()?;
 
         // Create descriptor set layout
         let ds_lock = Arc::new(RwLock::new(
@@ -193,7 +189,7 @@ where
                 .unwrap();
 
             // Only now can we lock device without deadlocking
-            let mut device = context.device().write().unwrap();
+            let mut device = context.lock_device().unwrap();
 
             // Return all the texture memory and descriptors.
             for (_, v) in self.blocks.drain() {

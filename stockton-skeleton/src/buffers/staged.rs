@@ -56,7 +56,7 @@ where
         context.ensure_memory_pool::<SP>()?;
 
         // Lock the device and memory pools
-        let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+        let mut device = context.lock_device()?;
         let mut mempool = context
             .existing_memory_pool::<P>()
             .unwrap()
@@ -111,7 +111,7 @@ where
     /// Destroy all Vulkan objects. Should be called before dropping.
     pub fn deactivate(mut self, context: &mut RenderingContext) {
         unsafe {
-            let device = &mut *context.device().write().unwrap();
+            let device = &mut *context.lock_device().unwrap();
 
             self.staged_memory.unmap(device).unwrap();
 

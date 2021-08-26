@@ -19,7 +19,6 @@ use stockton_levels::{
     types::Rgba,
 };
 use stockton_render::{
-    camera::calc_vp_matrix_system,
     level::{LevelDrawPass, LevelDrawPassConfig},
     ui::UiDrawPass,
     window::{process_window_events_system, UiState, WindowEvent, WindowFlow},
@@ -28,7 +27,7 @@ use stockton_skeleton::{
     draw_passes::ConsDrawPass, error::full_error_display, texture::resolver::FsResolver, Renderer,
 };
 use stockton_types::{
-    components::{CameraSettings, CameraVPMatrix, Transform},
+    components::{CameraSettings, Transform},
     Session, Vector2, Vector3,
 };
 
@@ -162,15 +161,10 @@ fn try_main() -> Result<()> {
     let mut session = Session::new(move |schedule| {
         schedule
             .add_system(update_deltatime_system())
-            .add_system(process_window_events_system::<
-                MovementInputsManager,
-                Dp<'static>,
-            >())
+            .add_system(process_window_events_system::<MovementInputsManager>())
             .flush()
             .add_system(hello_world_system())
-            .add_system(flycam_move_system::<MovementInputsManager>())
-            .flush()
-            .add_thread_local(calc_vp_matrix_system::<Dp<'static>>());
+            .add_system(flycam_move_system::<MovementInputsManager>());
     });
 
     session.resources.insert(map.clone());
@@ -190,7 +184,6 @@ fn try_main() -> Result<()> {
             fov: 90.0,
             near: 0.1,
         },
-        CameraVPMatrix::default(),
         FlycamControlled::new(512.0, 400.0),
     ));
 
@@ -217,7 +210,7 @@ fn try_main() -> Result<()> {
         ui.populate_initial_state(&renderer);
     }
 
-    session.resources.insert(renderer);
+    let mut renderer = Some(renderer);
 
     // Done loading - This is our main loop.
     // It just communicates events to the session and continuously ticks
@@ -228,15 +221,38 @@ fn try_main() -> Result<()> {
             }
             Event::RedrawRequested(_) => {
                 session.do_update();
-                let mut renderer = session
-                    .resources
-                    .get_mut::<Renderer<Dp<'static>>>()
-                    .unwrap();
-                renderer.render(&session).unwrap();
+                let r = renderer.take().unwrap();
+                match r.render(&session) {
+                    Ok(r) => {
+                        renderer = Some(r);
+                    }
+                    Err(e) => {
+                        println!("Error drawing: {}", full_error_display(e));
+
+                        // TODO: Not really sound
+                        *(new_control_flow.write().unwrap()) = ControlFlow::Exit;
+                    }
+                }
             }
             _ => {
                 if let Some(we) = WindowEvent::from(&event) {
-                    tx.send(we).unwrap()
+                    tx.send(we).unwrap();
+
+                    println!("{:?}", we);
+                    if let WindowEvent::SizeChanged(_, _) = we {
+                        let r = renderer.take().unwrap();
+                        match r.recreate_surface(&session) {
+                            Ok(r) => {
+                                renderer = Some(r);
+                            }
+                            Err(e) => {
+                                println!("Error resizing: {}", full_error_display(e));
+
+                                // TODO: Not really sound
+                                *(new_control_flow.write().unwrap()) = ControlFlow::Exit;
+                            }
+                        }
+                    }
                 }
             }
         }

@@ -4,7 +4,10 @@
 //! using [`RenderingContext.pool_allocator`]
 //! Alternatively, some default memory pools are availble when the feature `rendy_pools` is used (on by default).
 
-use crate::{context::RenderingContext, types::*};
+use crate::{
+    context::{DeactivatedMemoryPools, RenderingContext, StatefulRenderingContext},
+    types::*,
+};
 
 use std::{
     ops::Range,
@@ -36,7 +39,7 @@ pub trait MemoryPool: Send + Sync + 'static {
     fn free(&mut self, device: &DeviceT, block: Self::Block) -> u64;
 
     /// Deactivate this memory pool, freeing any allocated memory objects.
-    fn deactivate(self, context: &mut RenderingContext);
+    fn deactivate(self, context: &mut StatefulRenderingContext<DeactivatedMemoryPools>);
 }
 
 /// Block that owns a `Range` of the `Memory`.
@@ -78,7 +81,7 @@ mod rendy {
     use super::*;
 
     use crate::{
-        error::{EnvironmentError, LockPoisoned, UsageError},
+        error::{EnvironmentError, UsageError},
         utils::find_memory_type_id,
     };
 
@@ -128,7 +131,7 @@ mod rendy {
 
                 // Size and alignment don't necessarily stay the same, so we're forced to
                 // guess at the alignment for our allocator.
-                let device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+                let device = context.lock_device()?;
                 let img = device
                     .create_image(
                         Kind::D2(16, 16, 1, 1),
@@ -170,7 +173,7 @@ mod rendy {
             Ok(Arc::new(RwLock::new(Self(allocator))))
         }
 
-        fn deactivate(self, _context: &mut RenderingContext) {
+        fn deactivate(self, _context: &mut StatefulRenderingContext<DeactivatedMemoryPools>) {
             self.0.dispose();
         }
     }
@@ -193,7 +196,7 @@ mod rendy {
             let type_mask = unsafe {
                 use hal::image::{Kind, Tiling, Usage, ViewCapabilities};
 
-                let device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+                let device = context.lock_device()?;
                 let img = device
                     .create_image(
                         Kind::D2(16, 16, 1, 1),
@@ -235,7 +238,7 @@ mod rendy {
             Ok(Arc::new(RwLock::new(Self(allocator))))
         }
 
-        fn deactivate(self, _context: &mut RenderingContext) {
+        fn deactivate(self, _context: &mut StatefulRenderingContext<DeactivatedMemoryPools>) {
             self.0.dispose()
         }
     }
@@ -277,7 +280,7 @@ mod rendy {
             Ok(Arc::new(RwLock::new(StagingPool(allocator))))
         }
 
-        fn deactivate(self, _context: &mut RenderingContext) {
+        fn deactivate(self, _context: &mut StatefulRenderingContext<DeactivatedMemoryPools>) {
             self.0.dispose()
         }
     }
@@ -318,7 +321,7 @@ mod rendy {
             Ok(Arc::new(RwLock::new(DataPool(allocator))))
         }
 
-        fn deactivate(self, _context: &mut RenderingContext) {
+        fn deactivate(self, _context: &mut StatefulRenderingContext<DeactivatedMemoryPools>) {
             self.0.dispose()
         }
     }

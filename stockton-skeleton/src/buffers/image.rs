@@ -73,7 +73,7 @@ impl<P: MemoryPool> BoundImageView<P> {
             .write()
             .map_err(|_| LockPoisoned::MemoryPool)?;
 
-        let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+        let mut device = context.lock_device()?;
         let row_alignment_mask = context
             .physical_device_properties()
             .limits
@@ -149,11 +149,7 @@ impl<P: MemoryPool> BoundImageView<P> {
 
     /// Destroy all vulkan objects. Must be called before dropping.
     pub fn deactivate_with_context(self, context: &mut RenderingContext) {
-        let mut device = context
-            .device()
-            .write()
-            .map_err(|_| LockPoisoned::Device)
-            .unwrap();
+        let mut device = context.lock_device().unwrap();
         let mut pool = context
             .existing_memory_pool::<P>()
             .unwrap()
@@ -227,7 +223,7 @@ impl<P: MemoryPool> SampledImage<P> {
             .write()
             .map_err(|_| LockPoisoned::MemoryPool)?;
 
-        let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+        let mut device = context.lock_device()?;
         let row_alignment_mask = context
             .physical_device_properties()
             .limits
@@ -267,11 +263,7 @@ impl<P: MemoryPool> SampledImage<P> {
 
     /// Destroy all vulkan objects. Must be called before dropping.
     pub fn deactivate_with_context(self, context: &mut RenderingContext) {
-        let mut device = context
-            .device()
-            .write()
-            .map_err(|_| LockPoisoned::Device)
-            .unwrap();
+        let mut device = context.lock_device().unwrap();
         let mut pool = context
             .existing_memory_pool::<P>()
             .unwrap()

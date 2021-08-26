@@ -4,17 +4,19 @@
 use std::{
     any::{Any, TypeId},
     collections::HashMap,
+    marker::PhantomData,
     mem::ManuallyDrop,
     ptr::read,
-    sync::{Arc, RwLock},
+    sync::{Arc, RwLock, RwLockWriteGuard},
 };
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use hal::{
     format::{ChannelType, Format, ImageFeature},
     image::{Extent, FramebufferAttachment, Usage, ViewCapabilities},
     pool::CommandPoolCreateFlags,
     pso::Viewport,
+    queue::QueueFamilyId,
     window::{CompositeAlphaMode, PresentMode},
     PhysicalDeviceProperties,
 };
@@ -29,17 +31,16 @@ use super::{
 };
 use crate::{
     draw_passes::Singular,
-    error::{EnvironmentError, LockPoisoned},
+    error::{EnvironmentError, LockPoisoned, UsageError},
     mem::MemoryPool,
-    queue_negotiator::QueueFamilyNegotiator,
+    queue_negotiator::{QueueFamilyNegotiator, QueueFamilySelector, SharedQueue},
     types::*,
 };
 
 use stockton_types::Session;
 
-/// Contains most root vulkan objects, and some precalculated info such as best formats to use.
-/// In most cases, this and the DrawPass should contain all vulkan objects present.
-pub struct RenderingContext {
+/// The actual data behind [`StatefulRenderingContext`]
+struct InnerRenderingContext {
     /// Vulkan Instance
     instance: ManuallyDrop<back::Instance>,
 
@@ -75,7 +76,43 @@ pub struct RenderingContext {
     properties: ContextProperties,
 }
 
-impl RenderingContext {
+/// A type enum for different states the `RenderingContext` can be in.
+pub trait RenderingContextState: private::Sealed {}
+
+/// Normal operation.
+pub struct Normal;
+impl RenderingContextState for Normal {}
+
+/// The last draw failed, most likely meaning the surface needs re-created, or the entire context is toast.
+pub struct LastDrawFailed;
+impl RenderingContextState for LastDrawFailed {}
+
+/// All memory pools have been deactivated. This should only be used when shutting down
+pub struct DeactivatedMemoryPools;
+impl RenderingContextState for DeactivatedMemoryPools {}
+
+/// Seal `RenderingContextState`
+mod private {
+    pub trait Sealed {}
+    impl Sealed for super::Normal {}
+    impl Sealed for super::LastDrawFailed {}
+    impl Sealed for super::DeactivatedMemoryPools {}
+}
+
+/// Contains most root vulkan objects, and some precalculated info such as best formats to use.
+/// In most cases, this and the DrawPass should contain all Vulkan objects present.
+/// [`RenderingContext`] is a convenience type that applies in most situations.
+pub struct StatefulRenderingContext<S: RenderingContextState>(
+    /// The actual data. This is boxed so that there's less overhead when transitioning type state.
+    Box<InnerRenderingContext>,
+    PhantomData<S>,
+);
+
+/// Convenience type, since we often want to refer to normal operation
+pub type RenderingContext = StatefulRenderingContext<Normal>;
+
+/// Methods only implemented in normal operation
+impl StatefulRenderingContext<Normal> {
     /// Create a new RenderingContext for the given window.
     pub fn new<IDP: IntoDrawPass<DP, Singular>, DP: DrawPass<Singular>>(
         window: &Window,
@@ -96,7 +133,7 @@ impl RenderingContext {
         let adapter = adapters.remove(0);
 
         // Queue Negotiator
-        let (queue_negotiator, surface) = {
+        let (family_negotiator, surface) = {
             let dq: DrawQueue = DrawQueue { surface };
 
             let mut qn = QueueFamilyNegotiator::new();
@@ -117,7 +154,7 @@ impl RenderingContext {
             // TODO: This sucks, but hal is restrictive on how we can pass this specific argument.
 
             // Deduplicate families & convert to specific type.
-            let open_spec = queue_negotiator.get_open_spec(&adapter);
+            let open_spec = family_negotiator.get_open_spec(&adapter);
 
             let gpu = unsafe {
                 adapter
@@ -129,141 +166,106 @@ impl RenderingContext {
             (Arc::new(RwLock::new(gpu.device)), gpu.queue_groups)
         };
 
-        let mut queue_negotiator = queue_negotiator.finish(queue_groups);
+        let mut queue_negotiator = family_negotiator.finish(queue_groups);
 
         // Context properties
         let properties = ContextProperties::find_best(&adapter, &surface)
             .context("Error getting context properties")?;
 
-        // Lock device
-        let mut device = device_lock
-            .write()
-            .map_err(|_| LockPoisoned::Device)
-            .context("Error getting device lock")?;
+        debug!("Detected context properties: {:?}", properties);
 
-        debug!("Detected swapchain properties: {:?}", properties);
+        let (cmd_pool, target_chain) = {
+            // Lock device
+            let mut device = device_lock
+                .write()
+                .map_err(|_| LockPoisoned::Device)
+                .context("Error getting device lock")?;
 
-        // Command pool
-        let mut cmd_pool = unsafe {
-            device.create_command_pool(
-                queue_negotiator
-                    .family::<DrawQueue>()
-                    .ok_or(EnvironmentError::NoSuitableFamilies)?,
-                CommandPoolCreateFlags::RESET_INDIVIDUAL,
-            )
-        }
-        .context("Error creating draw command pool")?;
+            // Command pool
+            let mut cmd_pool = unsafe {
+                device.create_command_pool(
+                    queue_negotiator
+                        .family::<DrawQueue>()
+                        .ok_or(EnvironmentError::NoSuitableFamilies)?,
+                    CommandPoolCreateFlags::RESET_INDIVIDUAL,
+                )
+            }
+            .context("Error creating draw command pool")?;
 
-        // Swapchain and associated resources
-        let target_chain = TargetChain::new(&mut device, surface, &mut cmd_pool, &properties)
-            .context("Error creating target chain")?;
+            // Swapchain and associated resources
+            let target_chain = TargetChain::new(&mut device, surface, &mut cmd_pool, &properties)
+                .context("Error creating target chain")?;
 
-        // Unlock device
-        drop(device);
+            (cmd_pool, target_chain)
+        };
 
         let queue = queue_negotiator
             .get_queue::<DrawQueue>()
             .context("Error getting draw queue")?;
 
-        Ok(RenderingContext {
-            instance: ManuallyDrop::new(instance),
+        Ok(StatefulRenderingContext(
+            Box::new(InnerRenderingContext {
+                instance: ManuallyDrop::new(instance),
 
-            device: device_lock,
-            physical_device_properties: adapter.physical_device.properties(),
-            adapter,
+                device: device_lock,
+                physical_device_properties: adapter.physical_device.properties(),
+                adapter,
 
-            queue_negotiator,
-            queue,
+                queue_negotiator,
+                queue,
 
-            target_chain: ManuallyDrop::new(target_chain),
-            cmd_pool: ManuallyDrop::new(cmd_pool),
+                target_chain: ManuallyDrop::new(target_chain),
+                cmd_pool: ManuallyDrop::new(cmd_pool),
 
-            pixels_per_point: window.scale_factor() as f32,
-            memory_pools: HashMap::new(),
-            properties,
-        })
+                pixels_per_point: window.scale_factor() as f32,
+                memory_pools: HashMap::new(),
+                properties,
+            }),
+            PhantomData,
+        ))
     }
 
-    /// If this function fails the whole context is probably dead
-    /// # Safety
-    /// The context must not be used while this is being called
-    pub unsafe fn handle_surface_change(&mut self) -> Result<()> {
-        let mut device = self
-            .device
-            .write()
-            .map_err(|_| LockPoisoned::Device)
-            .context("Error getting device lock")?;
-
-        device
-            .wait_idle()
-            .context("Error waiting for device to become idle")?;
-
-        let surface = ManuallyDrop::into_inner(read(&self.target_chain))
-            .deactivate_with_recyling(&mut device, &mut self.cmd_pool);
-
-        self.properties = ContextProperties::find_best(&self.adapter, &surface)
-            .context("Error finding best swapchain properties")?;
-
-        self.target_chain = ManuallyDrop::new(
-            TargetChain::new(&mut device, surface, &mut self.cmd_pool, &self.properties)
-                .context("Error creating target chain")?,
-        );
-        Ok(())
-    }
-
-    /// Draw onto the next frame of the swapchain
+    /// Draw onto the next frame of the swapchain.
+    /// This takes ownership so we can transition to `LastDrawFailed` if an error occurs.
+    /// If it does, you can try to recover with [`StatefulRenderingContext::attempt_recovery`]
     pub fn draw_next_frame<DP: DrawPass<Singular>>(
+        mut self,
+        session: &Session,
+        dp: &mut DP,
+    ) -> Result<RenderingContext, (anyhow::Error, StatefulRenderingContext<LastDrawFailed>)> {
+        if let Err(e) = self.attempt_draw_next_frame(session, dp) {
+            Err((e, StatefulRenderingContext(self.0, PhantomData)))
+        } else {
+            Ok(self)
+        }
+    }
+
+    /// The actual drawing attempt
+    fn attempt_draw_next_frame<DP: DrawPass<Singular>>(
         &mut self,
         session: &Session,
         dp: &mut DP,
     ) -> Result<()> {
+        // Lock device & queue. We can't use our nice convenience function, because of borrowing issues
         let mut device = self
+            .0
             .device
             .write()
             .map_err(|_| LockPoisoned::Device)
             .context("Error getting device lock")?;
         let mut queue = self
+            .0
             .queue
             .write()
             .map_err(|_| LockPoisoned::Queue)
             .context("Error getting draw queue lock")?;
 
-        // Level draw pass
-        self.target_chain
+        self.0
+            .target_chain
             .do_draw_with(&mut device, &mut queue, dp, session)
             .context("Error preparing next target")?;
 
         Ok(())
-    }
-
-    /// Get a reference to the rendering context's pixels per point.
-    pub fn pixels_per_point(&self) -> f32 {
-        self.pixels_per_point
-    }
-
-    /// Get a reference to the rendering context's device.
-    pub fn device(&self) -> &Arc<RwLock<DeviceT>> {
-        &self.device
-    }
-
-    /// Get a reference to the rendering context's target chain.
-    pub fn target_chain(&self) -> &TargetChain {
-        &self.target_chain
-    }
-
-    /// Get a reference to the rendering context's adapter.
-    pub fn adapter(&self) -> &Adapter {
-        &self.adapter
-    }
-
-    /// Get a mutable reference to the rendering context's queue negotiator.
-    pub fn queue_negotiator_mut(&mut self) -> &mut QueueNegotiator {
-        &mut self.queue_negotiator
-    }
-
-    /// Get a reference to the physical device's properties.
-    pub fn physical_device_properties(&self) -> &PhysicalDeviceProperties {
-        &self.physical_device_properties
     }
 
     /// Get the specified memory pool, lazily initialising it if it's not yet present
@@ -276,8 +278,9 @@ impl RenderingContext {
     #[allow(clippy::map_entry)] // We can't follow the suggestion because of a borrowing issue
     pub fn ensure_memory_pool<P: MemoryPool>(&mut self) -> Result<()> {
         let tid = TypeId::of::<P>();
-        if !self.memory_pools.contains_key(&tid) {
-            self.memory_pools
+        if !self.0.memory_pools.contains_key(&tid) {
+            self.0
+                .memory_pools
                 .insert(tid, Box::new(P::from_context(self)?));
         }
         Ok(())
@@ -287,36 +290,130 @@ impl RenderingContext {
     /// You should only use this when you're certain it exists, such as when freeing memory
     /// allocated from that pool
     pub fn existing_memory_pool<P: MemoryPool>(&self) -> Option<&Arc<RwLock<P>>> {
-        self.memory_pools
+        self.0
+            .memory_pools
             .get(&TypeId::of::<P>())
             .map(|x| x.downcast_ref().unwrap())
     }
 
-    /// Get a reference to the rendering context's properties.
-    pub fn properties(&self) -> &ContextProperties {
-        &self.properties
+    /// Deactivate all stored memory pools.
+    pub fn deactivate_memory_pools(
+        self,
+    ) -> Result<StatefulRenderingContext<DeactivatedMemoryPools>> {
+        // TODO: Properly deactivate memory pools
+
+        Ok(StatefulRenderingContext(self.0, PhantomData))
     }
 }
 
-impl core::ops::Drop for RenderingContext {
-    fn drop(&mut self) {
-        {
-            self.device.write().unwrap().wait_idle().unwrap();
-        }
+impl StatefulRenderingContext<LastDrawFailed> {
+    /// If this function fails the whole context is probably dead
+    pub fn attempt_recovery(self) -> Result<RenderingContext> {
+        let this = self.recreate_surface()?;
+        Ok(StatefulRenderingContext(this.0, PhantomData))
+    }
+}
 
-        // TODO: Better deactivation code
+// Methods implemented for all states
+impl<S: RenderingContextState> StatefulRenderingContext<S> {
+    /// Get the current pixels per point.
+    pub fn pixels_per_point(&self) -> f32 {
+        self.0.pixels_per_point
+    }
 
+    /// Get a new reference to the lock for the device used by this context.
+    /// This can be used when instantiating code that runs in another thread.
+    pub fn clone_device_lock(&self) -> Arc<RwLock<DeviceT>> {
+        self.0.device.clone()
+    }
+
+    /// Lock the device used by this rendering context
+    pub fn lock_device(&self) -> Result<RwLockWriteGuard<'_, DeviceT>> {
+        Ok(self.0.device.write().map_err(|_| LockPoisoned::Device)?)
+    }
+
+    /// Get a reference to the rendering context's adapter.
+    pub fn adapter(&self) -> &Adapter {
+        &self.0.adapter
+    }
+
+    /// Get a shared queue from the family that was selected with T.
+    /// You should already have called [`crate::queue_negotiator::QueueFamilyNegotiator::find`], otherwise this will return an error.
+    pub fn get_queue<T: QueueFamilySelector>(&mut self) -> Result<SharedQueue> {
+        self.0.queue_negotiator.get_queue::<T>()
+    }
+
+    /// Get the family that was selected by T.
+    /// You should already have called [`crate::queue_negotiator::QueueFamilyNegotiator::find`], otherwise this will return an error.
+    pub fn get_queue_family<T: QueueFamilySelector>(&self) -> Result<QueueFamilyId> {
+        self.0
+            .queue_negotiator
+            .family::<T>()
+            .ok_or(anyhow!(UsageError::QueueNegotiatorMisuse))
+    }
+
+    /// Get a reference to the physical device's properties.
+    pub fn physical_device_properties(&self) -> &PhysicalDeviceProperties {
+        &self.0.physical_device_properties
+    }
+    /// Get a reference to the rendering context's properties.
+    pub fn properties(&self) -> &ContextProperties {
+        &self.0.properties
+    }
+
+    /// Recreate the surface, swapchain, and other derived components.
+    pub fn recreate_surface(mut self) -> Result<Self> {
+        // TODO: Deactivate if this fails
         unsafe {
-            let mut device = self.device.write().unwrap();
+            let mut device = self
+                .0
+                .device
+                .write()
+                .map_err(|_| LockPoisoned::Device)
+                .context("Error getting device lock")?;
 
-            ManuallyDrop::into_inner(read(&self.target_chain)).deactivate(
-                &mut self.instance,
-                &mut device,
-                &mut self.cmd_pool,
+            device
+                .wait_idle()
+                .context("Error waiting for device to become idle")?;
+
+            let surface = ManuallyDrop::into_inner(read(&self.0.target_chain))
+                .deactivate_with_recyling(&mut device, &mut self.0.cmd_pool);
+
+            self.0.properties = ContextProperties::find_best(&self.0.adapter, &surface)
+                .context("Error finding best swapchain properties")?;
+
+            // TODO: This is unsound, if we return an error here `self.0.TargetChain` may be accessed again.
+            self.0.target_chain = ManuallyDrop::new(
+                TargetChain::new(
+                    &mut device,
+                    surface,
+                    &mut self.0.cmd_pool,
+                    &self.0.properties,
+                )
+                .context("Error creating target chain")?,
             );
-
-            device.destroy_command_pool(ManuallyDrop::into_inner(read(&self.cmd_pool)));
         }
+
+        Ok(StatefulRenderingContext(self.0, PhantomData))
+    }
+}
+
+// Methods only implemented after we start deactivating
+impl StatefulRenderingContext<DeactivatedMemoryPools> {
+    pub fn deactivate(mut self) -> Result<()> {
+        self.lock_device()?.wait_idle()?;
+
+        // TODO: The rest of the deactivation code needs updated.
+        unsafe {
+            let mut device = self.0.device.write().map_err(|_| LockPoisoned::Device)?;
+
+            let target_chain = ManuallyDrop::take(&mut self.0.target_chain);
+            target_chain.deactivate(&mut self.0.instance, &mut device, &mut self.0.cmd_pool);
+
+            device.destroy_command_pool(ManuallyDrop::into_inner(self.0.cmd_pool));
+        }
+
+        Ok(())
     }
 }
 

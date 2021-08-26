@@ -27,7 +27,7 @@ where
     pub fn from_context(context: &mut RenderingContext, size: u64) -> Result<Self> {
         context.ensure_memory_pool::<P>()?;
 
-        let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+        let mut device = context.lock_device()?;
         let mut mempool = context
             .existing_memory_pool()
             .unwrap()
@@ -70,7 +70,7 @@ where
     }
 
     pub fn deactivate_context(self, context: &mut RenderingContext) {
-        let mut device = context.device().write().unwrap();
+        let mut device = context.lock_device().unwrap();
         let mut mempool = context.existing_memory_pool().unwrap().write().unwrap();
 
         self.deactivate_device_pool(&mut device, &mut mempool)

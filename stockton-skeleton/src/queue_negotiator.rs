@@ -70,7 +70,7 @@ impl QueueFamilyNegotiator {
         mut count: usize,
     ) -> Result<()> {
         if let Entry::Occupied(e) = self.family_ids.entry(TypeId::of::<T>()) {
-            count = count + e.get().0;
+            count += e.get().0;
         }
 
         let candidates: Vec<&QueueFamilyT> = adapter
@@ -123,12 +123,18 @@ impl QueueFamilyNegotiator {
     }
 
     /// Finish selecting our queue families, and turn this into a `QueueNegotiator`
-    pub fn finish<'a>(self, queue_groups: Vec<QueueGroup>) -> QueueNegotiator {
+    pub fn finish(self, queue_groups: Vec<QueueGroup>) -> QueueNegotiator {
         QueueNegotiator {
             family_ids: self.family_ids,
             already_allocated: HashMap::new(),
             all: queue_groups,
         }
+    }
+}
+
+impl Default for QueueFamilyNegotiator {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -164,7 +170,7 @@ impl QueueNegotiator {
     /// You should already have called [`self::QueueFamilyNegotiator::find`], otherwise this will return an error.
     ///
     /// The family of the queue returned is guaranteed to meet the spec of the `QueueFamilySelector` originally used by `find`.
-    pub fn get_queue<T: QueueFamilySelector>(&mut self) -> Result<Arc<RwLock<QueueT>>> {
+    pub fn get_queue<T: QueueFamilySelector>(&mut self) -> Result<SharedQueue> {
         let tid = TypeId::of::<T>();
         let (_, family_id) = self
             .family_ids

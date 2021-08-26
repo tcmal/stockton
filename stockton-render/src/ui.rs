@@ -9,7 +9,6 @@ use stockton_skeleton::{
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
-    error::LockPoisoned,
     mem::{DataPool, StagingPool, TexturesPool},
     queue_negotiator::QueueFamilyNegotiator,
     texture::{
@@ -201,7 +200,7 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
         self.draw_buffers.deactivate(context);
 
         unsafe {
-            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+            let mut device = context.lock_device()?;
             self.pipeline.deactivate(&mut device);
             for fb in self.framebuffers.dissolve() {
                 device.destroy_framebuffer(fb);
@@ -307,7 +306,7 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
             DrawBuffers::from_context(context).context("Error creating draw buffers")?;
 
         let (pipeline, framebuffers) = {
-            let mut device = context.device().write().map_err(|_| LockPoisoned::Device)?;
+            let mut device = context.lock_device()?;
 
             let pipeline = spec
                 .build(
@@ -339,8 +338,8 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
         })
     }
 
-    fn find_aux_queues<'c>(
-        adapter: &'c Adapter,
+    fn find_aux_queues(
+        adapter: &Adapter,
         queue_negotiator: &mut QueueFamilyNegotiator,
     ) -> Result<()> {
         queue_negotiator.find(adapter, &TexLoadQueue, 1)?;

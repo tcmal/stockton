@@ -216,7 +216,7 @@ impl WindowFlow {
 
 #[system]
 /// A system to process the window events sent to renderer by the winit event loop.
-pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass<Singular>>(
+pub fn _process_window_events<T: 'static + InputManager>(
     #[resource] window_channel: &mut WindowFlow,
     #[resource] manager: &mut T,
     #[resource] mouse: &mut Mouse,
@@ -273,7 +273,6 @@ pub fn _process_window_events<T: 'static + InputManager, DP: 'static + DrawPass<
     manager.handle_frame(&actions_buf[0..actions_buf_cursor]);
 }
 
-pub fn process_window_events_system<T: 'static + InputManager, DP: 'static + DrawPass<Singular>>(
-) -> impl Runnable {
-    _process_window_events_system::<T, DP>(Vec::with_capacity(4))
+pub fn process_window_events_system<T: 'static + InputManager>() -> impl Runnable {
+    _process_window_events_system::<T>(Vec::with_capacity(4))
 }

@@ -1,7 +1,7 @@
 //! Traits and common draw passes.
 use std::ops::Range;
 
-use crate::{queue_negotiator::QueueFamilyNegotiator, types::*, RenderingContext};
+use crate::{context::RenderingContext, queue_negotiator::QueueFamilyNegotiator, types::*};
 use hal::{
     image::Layout,
     pass::{AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
@@ -44,8 +44,8 @@ pub trait IntoDrawPass<T: DrawPass<P>, P: PassPosition> {
 
     /// This function should ask the queue negotatior to find families for any auxilary operations this draw pass needs to perform
     /// For example, .find(&TexLoadQueue)
-    fn find_aux_queues<'a>(
-        adapter: &'a Adapter,
+    fn find_aux_queues(
+        adapter: &Adapter,
         queue_negotiator: &mut QueueFamilyNegotiator,
     ) -> Result<()>;
 }

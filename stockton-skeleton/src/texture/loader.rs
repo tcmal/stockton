@@ -12,7 +12,7 @@ use super::{
 use crate::{
     buffers::image::SampledImage,
     context::RenderingContext,
-    error::{EnvironmentError, LockPoisoned},
+    error::LockPoisoned,
     mem::{MappableBlock, MemoryPool},
     queue_negotiator::QueueFamilySelector,
     types::*,
@@ -216,22 +216,16 @@ where
         config: TextureLoadConfig<R>,
     ) -> Result<Self> {
         // Queue family & Lock
-        let family = context
-            .queue_negotiator_mut()
-            .family::<Q>()
-            .ok_or(EnvironmentError::NoSuitableFamilies)?;
-        let queue_lock = context.queue_negotiator_mut().get_queue::<Q>()?;
+        let family = context.get_queue_family::<Q>()?;
+        let queue_lock = context.get_queue::<Q>()?;
 
         // Memory pools
         let tex_mempool = context.memory_pool()?.clone();
         let staging_mempool = context.memory_pool()?.clone();
 
         // Lock device
-        let device_lock = context.device().clone();
-        let mut device = device_lock
-            .write()
-            .map_err(|_| LockPoisoned::Device)
-            .context("Error getting device lock")?;
+        let device_lock = context.clone_device_lock();
+        let mut device = context.lock_device().context("Error getting device lock")?;
 
         // Physical properties
         let device_props = context.physical_device_properties();
