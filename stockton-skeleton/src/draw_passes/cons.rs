@@ -32,12 +32,26 @@ macro_rules! cons_shared_impl {
         }
 
         fn handle_surface_change(
-            &mut self,
+            mut self,
             session: &Session,
             context: &mut RenderingContext,
-        ) -> Result<()> {
-            self.a.handle_surface_change(session, context)?;
-            self.b.handle_surface_change(session, context)
+        ) -> Result<Self> {
+            match self.a.handle_surface_change(session, context) {
+                Ok(a) => self.a = a,
+                Err(e) => {
+                    self.b.deactivate(context)?;
+                    return Err(e);
+                }
+            }
+            match self.b.handle_surface_change(session, context) {
+                Ok(b) => self.b = b,
+                Err(e) => {
+                    self.a.deactivate(context)?;
+                    return Err(e);
+                }
+            }
+
+            Ok(self)
         }
     };
 }

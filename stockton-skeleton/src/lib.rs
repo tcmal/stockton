@@ -35,7 +35,7 @@ pub struct Renderer<DP> {
     context: ManuallyDrop<RenderingContext>,
 
     /// The draw pass we're using
-    draw_pass: DP,
+    draw_pass: ManuallyDrop<DP>,
 }
 
 impl<DP: DrawPass<Singular>> Renderer<DP> {
@@ -54,7 +54,7 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
 
         Ok(Renderer {
             context: ManuallyDrop::new(context),
-            draw_pass,
+            draw_pass: ManuallyDrop::new(draw_pass),
         })
     }
 
@@ -65,7 +65,7 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
         // Hence, we can always take from the ManuallyDrop
         unsafe {
             match ManuallyDrop::take(&mut self.context)
-                .draw_next_frame(session, &mut self.draw_pass)
+                .draw_next_frame(session, &mut *self.draw_pass)
             {
                 Ok(c) => {
                     self.context = ManuallyDrop::new(c);
@@ -74,7 +74,7 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
                 Err((_e, c)) => {
                     // TODO: Try to detect if the error is actually surface related.
                     let c = c.attempt_recovery()?;
-                    match c.draw_next_frame(session, &mut self.draw_pass) {
+                    match c.draw_next_frame(session, &mut *self.draw_pass) {
                         Ok(c) => {
                             self.context = ManuallyDrop::new(c);
                             Ok(self)
@@ -94,9 +94,11 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
         unsafe {
             let ctx = ManuallyDrop::take(&mut self.context).recreate_surface()?;
             self.context = ManuallyDrop::new(ctx);
+
+            let dp = ManuallyDrop::take(&mut self.draw_pass)
+                .handle_surface_change(session, &mut self.context)?;
+            self.draw_pass = ManuallyDrop::new(dp);
         }
-        self.draw_pass
-            .handle_surface_change(session, &mut self.context)?;
 
         Ok(self)
     }

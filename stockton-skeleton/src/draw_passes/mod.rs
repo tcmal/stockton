@@ -27,11 +27,15 @@ pub trait DrawPass<P: PassPosition> {
     ) -> Result<()>;
 
     /// Called just after the surface changes (probably a resize).
+    /// This takes ownership and returns itself to ensure that the `DrawPass` is not called again if it fails.
+    /// This means you should deactivate as much as possible in case of an error.
     fn handle_surface_change(
-        &mut self,
+        self,
         session: &Session,
         context: &mut RenderingContext,
-    ) -> Result<()>;
+    ) -> Result<Self>
+    where
+        Self: Sized;
 
     /// Deactivate any vulkan parts that need to be deactivated
     fn deactivate(self, context: &mut RenderingContext) -> Result<()>;

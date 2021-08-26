@@ -238,7 +238,6 @@ fn try_main() -> Result<()> {
                 if let Some(we) = WindowEvent::from(&event) {
                     tx.send(we).unwrap();
 
-                    println!("{:?}", we);
                     if let WindowEvent::SizeChanged(_, _) = we {
                         let r = renderer.take().unwrap();
                         match r.recreate_surface(&session) {

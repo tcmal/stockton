@@ -10,8 +10,8 @@ use stockton_skeleton::{
         image::{BoundImageView, ImageSpec, DEPTH_RESOURCES},
     },
     builders::{
-        AttachmentSpec, CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc,
-        VertexBufferSpec, VertexPrimitiveAssemblerSpec,
+        AttachmentSpec, CompletePipeline, PipelineSpec, PipelineSpecBuilder, RenderpassSpec,
+        ShaderDesc, VertexBufferSpec, VertexPrimitiveAssemblerSpec,
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
@@ -286,11 +286,41 @@ where
     }
 
     fn handle_surface_change(
-        &mut self,
+        mut self,
         _session: &Session,
-        _context: &mut RenderingContext,
-    ) -> Result<()> {
-        todo!()
+        context: &mut RenderingContext,
+    ) -> Result<Self> {
+        // TODO: Handle deactivation if any of this fails.
+
+        // Recreate depth buffers
+        for db in self.depth_buffers.dissolve() {
+            db.deactivate_with_context(context);
+        }
+        self.depth_buffers = create_depth_buffers(context)?;
+
+        {
+            let mut device = context.lock_device()?;
+
+            // Recreate pipeline
+            self.pipeline.deactivate(&mut device);
+            self.pipeline = create_pipeline_spec::<P>(context)?
+                .build(
+                    &mut device,
+                    context.properties().extent,
+                    once(&*self.repo.get_ds_layout()?),
+                )
+                .context("Error building pipeline")?;
+
+            // Recreate framebuffers
+            for fb in self.framebuffers.dissolve() {
+                unsafe {
+                    device.destroy_framebuffer(fb);
+                }
+            }
+            self.framebuffers = create_framebuffers(&mut device, &self.pipeline, context)?;
+        }
+
+        Ok(self)
     }
 }
 impl<'a, M> LevelDrawPass<'a, M> {
@@ -335,93 +365,7 @@ where
         _session: &mut Session,
         context: &mut RenderingContext,
     ) -> Result<LevelDrawPass<'a, M>> {
-        let spec = PipelineSpecBuilder::default()
-            .rasterizer(Rasterizer {
-                polygon_mode: PolygonMode::Fill,
-                cull_face: Face::BACK,
-                front_face: FrontFace::CounterClockwise,
-                depth_clamping: false,
-                depth_bias: None,
-                conservative: true,
-                line_width: State::Static(1.0),
-            })
-            .depth_stencil(DepthStencilDesc {
-                depth: Some(DepthTest {
-                    fun: Comparison::Less,
-                    write: true,
-                }),
-                depth_bounds: false,
-                stencil: None,
-            })
-            .blender(BlendDesc {
-                logic_op: Some(LogicOp::Copy),
-                targets: vec![ColorBlendDesc {
-                    mask: ColorMask::ALL,
-                    blend: Some(BlendState {
-                        color: BlendOp::Add {
-                            src: Factor::SrcAlpha,
-                            dst: Factor::OneMinusSrcAlpha,
-                        },
-                        alpha: BlendOp::Add {
-                            src: Factor::SrcAlpha,
-                            dst: Factor::OneMinusSrcAlpha,
-                        },
-                    }),
-                }],
-            })
-            .primitive_assembler(VertexPrimitiveAssemblerSpec::with_buffers(
-                InputAssemblerDesc::new(Primitive::TriangleList),
-                vec![VertexBufferSpec {
-                    attributes: vec![Format::Rgb32Sfloat, Format::R32Sint, Format::Rg32Sfloat],
-                    rate: VertexInputRate::Vertex,
-                }],
-            ))
-            .shader_vertex(ShaderDesc {
-                source: include_str!("./data/3d.vert").to_string(),
-                entry: "main".to_string(),
-                kind: ShaderKind::Vertex,
-            })
-            .shader_fragment(ShaderDesc {
-                source: include_str!("./data/3d.frag").to_string(),
-                entry: "main".to_string(),
-                kind: ShaderKind::Fragment,
-            })
-            .push_constants(vec![(ShaderStageFlags::VERTEX, 0..64)])
-            .renderpass(RenderpassSpec {
-                colors: vec![AttachmentSpec {
-                    attachment: Attachment {
-                        format: Some(context.properties().color_format),
-                        samples: 1,
-                        ops: P::attachment_ops(),
-                        stencil_ops: P::attachment_ops(),
-                        layouts: P::layout_as_range(),
-                    },
-
-                    used_layout: Layout::ColorAttachmentOptimal,
-                }],
-                depth: Some(AttachmentSpec {
-                    attachment: Attachment {
-                        format: Some(context.properties().depth_format),
-                        samples: 1,
-                        ops: AttachmentOps::new(
-                            AttachmentLoadOp::Clear,
-                            AttachmentStoreOp::DontCare,
-                        ),
-                        stencil_ops: AttachmentOps::new(
-                            AttachmentLoadOp::DontCare,
-                            AttachmentStoreOp::DontCare,
-                        ),
-                        layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
-                    },
-                    used_layout: Layout::DepthStencilAttachmentOptimal,
-                }),
-                inputs: vec![],
-                resolves: vec![],
-                preserves: vec![],
-            })
-            .build()
-            .context("Error building pipeline")?;
-
+        let spec = create_pipeline_spec::<P>(context)?;
         let repo = TextureRepo::new::<_, TexLoadQueue>(
             context,
             TextureLoadConfig {
@@ -430,7 +374,7 @@ where
                 wrap_mode: WrapMode::Tile,
             },
         )
-        .context("Error createing texture repo")?;
+        .context("Error creating texture repo")?;
 
         let draw_buffers =
             DrawBuffers::from_context(context).context("Error creating draw buffers")?;
@@ -444,40 +388,11 @@ where
                 )
                 .context("Error building pipeline")?;
 
-            let fat = context.properties().swapchain_framebuffer_attachment();
-            let dat = FramebufferAttachment {
-                usage: Usage::DEPTH_STENCIL_ATTACHMENT,
-                format: context.properties().depth_format,
-                view_caps: ViewCapabilities::empty(),
-            };
-            let framebuffers = TargetSpecificResources::new(
-                || unsafe {
-                    Ok(device.create_framebuffer(
-                        &pipeline.renderpass,
-                        IntoIter::new([fat.clone(), dat.clone()]),
-                        context.properties().extent,
-                    )?)
-                },
-                context.properties().image_count as usize,
-            )?;
+            let framebuffers = create_framebuffers(&mut device, &pipeline, context)?;
 
             (pipeline, framebuffers)
         };
-        let db_spec = ImageSpec {
-            width: context.properties().extent.width,
-            height: context.properties().extent.height,
-            format: context.properties().depth_format,
-            usage: Usage::DEPTH_STENCIL_ATTACHMENT,
-            resources: DEPTH_RESOURCES,
-        };
-        let img_count = context.properties().image_count;
-        let depth_buffers = TargetSpecificResources::new(
-            || {
-                BoundImageView::from_context(context, &db_spec)
-                    .context("Error creating depth buffer")
-            },
-            img_count as usize,
-        )?;
+        let depth_buffers = create_depth_buffers(context)?;
 
         Ok(LevelDrawPass {
             pipeline,
@@ -500,6 +415,30 @@ where
     }
 }
 
+fn create_framebuffers(
+    device: &mut DeviceT,
+    pipeline: &CompletePipeline,
+    context: &RenderingContext,
+) -> Result<TargetSpecificResources<FramebufferT>> {
+    let fat = context.properties().swapchain_framebuffer_attachment();
+    let dat = FramebufferAttachment {
+        usage: Usage::DEPTH_STENCIL_ATTACHMENT,
+        format: context.properties().depth_format,
+        view_caps: ViewCapabilities::empty(),
+    };
+
+    TargetSpecificResources::new(
+        || unsafe {
+            Ok(device.create_framebuffer(
+                &pipeline.renderpass,
+                IntoIter::new([fat.clone(), dat.clone()]),
+                context.properties().extent,
+            )?)
+        },
+        context.properties().image_count as usize,
+    )
+}
+
 /// Indicates an issue with the level object being used
 #[derive(Debug, Error)]
 pub enum LevelError {
@@ -516,5 +455,109 @@ fn euler_to_direction(euler: &Vector3) -> Vector3 {
         yaw.sin() * pitch.cos(),
         pitch.sin(),
         yaw.cos() * pitch.cos(),
+    )
+}
+
+fn create_pipeline_spec<P: PassPosition>(context: &RenderingContext) -> Result<PipelineSpec> {
+    Ok(PipelineSpecBuilder::default()
+        .rasterizer(Rasterizer {
+            polygon_mode: PolygonMode::Fill,
+            cull_face: Face::BACK,
+            front_face: FrontFace::CounterClockwise,
+            depth_clamping: false,
+            depth_bias: None,
+            conservative: true,
+            line_width: State::Static(1.0),
+        })
+        .depth_stencil(DepthStencilDesc {
+            depth: Some(DepthTest {
+                fun: Comparison::Less,
+                write: true,
+            }),
+            depth_bounds: false,
+            stencil: None,
+        })
+        .blender(BlendDesc {
+            logic_op: Some(LogicOp::Copy),
+            targets: vec![ColorBlendDesc {
+                mask: ColorMask::ALL,
+                blend: Some(BlendState {
+                    color: BlendOp::Add {
+                        src: Factor::SrcAlpha,
+                        dst: Factor::OneMinusSrcAlpha,
+                    },
+                    alpha: BlendOp::Add {
+                        src: Factor::SrcAlpha,
+                        dst: Factor::OneMinusSrcAlpha,
+                    },
+                }),
+            }],
+        })
+        .primitive_assembler(VertexPrimitiveAssemblerSpec::with_buffers(
+            InputAssemblerDesc::new(Primitive::TriangleList),
+            vec![VertexBufferSpec {
+                attributes: vec![Format::Rgb32Sfloat, Format::R32Sint, Format::Rg32Sfloat],
+                rate: VertexInputRate::Vertex,
+            }],
+        ))
+        .shader_vertex(ShaderDesc {
+            source: include_str!("./data/3d.vert").to_string(),
+            entry: "main".to_string(),
+            kind: ShaderKind::Vertex,
+        })
+        .shader_fragment(ShaderDesc {
+            source: include_str!("./data/3d.frag").to_string(),
+            entry: "main".to_string(),
+            kind: ShaderKind::Fragment,
+        })
+        .push_constants(vec![(ShaderStageFlags::VERTEX, 0..64)])
+        .renderpass(RenderpassSpec {
+            colors: vec![AttachmentSpec {
+                attachment: Attachment {
+                    format: Some(context.properties().color_format),
+                    samples: 1,
+                    ops: P::attachment_ops(),
+                    stencil_ops: P::attachment_ops(),
+                    layouts: P::layout_as_range(),
+                },
+
+                used_layout: Layout::ColorAttachmentOptimal,
+            }],
+            depth: Some(AttachmentSpec {
+                attachment: Attachment {
+                    format: Some(context.properties().depth_format),
+                    samples: 1,
+                    ops: AttachmentOps::new(AttachmentLoadOp::Clear, AttachmentStoreOp::DontCare),
+                    stencil_ops: AttachmentOps::new(
+                        AttachmentLoadOp::DontCare,
+                        AttachmentStoreOp::DontCare,
+                    ),
+                    layouts: Layout::Undefined..Layout::DepthStencilAttachmentOptimal,
+                },
+                used_layout: Layout::DepthStencilAttachmentOptimal,
+            }),
+            inputs: vec![],
+            resolves: vec![],
+            preserves: vec![],
+        })
+        .build()
+        .context("Error building pipeline")?)
+}
+
+fn create_depth_buffers(
+    context: &mut RenderingContext,
+) -> Result<TargetSpecificResources<BoundImageView<DepthBufferPool>>> {
+    let db_spec = ImageSpec {
+        width: context.properties().extent.width,
+        height: context.properties().extent.height,
+        format: context.properties().depth_format,
+        usage: Usage::DEPTH_STENCIL_ATTACHMENT,
+        resources: DEPTH_RESOURCES,
+    };
+    let img_count = context.properties().image_count;
+
+    TargetSpecificResources::new(
+        || BoundImageView::from_context(context, &db_spec).context("Error creating depth buffer"),
+        img_count as usize,
     )
 }
