@@ -274,6 +274,38 @@ impl StatefulRenderingContext<Normal> {
         Ok(self.existing_memory_pool::<P>().unwrap())
     }
 
+    /// Allocate memory from the given pool.
+    /// See [`crate::mem::MemoryPool::alloc`]
+    pub fn alloc<P: MemoryPool>(&mut self, size: u64, align: u64) -> Result<P::Block> {
+        self.ensure_memory_pool::<P>()?;
+
+        let device = self.lock_device()?;
+        let mut pool = self
+            .existing_memory_pool::<P>()
+            .unwrap()
+            .write()
+            .map_err(|_| LockPoisoned::MemoryPool)?;
+
+        Ok(pool.alloc(&device, size, align)?.0)
+    }
+
+    /// Free memory from the given pool.
+    /// See [`crate::mem::MemoryPool::free`]
+    pub fn free<P: MemoryPool>(&mut self, block: P::Block) -> Result<()> {
+        self.ensure_memory_pool::<P>()?;
+
+        let device = self.lock_device()?;
+        let mut pool = self
+            .existing_memory_pool::<P>()
+            .unwrap()
+            .write()
+            .map_err(|_| LockPoisoned::MemoryPool)?;
+
+        pool.free(&device, block);
+
+        Ok(())
+    }
+
     /// Ensure the specified memory pool is initialised.
     #[allow(clippy::map_entry)] // We can't follow the suggestion because of a borrowing issue
     pub fn ensure_memory_pool<P: MemoryPool>(&mut self) -> Result<()> {
