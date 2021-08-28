@@ -4,8 +4,8 @@ use crate::window::UiState;
 use stockton_skeleton::{
     buffers::draw::DrawBuffers,
     builders::{
-        AttachmentSpec, CompletePipeline, PipelineSpec, PipelineSpecBuilder, RenderpassSpec,
-        ShaderDesc, VertexBufferSpec, VertexPrimitiveAssemblerSpec,
+        AttachmentSpec, CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc,
+        VertexBufferSpec, VertexPrimitiveAssemblerSpec,
     },
     context::RenderingContext,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
@@ -47,11 +47,10 @@ pub struct UiPoint(pub Vector2, pub Vector2, pub [f32; 4]);
 
 /// Draw a Ui object
 pub struct UiDrawPass<'a> {
-    pipeline: CompletePipeline,
     repo: TextureRepo<TexturesPool, StagingPool>,
     draw_buffers: DrawBuffers<'a, UiPoint, DataPool, StagingPool>,
 
-    framebuffers: TargetSpecificResources<FramebufferT>,
+    surface_resources: SurfaceDependentResources,
 }
 
 impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
@@ -76,12 +75,12 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
         let ui: &mut UiState = &mut session.resources.get_mut::<UiState>().unwrap();
 
         // Get framebuffer and depth buffer
-        let fb = self.framebuffers.get_next();
+        let fb = self.surface_resources.framebuffers.get_next();
         unsafe {
             cmd_buffer.begin_render_pass(
-                &self.pipeline.renderpass,
+                &self.surface_resources.pipeline.renderpass,
                 fb,
-                self.pipeline.render_area,
+                self.surface_resources.pipeline.render_area,
                 vec![RenderAttachmentInfo {
                     image_view: img_view,
                     clear_value: ClearValue {
@@ -93,7 +92,7 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
                 .into_iter(),
                 SubpassContents::Inline,
             );
-            cmd_buffer.bind_graphics_pipeline(&self.pipeline.pipeline);
+            cmd_buffer.bind_graphics_pipeline(&self.surface_resources.pipeline.pipeline);
 
             // Bind buffers
             cmd_buffer.bind_vertex_buffers(
@@ -153,7 +152,7 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
             if let Some(ds) = self.repo.attempt_get_descriptor_set(0) {
                 unsafe {
                     cmd_buffer.push_graphics_constants(
-                        &self.pipeline.pipeline_layout,
+                        &self.surface_resources.pipeline.pipeline_layout,
                         ShaderStageFlags::VERTEX,
                         0,
                         &[screen.x.to_bits(), screen.y.to_bits()],
@@ -169,7 +168,7 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
                         }]),
                     );
                     cmd_buffer.bind_graphics_descriptor_sets(
-                        &self.pipeline.pipeline_layout,
+                        &self.surface_resources.pipeline.pipeline_layout,
                         0,
                         IntoIter::new([ds]),
                         empty(),
@@ -198,14 +197,7 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
 
     fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
         self.draw_buffers.deactivate(context);
-
-        unsafe {
-            let mut device = context.lock_device()?;
-            self.pipeline.deactivate(&mut device);
-            for fb in self.framebuffers.dissolve() {
-                device.destroy_framebuffer(fb);
-            }
-        }
+        self.surface_resources.deactivate(context)?;
         self.repo.deactivate(context);
 
         Ok(())
@@ -216,36 +208,23 @@ impl<'a, P: PassPosition> DrawPass<P> for UiDrawPass<'a> {
         _session: &Session,
         context: &mut RenderingContext,
     ) -> Result<Self> {
-        {
-            let mut device = context.lock_device()?;
+        let new_surface_resources =
+            SurfaceDependentResources::new::<P>(context, &*self.repo.get_ds_layout()?)?;
+        let old_surface_resources = self.surface_resources;
+        self.surface_resources = new_surface_resources;
 
-            // Recreate pipeline
-            self.pipeline.deactivate(&mut device);
-            self.pipeline = create_pipeline_spec::<P>(context)?
-                .build(
-                    &mut device,
-                    context.properties().extent,
-                    once(&*self.repo.get_ds_layout()?),
-                )
-                .context("Error building pipeline")?;
-
-            // Recreate framebuffers
-            for fb in self.framebuffers.dissolve() {
-                unsafe {
-                    device.destroy_framebuffer(fb);
-                }
+        match old_surface_resources.deactivate(context) {
+            Ok(_) => Ok(self),
+            Err(e) => {
+                <Self as DrawPass<P>>::deactivate(self, context)?;
+                Err(e)
             }
-            self.framebuffers = create_framebuffers(&mut device, context, &self.pipeline)?;
         }
-
-        Ok(self)
     }
 }
 
 impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
     fn init(self, session: &mut Session, context: &mut RenderingContext) -> Result<UiDrawPass<'a>> {
-        let spec = create_pipeline_spec::<P>(context)?;
-
         let ui: &mut UiState = &mut session.resources.get_mut::<UiState>().unwrap();
         let repo = TextureRepo::new::<_, TexLoadQueue>(
             context,
@@ -260,26 +239,13 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
         let draw_buffers =
             DrawBuffers::from_context(context).context("Error creating draw buffers")?;
 
-        let (pipeline, framebuffers) = {
-            let mut device = context.lock_device()?;
-
-            let pipeline = spec
-                .build(
-                    &mut device,
-                    context.properties().extent,
-                    once(&*repo.get_ds_layout()?),
-                )
-                .context("Error building pipeline")?;
-
-            let framebuffers = create_framebuffers(&mut device, context, &pipeline)?;
-            (pipeline, framebuffers)
-        };
+        let surface_resources =
+            SurfaceDependentResources::new::<P>(context, &*repo.get_ds_layout()?)?;
 
         Ok(UiDrawPass {
-            pipeline,
             repo,
             draw_buffers,
-            framebuffers,
+            surface_resources,
         })
     }
 
@@ -291,96 +257,6 @@ impl<'a, P: PassPosition> IntoDrawPass<UiDrawPass<'a>, P> for () {
 
         Ok(())
     }
-}
-
-fn create_framebuffers(
-    device: &mut DeviceT,
-    context: &RenderingContext,
-    pipeline: &CompletePipeline,
-) -> Result<TargetSpecificResources<FramebufferT>> {
-    let fat = context.properties().swapchain_framebuffer_attachment();
-
-    TargetSpecificResources::new(
-        || unsafe {
-            Ok(device.create_framebuffer(
-                &pipeline.renderpass,
-                IntoIter::new([fat.clone()]),
-                context.properties().extent,
-            )?)
-        },
-        context.properties().image_count as usize,
-    )
-}
-
-fn create_pipeline_spec<P: PassPosition>(context: &RenderingContext) -> Result<PipelineSpec> {
-    PipelineSpecBuilder::default()
-        .rasterizer(Rasterizer {
-            polygon_mode: PolygonMode::Fill,
-            cull_face: Face::NONE,
-            front_face: FrontFace::CounterClockwise,
-            depth_clamping: false,
-            depth_bias: None,
-            conservative: true,
-            line_width: State::Static(1.0),
-        })
-        .depth_stencil(DepthStencilDesc {
-            depth: None,
-            depth_bounds: false,
-            stencil: None,
-        })
-        .blender(BlendDesc {
-            logic_op: Some(LogicOp::Copy),
-            targets: vec![ColorBlendDesc {
-                mask: ColorMask::ALL,
-                blend: Some(BlendState {
-                    color: BlendOp::Add {
-                        src: Factor::SrcAlpha,
-                        dst: Factor::OneMinusSrcAlpha,
-                    },
-                    alpha: BlendOp::Add {
-                        src: Factor::SrcAlpha,
-                        dst: Factor::OneMinusSrcAlpha,
-                    },
-                }),
-            }],
-        })
-        .primitive_assembler(VertexPrimitiveAssemblerSpec::with_buffers(
-            InputAssemblerDesc::new(Primitive::TriangleList),
-            vec![VertexBufferSpec {
-                attributes: vec![Format::Rg32Sfloat, Format::Rg32Sfloat, Format::Rgba32Sfloat],
-                rate: VertexInputRate::Vertex,
-            }],
-        ))
-        .shader_vertex(ShaderDesc {
-            source: include_str!("./data/ui.vert").to_string(),
-            entry: "main".to_string(),
-            kind: ShaderKind::Vertex,
-        })
-        .shader_fragment(ShaderDesc {
-            source: include_str!("./data/ui.frag").to_string(),
-            entry: "main".to_string(),
-            kind: ShaderKind::Fragment,
-        })
-        .push_constants(vec![(ShaderStageFlags::VERTEX, 0..8)])
-        .renderpass(RenderpassSpec {
-            colors: vec![AttachmentSpec {
-                attachment: Attachment {
-                    format: Some(context.properties().color_format),
-                    samples: 1,
-                    ops: P::attachment_ops(),
-                    stencil_ops: P::attachment_ops(),
-                    layouts: P::layout_as_range(),
-                },
-                used_layout: Layout::ColorAttachmentOptimal,
-            }],
-            depth: None,
-            inputs: vec![],
-            resolves: vec![],
-            preserves: vec![],
-        })
-        .dynamic_scissor(true)
-        .build()
-        .context("Error building pipeline")
 }
 
 pub struct UiTexture(Arc<Texture>);
@@ -423,5 +299,123 @@ impl LoadableImage for UiTexture {
             *ptr.offset((i as isize * 4) + 2) = 255;
             *ptr.offset((i as isize * 4) + 3) = *x;
         }
+    }
+}
+
+struct SurfaceDependentResources {
+    pipeline: CompletePipeline,
+    framebuffers: TargetSpecificResources<FramebufferT>,
+}
+
+impl SurfaceDependentResources {
+    fn new<P: PassPosition>(
+        context: &mut RenderingContext,
+        ds_layout: &DescriptorSetLayoutT,
+    ) -> Result<Self> {
+        let mut device = context.lock_device()?;
+
+        let spec = PipelineSpecBuilder::default()
+            .rasterizer(Rasterizer {
+                polygon_mode: PolygonMode::Fill,
+                cull_face: Face::NONE,
+                front_face: FrontFace::CounterClockwise,
+                depth_clamping: false,
+                depth_bias: None,
+                conservative: true,
+                line_width: State::Static(1.0),
+            })
+            .depth_stencil(DepthStencilDesc {
+                depth: None,
+                depth_bounds: false,
+                stencil: None,
+            })
+            .blender(BlendDesc {
+                logic_op: Some(LogicOp::Copy),
+                targets: vec![ColorBlendDesc {
+                    mask: ColorMask::ALL,
+                    blend: Some(BlendState {
+                        color: BlendOp::Add {
+                            src: Factor::SrcAlpha,
+                            dst: Factor::OneMinusSrcAlpha,
+                        },
+                        alpha: BlendOp::Add {
+                            src: Factor::SrcAlpha,
+                            dst: Factor::OneMinusSrcAlpha,
+                        },
+                    }),
+                }],
+            })
+            .primitive_assembler(VertexPrimitiveAssemblerSpec::with_buffers(
+                InputAssemblerDesc::new(Primitive::TriangleList),
+                vec![VertexBufferSpec {
+                    attributes: vec![Format::Rg32Sfloat, Format::Rg32Sfloat, Format::Rgba32Sfloat],
+                    rate: VertexInputRate::Vertex,
+                }],
+            ))
+            .shader_vertex(ShaderDesc {
+                source: include_str!("./data/ui.vert").to_string(),
+                entry: "main".to_string(),
+                kind: ShaderKind::Vertex,
+            })
+            .shader_fragment(ShaderDesc {
+                source: include_str!("./data/ui.frag").to_string(),
+                entry: "main".to_string(),
+                kind: ShaderKind::Fragment,
+            })
+            .push_constants(vec![(ShaderStageFlags::VERTEX, 0..8)])
+            .renderpass(RenderpassSpec {
+                colors: vec![AttachmentSpec {
+                    attachment: Attachment {
+                        format: Some(context.properties().color_format),
+                        samples: 1,
+                        ops: P::attachment_ops(),
+                        stencil_ops: P::attachment_ops(),
+                        layouts: P::layout_as_range(),
+                    },
+                    used_layout: Layout::ColorAttachmentOptimal,
+                }],
+                depth: None,
+                inputs: vec![],
+                resolves: vec![],
+                preserves: vec![],
+            })
+            .dynamic_scissor(true)
+            .build()
+            .context("Error building pipeline")?;
+
+        let pipeline = spec
+            .build(&mut device, context.properties().extent, once(ds_layout))
+            .context("Error building pipeline")?;
+
+        let fat = context.properties().swapchain_framebuffer_attachment();
+
+        let framebuffers = TargetSpecificResources::new(
+            || unsafe {
+                Ok(device.create_framebuffer(
+                    &pipeline.renderpass,
+                    IntoIter::new([fat.clone()]),
+                    context.properties().extent,
+                )?)
+            },
+            context.properties().image_count as usize,
+        )?;
+
+        Ok(Self {
+            framebuffers,
+            pipeline,
+        })
+    }
+
+    fn deactivate(self, context: &mut RenderingContext) -> Result<()> {
+        unsafe {
+            let mut device = context.lock_device()?;
+            self.pipeline.deactivate(&mut device);
+
+            for fb in self.framebuffers.dissolve() {
+                device.destroy_framebuffer(fb);
+            }
+        }
+
+        Ok(())
     }
 }
