@@ -25,7 +25,7 @@
 //! # fn init(
 //! #    context: &mut RenderingContext,
 //! # ) -> Result<()> {
-//! let queue = context.queue_negotiator_mut().get_queue::<TexLoadQueue>()?;
+//! let queue = context.get_queue::<TexLoadQueue>()?;
 //!  // ...
 //! # Ok(())
 //! # }

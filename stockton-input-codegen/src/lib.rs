@@ -7,7 +7,7 @@ use quote::{format_ident, quote};
 use syn::{parse_macro_input, Data, DeriveInput, Fields, Ident};
 
 /// Generate an input manager for the given struct.
-/// Each button in the struct should be decorated with #[button] and each axis with #[axis].
+/// Each button in the struct should be decorated with `#[button]` and each axis with `#[axis]`.
 /// Given struct MovementInputs, this will output struct MovementInputsManager which implements InputManager.
 /// It also creates an enum MovementInputsFields, with values for all the buttons and axes in MovementInputs.
 /// You'll need to pass in an action schema to `MovementInputsManager::new()`, which is a BTreeMap<u32, (MovementInputsFields, InputMutation)>

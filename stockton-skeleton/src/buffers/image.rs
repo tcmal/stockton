@@ -2,20 +2,22 @@
 //! This is useful for most types of images.
 //! ```rust
 //! # use anyhow::Result;
-//! # use crate::{mem::DrawAttachments, context::RenderingContext};
-//! fn create_depth_buffer(
-//!     context: &mut RenderingContext,
-//! ) -> Result<BoundImageView<DrawAttachments>> {
-//!     BoundImageView::from_context(
-//!         context,
-//!         &ImageSpec {
-//!             width: 10,
-//!             height: 10,
-//!             format: Format::D32Sfloat,
-//!             usage: Usage::DEPTH_STENCIL_ATTACHMENT,
-//!         },
-//!     )
-//! }
+//! # use stockton_skeleton::{mem::DepthBufferPool, context::RenderingContext, buffers::image::{BoundImageView, ImageSpec}};
+//! # use gfx_hal::{format::Format, image::Usage};
+//! # fn create_depth_buffer(
+//! #     context: &mut RenderingContext,
+//! # ) -> Result<BoundImageView<DepthBufferPool>> {
+//! BoundImageView::from_context(
+//!     context,
+//!     &ImageSpec {
+//!         width: 10,
+//!         height: 10,
+//!         format: Format::D32Sfloat,
+//!         usage: Usage::DEPTH_STENCIL_ATTACHMENT,
+//!         resources: stockton_skeleton::buffers::image::COLOR_RESOURCES
+//!     },
+//! )
+//! # }
 /// ```
 use std::mem::ManuallyDrop;
 

@@ -34,9 +34,9 @@ pub const BLOCK_SIZE: usize = 8;
 /// This assumes each texture has a numeric id, and will group them into blocks of `[BLOCK_SIZE]`,
 /// yielding descriptor sets with that many samplers and images.
 /// You only need to supply a [`super::resolver::TextureResolver`] and create one from the main thread.
-/// Then, use [`get_ds_layout`] in your graphics pipeline.
-/// Make sure to call [`process_responses`] every frame.
-/// Then, whenever you draw, use [`attempt_get_descriptor_set`] to see if that texture has finished loading,
+/// Then, use [`self::TextureRepo::get_ds_layout`] in your graphics pipeline.
+/// Make sure to call [`self::TextureRepo::process_responses`] every frame, or at least often.
+/// Then, whenever you draw, use [`self::TextureRepo::attempt_get_descriptor_set`] to see if that texture has finished loading,
 /// or `queue_load` to start loading it ASAP.
 
 pub struct TextureRepo<TP, SP>

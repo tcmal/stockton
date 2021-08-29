@@ -1,7 +1,7 @@
 //! Used to represent access different memory 'pools'.
 //! Ideally, each pool is optimised for a specific use case.
 //! You can implement your own pools using whatever algorithm you'd like. You just need to implement [`MemoryPool`] and optionally [`Block`], then access it
-//! using [`RenderingContext.pool_allocator`]
+//! using `RenderingContext.alloc`
 //! Alternatively, some default memory pools are availble when the feature `rendy_pools` is used (on by default).
 
 use crate::{
