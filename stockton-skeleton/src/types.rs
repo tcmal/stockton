@@ -33,3 +33,11 @@ pub type DynamicAllocator = rendy_memory::DynamicAllocator<back::Backend>;
 pub type DynamicBlock = rendy_memory::DynamicBlock<back::Backend>;
 
 pub type RDescriptorSet = rendy_descriptor::DescriptorSet<back::Backend>;
+
+pub type Vector2 = na::Vec2;
+pub type Vector3 = na::Vec3;
+
+pub type Vector2i = na::IVec2;
+pub type Vector3i = na::IVec3;
+
+pub type Matrix4 = na::Mat4x4;

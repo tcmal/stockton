@@ -5,8 +5,8 @@ use crate::{
     context::ContextProperties,
     draw_passes::{DrawPass, Singular},
     types::*,
+    session::Session
 };
-use stockton_types::Session;
 
 use std::{
     borrow::Borrow,

@@ -8,7 +8,6 @@ edition = "2018"
 stockton-skeleton = { path = "../../stockton-skeleton", features = ["vulkan"] }
 stockton-input = { path = "../../stockton-input" }
 stockton-input-codegen = { path = "../../stockton-input-codegen" }
-stockton-types = { path = "../../stockton-types" }
 stockton-levels = { path = "../../stockton-levels" }
 stockton-contrib = { path = "../../stockton-contrib", features = ["delta_time", "flycam"] }
 stockton-render = { path = "../../stockton-render" }

@@ -1,9 +1,0 @@
-[package]
-name = "stockton-types"
-version = "0.1.0"
-authors = ["Oscar <oscar.shrimpton.personal@gmail.com>"]
-edition = "2018"
-
-[dependencies]
-nalgebra-glm = "^0.6"
-legion = { version = "^0.3" }

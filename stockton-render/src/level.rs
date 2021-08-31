@@ -13,17 +13,16 @@ use stockton_skeleton::{
         AttachmentSpec, CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc,
         VertexBufferSpec, VertexPrimitiveAssemblerSpec,
     },
-    context::RenderingContext,
-    draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
+    RenderingContext,
+    Session,
+    DrawPass, IntoDrawPass, PassPosition,
+    draw_passes::{util::TargetSpecificResources},
     error::LockPoisoned,
     mem::{DataPool, DepthBufferPool, StagingPool, TexturesPool},
     queue_negotiator::QueueFamilyNegotiator,
-    texture::{resolver::TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
+    texture::{TextureResolver, TexLoadQueue, TextureLoadConfig, TextureRepo},
     types::*,
-};
-use stockton_types::{
     components::{CameraSettings, Transform},
-    *,
 };
 
 use anyhow::{Context, Result};

@@ -1,7 +1,7 @@
 use na::{Mat4, Vec4};
 use std::f32::consts::PI;
 
-use crate::Vector3;
+use crate::types::Vector3;
 
 /// 90 degrees in radians
 const R89: f32 = (PI / 180.0) * 89.0;

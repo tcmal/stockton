@@ -2,8 +2,7 @@
 //! Note that this can be extended to an arbitrary amount of draw passes.
 
 use super::{Beginning, DrawPass, End, IntoDrawPass, Middle, Singular};
-use crate::{context::RenderingContext, queue_negotiator::QueueFamilyNegotiator, types::*};
-use stockton_types::Session;
+use crate::{session::Session, context::RenderingContext, queue_negotiator::QueueFamilyNegotiator, types::*};
 
 use anyhow::Result;
 

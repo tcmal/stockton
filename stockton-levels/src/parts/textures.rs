@@ -11,7 +11,9 @@
 // You should have received a copy of the GNU General Public License along
 // with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-use std::iter::Iterator;
+use std::{iter::Iterator, path::Path, sync::{Arc, RwLock}};
+use image::{RgbaImage, io::Reader};
+use stockton_skeleton::texture::TextureResolver;
 
 pub type TextureRef = u32;
 
@@ -44,5 +46,38 @@ impl<'a, T: HasTextures> Iterator for Textures<'a, T> {
         let res = self.container.get_texture(self.next);
         self.next += 1;
         res
+    }
+}
+
+
+/// A basic filesystem resolver which gets the texture name from any HasTextures Object.
+pub struct FsResolver<'a, T: HasTextures> {
+    path: &'a Path,
+    map_lock: Arc<RwLock<T>>,
+}
+
+impl<'a, T: HasTextures> FsResolver<'a, T> {
+    pub fn new(path: &'a Path, map_lock: Arc<RwLock<T>>) -> Self {
+        FsResolver { path, map_lock }
+    }
+}
+
+impl<'a, T: HasTextures> TextureResolver for FsResolver<'a, T> {
+    type Image = RgbaImage;
+
+    fn resolve(&mut self, tex: u32) -> Option<Self::Image> {
+        let map = self.map_lock.read().unwrap();
+        let tex = map.get_texture(tex)?;
+        let path = self.path.join(&tex.name());
+
+        if let Ok(file) = Reader::open(path) {
+            if let Ok(guessed) = file.with_guessed_format() {
+                if let Ok(decoded) = guessed.decode() {
+                    return Some(decoded.into_rgba8());
+                }
+            }
+        }
+
+        None
     }
 }

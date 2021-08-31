@@ -1,12 +1,11 @@
 //! Traits and common draw passes.
 use std::ops::Range;
 
-use crate::{context::RenderingContext, queue_negotiator::QueueFamilyNegotiator, types::*};
+use crate::{context::RenderingContext, queue_negotiator::QueueFamilyNegotiator, types::*, session::Session};
 use hal::{
     image::Layout,
     pass::{AttachmentLoadOp, AttachmentOps, AttachmentStoreOp},
 };
-use stockton_types::Session;
 
 use anyhow::Result;
 

@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 stockton-skeleton = { path = "../stockton-skeleton" }
-stockton-types = { path = "../stockton-types" }
 stockton-levels = { path = "../stockton-levels" }
 stockton-input = { path = "../stockton-input" }
 anyhow = "1.0.40"

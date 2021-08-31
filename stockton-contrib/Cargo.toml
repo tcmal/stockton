@@ -7,8 +7,8 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+stockton-skeleton = { path = "../stockton-skeleton" }
 stockton-input = { path = "../stockton-input" }
-stockton-types = { path = "../stockton-types" }
 legion = { version = "^0.3" }
 
 [features]

@@ -17,15 +17,17 @@ mod target;
 pub mod texture;
 pub mod types;
 pub mod utils;
+pub mod components;
+pub mod session;
 
+pub use context::RenderingContext;
+pub use session::Session;
+pub use draw_passes::{DrawPass, IntoDrawPass, PassPosition};
+pub use anyhow::Result;
+
+use draw_passes::Singular;
 use std::mem::ManuallyDrop;
-
-use context::RenderingContext;
-use draw_passes::{DrawPass, IntoDrawPass, Singular};
-
-use anyhow::{Context, Result};
-
-use stockton_types::Session;
+use anyhow::{Context};
 use winit::window::Window;
 
 /// Renders a world to a window when you tell it to.

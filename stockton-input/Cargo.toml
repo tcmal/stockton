@@ -5,5 +5,5 @@ authors = ["Oscar Shrimpton <oscar.shrimpton.personal@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-stockton-types = { path = "../stockton-types" }
+stockton-skeleton = { path = "../stockton-skeleton" }
 egui = "^0.2"

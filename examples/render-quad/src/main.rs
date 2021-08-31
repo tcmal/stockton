@@ -15,7 +15,7 @@ use std::{
 use stockton_contrib::{delta_time::*, flycam::*};
 use stockton_input::{Axis, InputManager, Mouse};
 use stockton_levels::{
-    parts::data::{Geometry, Vertex},
+    parts::{data::{Geometry, Vertex}, FsResolver},
     types::Rgba,
 };
 use stockton_render::{
@@ -24,11 +24,9 @@ use stockton_render::{
     window::{process_window_events_system, UiState, WindowEvent, WindowFlow},
 };
 use stockton_skeleton::{
-    draw_passes::ConsDrawPass, error::full_error_display, texture::resolver::FsResolver, Renderer,
-};
-use stockton_types::{
+    draw_passes::ConsDrawPass, error::full_error_display, Renderer,
+    Session, types::*, 
     components::{CameraSettings, Transform},
-    Session, Vector2, Vector3,
 };
 
 use anyhow::{Context, Result};

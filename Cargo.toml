@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "stockton-types",
     "stockton-input",
     "stockton-input-codegen",
     "stockton-skeleton",

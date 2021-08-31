@@ -2,6 +2,7 @@ use stockton_levels::parts::{
     data::{FaceRef, Geometry, TextureRef},
     HasFaces, HasTextures, HasVisData, IsFace, IsTexture,
 };
+use stockton_skeleton::components::{CameraSettings, Transform};
 
 pub struct DemoLevel {
     pub faces: Box<[Face]>,
@@ -70,8 +71,8 @@ impl<'a> HasVisData<'a> for DemoLevel {
 
     fn get_visible(
         &'a self,
-        _transform: &stockton_types::components::Transform,
-        _settings: &stockton_types::components::CameraSettings,
+        _transform: &Transform,
+        _settings: &CameraSettings,
     ) -> Self::Faces {
         0..self.faces.len() as u32
     }

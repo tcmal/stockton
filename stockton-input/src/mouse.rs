@@ -1,4 +1,4 @@
-use stockton_types::Vector2;
+use stockton_skeleton::types::Vector2;
 
 #[derive(Debug, Clone)]
 pub struct Mouse {

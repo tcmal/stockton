@@ -1,6 +1,6 @@
 use super::faces::FaceRef;
 use std::iter::Iterator;
-use stockton_types::components::{CameraSettings, Transform};
+use stockton_skeleton::components::{CameraSettings, Transform};
 
 pub trait HasVisData<'a> {
     type Faces: Iterator<Item = FaceRef>;

@@ -35,9 +35,8 @@ use crate::{
     mem::MemoryPool,
     queue_negotiator::{QueueFamilyNegotiator, QueueFamilySelector, SharedQueue},
     types::*,
+    session::Session
 };
-
-use stockton_types::Session;
 
 /// The actual data behind [`StatefulRenderingContext`]
 struct InnerRenderingContext {

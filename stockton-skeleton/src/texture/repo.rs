@@ -2,7 +2,7 @@ use super::{
     block::TexturesBlock,
     load::TextureLoadConfig,
     loader::{BlockRef, LoaderRequest, TextureLoader, TextureLoaderRemains, NUM_SIMULTANEOUS_CMDS},
-    resolver::TextureResolver,
+    TextureResolver,
 };
 use crate::types::*;
 use crate::{context::RenderingContext, error::LockPoisoned, mem::MappableBlock};

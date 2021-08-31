@@ -6,7 +6,7 @@ use super::{
         load_image, QueuedLoad, TextureLoadConfig, TextureLoadError, FORMAT, LAYERS, RESOURCES,
     },
     repo::BLOCK_SIZE,
-    resolver::TextureResolver,
+    TextureResolver,
     PIXEL_SIZE,
 };
 use crate::{

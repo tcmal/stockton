@@ -5,10 +5,9 @@ mod image;
 mod load;
 mod loader;
 mod repo;
-pub mod resolver;
 
 pub use self::block::TexturesBlock;
-pub use self::image::LoadableImage;
+pub use self::image::{LoadableImage, TextureResolver};
 pub use self::load::TextureLoadConfig;
 pub use self::loader::BlockRef;
 pub use self::repo::{TexLoadQueue, TextureRepo};

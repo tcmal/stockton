@@ -41,3 +41,11 @@ impl LoadableImage for RgbaImage {
         copy_nonoverlapping(row.as_ptr(), ptr, row.len());
     }
 }
+
+/// An object that can be used to resolve a texture from a BSP File
+pub trait TextureResolver {
+    type Image: LoadableImage;
+
+    /// Get the given texture, or None if it's corrupt/not there.
+    fn resolve(&mut self, texture_id: u32) -> Option<Self::Image>;
+}

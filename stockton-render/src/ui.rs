@@ -7,16 +7,16 @@ use stockton_skeleton::{
         AttachmentSpec, CompletePipeline, PipelineSpecBuilder, RenderpassSpec, ShaderDesc,
         VertexBufferSpec, VertexPrimitiveAssemblerSpec,
     },
-    context::RenderingContext,
+    RenderingContext,
+    Session,
     draw_passes::{util::TargetSpecificResources, DrawPass, IntoDrawPass, PassPosition},
     mem::{DataPool, StagingPool, TexturesPool},
     queue_negotiator::QueueFamilyNegotiator,
     texture::{
-        resolver::TextureResolver, LoadableImage, TexLoadQueue, TextureLoadConfig, TextureRepo,
+        TextureResolver, LoadableImage, TexLoadQueue, TextureLoadConfig, TextureRepo,
     },
     types::*,
 };
-use stockton_types::{Session, Vector2};
 
 use std::{
     array::IntoIter,

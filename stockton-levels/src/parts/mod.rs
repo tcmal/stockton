@@ -13,5 +13,5 @@ pub mod data {
 
 pub use entities::{HasEntities, IsEntity};
 pub use faces::{HasFaces, IsFace};
-pub use textures::{HasTextures, IsTexture};
+pub use textures::{HasTextures, IsTexture, FsResolver};
 pub use visdata::HasVisData;
