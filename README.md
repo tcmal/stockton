@@ -1,12 +1,10 @@
 # stockton
 
-[![check and test](https://github.com/tcmal/stockton/actions/workflows/test.yml/badge.svg)](https://github.com/tcmal/stockton/actions/workflows/test.yml) [![rustfmt and clippy](https://github.com/tcmal/stockton/actions/workflows/lint.yml/badge.svg)](https://github.com/tcmal/stockton/actions/workflows/lint.yml)
-
-A WIP Game engine using Vulkan and Rust.
+This was a modular engine using `gfx-hal`, mostly built to learn about Vulkan and larger scale rust projects. If you're looking for something with similar functionality, check out [`rendy`](https://github.com/amethyst/rendy).
 
 ## License
 
-Code & Assets (including from `rust-bsp`) are licensed under the GNU GPL v3.0, all contributions automatically come under this. See LICENSE.
+Licensed under the GNU GPL v3.0, See LICENSE.
 
 Exceptions:
 
