@@ -1,8 +1,10 @@
 use crate::types::*;
 
+pub use shaderc::ShaderKind;
+
 use anyhow::{Context, Result};
 use hal::pso::Specialization;
-use shaderc::{Compiler, ShaderKind};
+use shaderc::Compiler;
 
 #[derive(Debug, Clone)]
 pub struct ShaderDesc {

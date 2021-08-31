@@ -1,6 +1,6 @@
 use std::sync::{Arc, RwLock};
 
-use super::{block::TexturesBlock, repo::BLOCK_SIZE, TextureResolver, LoadableImage};
+use super::{block::TexturesBlock, repo::BLOCK_SIZE, LoadableImage, TextureResolver};
 use crate::{
     buffers::{
         image::{ImageSpec, SampledImage, COLOR_RESOURCES},

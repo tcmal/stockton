@@ -12,7 +12,7 @@ stockton-input = { path = "../stockton-input" }
 legion = { version = "^0.3" }
 
 [features]
-default = []
+default = ['delta_time']
 
 delta_time = []
 flycam = []

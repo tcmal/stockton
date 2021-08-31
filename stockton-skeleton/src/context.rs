@@ -34,8 +34,8 @@ use crate::{
     error::{EnvironmentError, LockPoisoned, UsageError},
     mem::MemoryPool,
     queue_negotiator::{QueueFamilyNegotiator, QueueFamilySelector, SharedQueue},
+    session::Session,
     types::*,
-    session::Session
 };
 
 /// The actual data behind [`StatefulRenderingContext`]

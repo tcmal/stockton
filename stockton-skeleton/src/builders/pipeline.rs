@@ -97,6 +97,7 @@ pub struct PipelineSpec {
     #[builder(setter(strip_option), default)]
     shader_tesselation: Option<(ShaderDesc, ShaderDesc)>,
 
+    #[builder(default = "vec![]")]
     push_constants: Vec<(ShaderStageFlags, Range<u32>)>,
 
     #[builder(default = "false")]

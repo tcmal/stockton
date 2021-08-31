@@ -1,7 +1,7 @@
 use std::f32::consts::PI;
 
 use stockton_input::{Axis, InputManager, Mouse};
-use stockton_skeleton::{types::Vector3, components::Transform};
+use stockton_skeleton::{components::Transform, types::Vector3};
 
 use crate::delta_time::Timing;
 

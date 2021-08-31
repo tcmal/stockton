@@ -4,8 +4,8 @@
 use crate::{
     context::ContextProperties,
     draw_passes::{DrawPass, Singular},
+    session::Session,
     types::*,
-    session::Session
 };
 
 use std::{

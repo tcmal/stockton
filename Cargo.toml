@@ -3,8 +3,6 @@ members = [
     "stockton-input",
     "stockton-input-codegen",
     "stockton-skeleton",
-    "stockton-levels",
-    "stockton-render",
     "stockton-contrib",
     "rendy-memory",
     "rendy-descriptor",

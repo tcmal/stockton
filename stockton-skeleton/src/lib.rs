@@ -8,26 +8,26 @@ extern crate derive_builder;
 
 pub mod buffers;
 pub mod builders;
+pub mod components;
 pub mod context;
 pub mod draw_passes;
 pub mod error;
 pub mod mem;
 pub mod queue_negotiator;
+pub mod session;
 mod target;
 pub mod texture;
 pub mod types;
 pub mod utils;
-pub mod components;
-pub mod session;
 
-pub use context::RenderingContext;
-pub use session::Session;
-pub use draw_passes::{DrawPass, IntoDrawPass, PassPosition};
 pub use anyhow::Result;
+pub use context::RenderingContext;
+pub use draw_passes::{DrawPass, IntoDrawPass, PassPosition};
+pub use session::Session;
 
+use anyhow::Context;
 use draw_passes::Singular;
 use std::mem::ManuallyDrop;
-use anyhow::{Context};
 use winit::window::Window;
 
 /// Renders a world to a window when you tell it to.
@@ -75,6 +75,7 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
                 }
                 Err((_e, c)) => {
                     // TODO: Try to detect if the error is actually surface related.
+
                     let c = c.attempt_recovery()?;
                     match c.draw_next_frame(session, &mut *self.draw_pass) {
                         Ok(c) => {
@@ -94,9 +95,11 @@ impl<DP: DrawPass<Singular>> Renderer<DP> {
         // Safety: If this fails at any point, the ManuallyDrop won't be touched again, as Renderer will be dropped.
         // Hence, we can always take from the ManuallyDrop
         unsafe {
-            let ctx = ManuallyDrop::take(&mut self.context).recreate_surface()?;
+            let ctx = ManuallyDrop::take(&mut self.context);
+            log::debug!("ctx");
+            let ctx = ctx.recreate_surface()?;
             self.context = ManuallyDrop::new(ctx);
-
+            log::debug!("Finished resizing ctx");
             let dp = ManuallyDrop::take(&mut self.draw_pass)
                 .handle_surface_change(session, &mut self.context)?;
             self.draw_pass = ManuallyDrop::new(dp);

@@ -6,15 +6,10 @@ edition = "2018"
 
 [dependencies]
 stockton-skeleton = { path = "../../stockton-skeleton", features = ["vulkan"] }
-stockton-input = { path = "../../stockton-input" }
-stockton-input-codegen = { path = "../../stockton-input-codegen" }
-stockton-levels = { path = "../../stockton-levels" }
-stockton-contrib = { path = "../../stockton-contrib", features = ["delta_time", "flycam"] }
-stockton-render = { path = "../../stockton-render" }
 winit = "^0.21"
 log = "0.4.0"
 simplelog = "^0.10"
 image = "0.23.2"
-egui = "^0.12"
 legion = { version = "^0.3" }
 anyhow = "1.0.40"
+gfx-hal = "^0.8.0"
